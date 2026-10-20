@@ -16,5 +16,6 @@ public abstract class PonderViewportExtractionAuditMixin {
         int x, int y, int width, int height, double slide, float partial, float flash,
         CallbackInfoReturnable<PonderViewport.State> callback) {
         PonderRegistryRenderAudit.extracted(scene, callback.getReturnValue());
+        net.createmod.ponder.test.PonderVisualRegressionTest.observe(scene,callback.getReturnValue());
     }
 }

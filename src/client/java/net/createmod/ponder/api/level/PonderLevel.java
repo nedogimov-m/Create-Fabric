@@ -57,6 +57,7 @@ public class PonderLevel extends SchematicLevel implements com.simibubi.create.f
 
   public int simulationTicks(){return simulationTicks;}
   @Override public long virtualGameTime(){return simulationTicks;}
+  @Override public long getGameTime(){return simulationTicks;}
   public float scenePartialTicks(){return scenePartialTicks;}
   public void scenePartialTicks(float partial){scenePartialTicks=partial;}
 

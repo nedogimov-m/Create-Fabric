@@ -77,12 +77,12 @@ public final class PonderViewport {
         var camera = new SceneCamera();
         // Exact original PonderScene particle billboard orientation; camera-relative origin is ZERO.
         camera.configure(-transform.getXRotation(partial), transform.getYRotation(partial) + 180);
-        // Match native PIP's pixel projection, including native negative Z and GUI scale.
+        // Match native PIP's pixel projection and GUI scale; the source world retains its own depth orientation.
         float guiScale = clientGuiScale();
         // Projection.getMatrix swaps configured far/near for native reverse depth.
         var projection = new Matrix4f().setOrtho(0, width, height, 0, 1000 / guiScale, -1000 / guiScale,
             RenderSystem.getDevice().getDeviceInfo().isZZeroToOne());
-        var viewMatrix = new Matrix4f().scaling(1, 1, -1).mul(worldMatrix);
+        var viewMatrix = new Matrix4f(worldMatrix);
         var frustum = new Frustum(viewMatrix, projection);
         frustum.prepare(0, 0, 0);
         var cameraState = new CameraRenderState();
@@ -150,9 +150,10 @@ public final class PonderViewport {
             // Native prepare owns an enclosing model-view push/pop across this callback AND feature
             // preparation/execution. Install the captured scene transform there so native particle
             // groups and model features use the same PIP space. No projection/target/flush is bypassed.
-            // Native PIP already uses Y-down ortho. Undo its bottom-center origin;
-            // SceneTransform already maps the scene into GUI pixels and flips source world Y.
+            // SceneTransform already maps the source world into GUI pixels. Undo native PIP's
+            // bottom-center origin and Z reflection to retain outward faces and world depth order.
             pose.translate(-state.viewportWidth / 2f, -state.viewportHeight, 0);
+            pose.scale(1, 1, -1);
             pose.mulPose(state.worldTransform);
             RenderSystem.getModelViewStack().mul(pose.last().pose());
             var local = new PoseStack();

@@ -311,6 +311,7 @@
       "com.simibubi.create.test.PonderVirtualEjectorFlightTest",
       "com.simibubi.create.test.PonderVirtualConveyorOwnershipTest",
       "net.createmod.ponder.test.PonderRegisteredProgramsTest",
+      "net.createmod.ponder.test.PonderVisualRegressionTest",
       "net.createmod.ponder.test.PonderNavigationTest",
       "net.createmod.ponder.test.PonderZoomTest",
       "com.simibubi.create.test.RadialWrenchRenderingTest",
