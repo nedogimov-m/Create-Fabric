@@ -22,6 +22,7 @@
     "CarriagePassengerRemovalObservationMixin",
     "CarriageNativeStorageObservationMixin",
     "CarriageNativeUnloadObservationMixin",
+    "NativeTrainTickLeaseMixin",
     "StationMapStorageAccessor",
     "GameTestBatchSizeMixin"
   ],
