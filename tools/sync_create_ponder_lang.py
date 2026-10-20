@@ -43,7 +43,9 @@ def synchronize(source_root, fabric_root):
     manifest = {'createCommit': CREATE_COMMIT,
                 'source': 'Exact pinned Create locale source JSON; no generated scene callbacks',
                 'languageFiles': records}
-    (fabric_root / 'create-ponder-lang-source.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    report = fabric_root / 'build/reports/porting/create-ponder-lang-source.json'
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(json.dumps(manifest, indent=2) + '\n')
     return manifest
 
 

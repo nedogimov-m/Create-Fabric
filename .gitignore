@@ -3,6 +3,12 @@
 *.[mM][aA][rR][kK][dD][oO][wW][nN]
 /research/
 
+# Local porting manifests (game resources and test fixtures remain tracked)
+/create-ponder-*-source.json
+/ponder-assets-source.json
+/ponder-source-provenance.json
+/upstream.json
+
 # Build output, caches, packaged artifacts
 .gradle/
 .kotlin/

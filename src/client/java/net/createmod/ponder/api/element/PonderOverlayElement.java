@@ -1,5 +1,5 @@
 // Ponder/Catnip 1.0.82 element lifecycle, MIT; native26.3 detached overlay extraction contract.
-// See licenses/Ponder-LICENSE and ponder-source-provenance.json.
+// See licenses/Ponder-LICENSE.
 package net.createmod.ponder.api.element;
 
 import net.createmod.ponder.foundation.PonderScene;

@@ -65,7 +65,9 @@ def synchronize(source_root, fabric_root, ponder_source):
         "license": "MIT; licenses/Ponder-LICENSE (Ponder) and project Create license (Create scenes)",
         "resources": inputs,
     }
-    (fabric_root / "ponder-assets-source.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    report = fabric_root / "build/reports/porting/ponder-assets-source.json"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(json.dumps(manifest, indent=2) + "\n")
     return len(inputs)
 
 

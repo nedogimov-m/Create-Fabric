@@ -1,5 +1,5 @@
 // Ponder/Catnip 1.0.82 source, MIT; native26.3 source adaptation.
-// See licenses/Ponder-LICENSE and ponder-source-provenance.json.
+// See licenses/Ponder-LICENSE.
 package net.createmod.catnip.levelWrappers;
 
 import java.util.HashMap;

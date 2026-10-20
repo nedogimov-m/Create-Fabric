@@ -1,5 +1,5 @@
 // Ponder/Catnip 1.0.82 element lifecycle, MIT; native26.3 detached extraction contract.
-// See licenses/Ponder-LICENSE and ponder-source-provenance.json.
+// See licenses/Ponder-LICENSE.
 package net.createmod.ponder.api.element;
 
 import com.mojang.blaze3d.vertex.PoseStack;
