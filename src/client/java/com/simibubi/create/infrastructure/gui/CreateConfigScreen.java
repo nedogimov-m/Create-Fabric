@@ -71,7 +71,22 @@ public final class CreateConfigScreen extends Screen {
     }
 
     private static Component label(NativeConfigBase.CValue<?> value) {
+        if (value.key().startsWith("kinetics.stressValues.v2."))
+            return Component.translatableWithFallback("block.create." + value.getName(), words(value.getName()));
         return Component.translatableWithFallback("create.config." + value.key(), words(value.getName()));
+    }
+
+    private static Component description(NativeConfigBase.CValue<?> value) {
+        if (value.key().startsWith("kinetics.stressValues.v2."))
+            return ui(value.path().contains("impact") ? "stress_impact" : "stress_capacity");
+        return Component.translatableWithFallback("create.config." + value.key() + ".description",
+            String.join("\n", value.comments()));
+    }
+
+    private static Component valueLabel(Object value) {
+        if (value instanceof Boolean enabled) return Component.translatable(enabled ? "options.on" : "options.off");
+        if (value instanceof Enum<?> choice) return enumLabel(choice);
+        return Component.literal(String.valueOf(value));
     }
 
     @Override protected void init() {
@@ -129,7 +144,8 @@ public final class CreateConfigScreen extends Screen {
     }
 
     private Component groupLabel() {
-        return draft.group.isEmpty() ? ui("all_groups") : Component.literal(words(draft.group));
+        return draft.group.isEmpty() ? ui("all_groups")
+            : Component.translatableWithFallback("create.config.group." + draft.group, words(draft.group));
     }
 
     private void changeGroup() {
@@ -194,7 +210,7 @@ public final class CreateConfigScreen extends Screen {
                 status = Component.empty();
                 refreshRows();
             }).bounds(left + panelWidth - 20, y + 2, 20, 20).build();
-            resetField.setTooltip(Tooltip.create(ui("reset_value", String.valueOf(field.definition.defaultValue()))));
+            resetField.setTooltip(Tooltip.create(ui("reset_value", valueLabel(field.definition.defaultValue()))));
             rowWidgets.add(addRenderableWidget(resetField));
         }
         previous.active = draft.page > 0;
@@ -213,7 +229,8 @@ public final class CreateConfigScreen extends Screen {
     }
 
     private static Component enumLabel(Enum<?> value) {
-        return Component.literal(words(value.name().toLowerCase(Locale.ROOT)));
+        return Component.translatableWithFallback("create.config.enum." + value.getDeclaringClass().getSimpleName()
+            + "." + value.name().toLowerCase(Locale.ROOT), words(value.name().toLowerCase(Locale.ROOT)));
     }
 
     private static boolean remoteSession(NativeConfigStore store) {
@@ -367,7 +384,7 @@ public final class CreateConfigScreen extends Screen {
             int color = field.error != null ? 0xFFFF7777 : field.dirty() ? 0xFFE4BB67 : 0xFFE0E0E0;
             gui.text(font, fit(label(field.definition).getString(), labelWidth), left, row.y() + 2, color, false);
             var hint = field.error != null ? field.error
-                : field.definition.comments().isEmpty() ? field.definition.key() : field.definition.comments().getFirst();
+                : description(field.definition).getString().lines().findFirst().orElse(field.definition.key());
             gui.text(font, fit(hint, labelWidth), left, row.y() + 14, 0xFF999999, false);
             if (mouseX >= left && mouseX < valueX && mouseY >= row.y() && mouseY < row.y() + ROW_HEIGHT)
                 tooltip(gui, field.tooltip(), mouseX, mouseY);
@@ -443,7 +460,8 @@ public final class CreateConfigScreen extends Screen {
             String query = filter.toLowerCase(Locale.ROOT).trim();
             return fields.values().stream().filter(field -> group.isEmpty() || field.group().equals(group))
                 .filter(field -> query.isEmpty() || (field.definition.key() + " " + label(field.definition).getString()
-                    + " " + String.join(" ", field.definition.comments())).toLowerCase(Locale.ROOT).contains(query)).toList();
+                    + " " + description(field.definition).getString() + " " + String.join(" ", field.definition.comments()))
+                    .toLowerCase(Locale.ROOT).contains(query)).toList();
         }
     }
 
@@ -490,12 +508,19 @@ public final class CreateConfigScreen extends Screen {
 
         Component tooltip() {
             var text = label(definition).copy();
-            for (var comment : definition.comments()) text.append("\n").append(comment);
-            text.append("\n").append(ui("default", String.valueOf(definition.defaultValue())));
+            var detail = description(definition);
+            if (!detail.getString().isEmpty()) text.append("\n").append(detail);
+            text.append("\n").append(ui("default", valueLabel(definition.defaultValue())));
             if (definition.minimum().isPresent() && definition.maximum().isPresent())
                 text.append("\n").append(ui("bounds", definition.minimum().get(), definition.maximum().get()));
-            if (definition instanceof NativeConfigBase.ConfigEnum<?> choices)
-                text.append("\n").append(choices.choices().toString());
+            if (definition instanceof NativeConfigBase.ConfigEnum<?> choices) {
+                var options = Component.empty();
+                for (var choice : choices.choices()) {
+                    if (!options.getSiblings().isEmpty()) options.append(", ");
+                    options.append(enumLabel(choice));
+                }
+                text.append("\n").append(ui("choices", options));
+            }
             if (error != null) text.append("\n").append(error);
             return text;
         }

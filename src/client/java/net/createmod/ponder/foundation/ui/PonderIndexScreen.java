@@ -39,7 +39,7 @@ public final class PonderIndexScreen extends AbstractPonderScreen {
             var entry = button(firstX + slot % columns * 30, 69 + slot / columns * 30, 24, stack.getHoverName(),
                 () -> open(PonderUI.of(stack))).showing(stack);
             entry.active = minecraft.level != null;
-            if (!entry.active) entry.hint(Component.literal("Join a world to view this scene"));
+            if (!entry.active) entry.hint(text("join_world"));
         }
         button(40, height - 35, 32, Component.literal("<"), () -> page(-1)).active = page > 0;
         button(width - 72, height - 35, 32, Component.literal(">"), () -> page(1)).active = (page + 1) * pageSize < items.size();

@@ -100,9 +100,9 @@ public final class PonderUI extends AbstractPonderScreen {
             .withShortcut(minecraft.options.keyDown);
         slowMode = control(width - 51, footer, "slow_text", PonderGuiTextures.ICON_PONDER_SLOW_MODE,
             () -> setComfyReadingEnabled(!isComfyReadingEnabled()));
-        if (PonderIndex.editingModeActive()) buttons.add(userMode = button(width - 81, footer, 20, Component.literal("User View"),
+        if (PonderIndex.editingModeActive()) buttons.add(userMode = button(width - 81, footer, 20, text("user_view"),
             () -> userViewMode = !userViewMode).showing(PonderGuiTextures.ICON_PONDER_USER_MODE)
-            .hint(Component.literal("User View")));
+            .hint(text("user_view")));
         progress = addRenderableWidget(new PonderProgressBar(this, Math.max(32, center - 110), height - 28, Math.max(32, Math.min(220, width - 64)), 16));
         for (int i = 0; i < tags.size(); i++) {
             var tag = tags.get(i);

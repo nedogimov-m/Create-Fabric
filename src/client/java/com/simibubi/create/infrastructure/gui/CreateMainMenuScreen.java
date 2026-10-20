@@ -18,7 +18,7 @@ import net.minecraft.network.chat.Component;
 public final class CreateMainMenuScreen extends Screen {
     public static final String CURSEFORGE_LINK = "https://www.curseforge.com/minecraft/mc-mods/create";
     public static final String MODRINTH_LINK = "https://modrinth.com/mod/create";
-    public static final String ISSUE_TRACKER_LINK = "https://github.com/Creators-of-Create/Create/issues";
+    public static final String ISSUE_TRACKER_LINK = "https://github.com/nedogimov-m/Create-Fabric";
     public static final String SUPPORT_LINK = "https://github.com/Creators-of-Create/Create/wiki/Supporting-the-Project";
     private final Screen parent;
     private final String version;

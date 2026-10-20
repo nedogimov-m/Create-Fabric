@@ -65,5 +65,7 @@
   "catnip.ui.other_mods_config_unavailable": "This Mod does not have any configs registered or is not using Forge's config system",
 
   "catnip.util.unable_to_find_config.message" : "Unable to find the specified config",
-  "catnip.util.fly_speed_set.message": "Temporarily set %1$s's Flying Speed to %2$s"
+  "catnip.util.fly_speed_set.message": "Temporarily set %1$s's Flying Speed to %2$s",
+  "ponder.ui.user_view": "User View",
+  "ponder.ui.join_world": "Join a world to view this scene"
 }

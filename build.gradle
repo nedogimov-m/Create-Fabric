@@ -71,8 +71,16 @@ test {
 
 def reuseGameTestWorld = providers.gradleProperty('reuseGameTestWorld').map { it.toBoolean() }.getOrElse(false)
 def gameTestSelection = providers.gradleProperty('gameTestSelection')
+def gameTestBatchSize = providers.gradleProperty('gameTestBatchSize').map { it.toInteger() }
 def gameTestWorldsDirectory = layout.buildDirectory.dir('run/gameTest/test-worlds').get().asFile
 tasks.withType(JavaExec).configureEach {
+    if (name == 'runGameTest' && gameTestBatchSize.isPresent()) {
+        def batchSize = gameTestBatchSize.get()
+        if (batchSize < 1 || batchSize > 50) {
+            throw new GradleException('gameTestBatchSize must be between 1 and 50.')
+        }
+        systemProperty 'create.test.nativeBatchSize', batchSize
+    }
     if (name == 'runGameTest' && gameTestSelection.isPresent()) {
         def selection = gameTestSelection.get().trim()
         if (selection.isEmpty()) {

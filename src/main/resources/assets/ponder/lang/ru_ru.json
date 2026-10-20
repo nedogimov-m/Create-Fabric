@@ -64,5 +64,8 @@
   "catnip.ui.other_mods_config_unavailable": "Этот мод не имеет зарегистрированных файлов конфигурации, либо те не поддерживают систему конфигурации Forge",
 
   "catnip.util.unable_to_find_config.message" : "Указанный файл конфигурации не найден",
-  "catnip.util.fly_speed_set.message": "Скорость полёта %1$s временно изменена на %2$s"
+  "catnip.util.fly_speed_set.message": "Скорость полёта %1$s временно изменена на %2$s",
+  "ponder.ui.user_view": "Вид от игрока",
+  "ponder.ui.join_world": "Откройте мир, чтобы посмотреть сцену",
+  "key.categories.ponder": "Размышления"
 }

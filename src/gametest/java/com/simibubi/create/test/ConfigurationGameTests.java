@@ -24,6 +24,31 @@ import net.minecraft.world.level.material.Fluids;
 /** Real files, actual native configuration consumers and persisted item/fluid ownership. Runtime UNRUN. */
 public final class ConfigurationGameTests {
  private static final BlockPos P=new BlockPos(2,2,2);
+ @GameTest public void englishAndRussianCoverEveryRegisteredSettingGroupAndChoice(GameTestHelper h)throws Exception{
+  for(var locale:List.of("en_us","ru_ru")){
+   JsonObject language;
+   try(var input=ConfigurationGameTests.class.getResourceAsStream("/assets/create/lang/"+locale+".json")){
+    h.assertTrue(input!=null,"Actual packaged locale is available: "+locale);
+    language=JsonParser.parseReader(new java.io.InputStreamReader(input,java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+   }
+   for(var scope:ConfigScope.values())for(var definition:AllConfigs.store(scope).definitions()){
+    var key="create.config."+definition.key();
+    if(definition.key().startsWith("kinetics.stressValues.v2.")){
+     h.assertTrue(language.has("block.create."+definition.getName()),locale+" has the actual stress block name: "+definition.key());
+    }else{
+     h.assertTrue(language.has(key)&&!language.get(key).getAsString().isBlank(),locale+" has the actual setting label: "+definition.key());
+     h.assertTrue(language.has(key+".description")&&!language.get(key+".description").getAsString().isBlank(),locale+" has the actual setting description: "+definition.key());
+    }
+    var path=definition.path();var group="create.config.group."+String.join(".",path.subList(0,path.size()-1));
+    h.assertTrue(language.has(group),locale+" has the actual setting group: "+group);
+    if(definition instanceof NativeConfigBase.ConfigEnum<?> choices)for(var choice:choices.choices()){
+     var option="create.config.enum."+choice.getDeclaringClass().getSimpleName()+"."+choice.name().toLowerCase(Locale.ROOT);
+     h.assertTrue(language.has(option),locale+" has the actual enum choice: "+option);
+    }
+   }
+  }
+  h.succeed();
+ }
  private static long insert(Storage<ItemVariant> storage,long amount){try(var tx=Transaction.openOuter()){long moved=storage.insert(ItemVariant.of(Items.APPLE),amount,tx);tx.commit();return moved;}}
  private static long items(Storage<ItemVariant> storage){long sum=0;for(var view:storage)sum+=view.getAmount();return sum;}
  private static long fill(FluidTankBlockEntity tank,long amount){try(var tx=Transaction.openOuter()){long moved=tank.storage().insert(FluidVariant.of(Fluids.WATER),amount,tx);tx.commit();return moved;}}
