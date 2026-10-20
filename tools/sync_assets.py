@@ -867,6 +867,8 @@ def main() -> None:
     for model in ("blaze/inert", "blaze/idle", "blaze/active", "blaze/super", "blaze/super_active",
                   "rods_small", "rods_large", "superheated_rods_small", "superheated_rods_large", "flame", "goggles", "goggles_small"):
         copy_model(f"create:block/blaze_burner/{model}")
+    for texture in ("blaze_burner_flame_scroll", "blaze_burner_flame_superheated_scroll"):
+        copy_texture(f"create:block/{texture}")
     for block in ("blaze_burner", "zinc_ore", "deepslate_zinc_ore"):
         relative = f"data/create/loot_table/blocks/{block}.json"
         write_json(relative, modern_loot(json.loads(find(relative).read_text())))
@@ -1081,7 +1083,7 @@ def main() -> None:
             lang[f"fluid.create.{name}"] = original.get(f"fluid.create.{name}", "Молоко" if name == "milk" and locale == "ru_ru" else name.title())
         for key in ("item.create.package", "item.create.rare_package", "entity.create.package", "entity.create.seat", "entity.create.super_glue", "tag.item.create.seats", "create.gui.package_filter"):
             if key in original: lang[key] = original[key]
-        lang["itemGroup.create.base"] = "Create — перенос 26.3" if locale == "ru_ru" else "Create — 26.3 port"
+        lang["itemGroup.create.base"] = "Create"
         lang["create.motor.speed"] = "Скорость двигателя: %s об/мин" if locale == "ru_ru" else "Motor speed: %s RPM"
         lang["create.table_cloth.stock"] = "В наличии: %s" if locale == "ru_ru" else "In stock: %s"
         lang["create.table_cloth.selected"] = "В списке: %s" if locale == "ru_ru" else "Selected: %s"

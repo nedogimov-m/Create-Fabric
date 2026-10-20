@@ -1556,7 +1556,7 @@
   "entity.create.seat": "Seat",
   "entity.create.super_glue": "Super Glue",
   "tag.item.create.seats": "Seats",
-  "itemGroup.create.base": "Create \u2014 26.3 port",
+  "itemGroup.create.base": "Create",
   "create.motor.speed": "Motor speed: %s RPM",
   "create.table_cloth.stock": "In stock: %s",
   "create.table_cloth.selected": "Selected: %s",

@@ -41,7 +41,9 @@ public final class SteamEngineBlock extends FaceAttachedHorizontalDirectionalBlo
         if(!stack.is(AllBlocks.SHAFT.asItem())||!player.mayBuild())return InteractionResult.PASS;
         var target=getShaftPos(state,pos);if(!level.isLoaded(target)||!LoadedLevelAccess.blockState(level,target).canBeReplaced())return InteractionResult.PASS;
         Direction side=java.util.Arrays.stream(Direction.orderedByNearest(player)).filter(d->d.getAxis()!=getFacing(state).getAxis()).findFirst().orElse(Direction.UP);
-        var context=new UseOnContext(player,hand,hit);return ((BlockItem)stack.getItem()).place(BlockPlaceContext.at(new BlockPlaceContext(context),target,side));
+        var context=new UseOnContext(player,hand,hit);
+        var placement=new com.simibubi.create.content.kinetics.simpleRelays.CogwheelBlockItem.Placement(target,side.getAxis());
+        return ((BlockItem)stack.getItem()).place(com.simibubi.create.content.kinetics.simpleRelays.CogwheelBlockItem.assistedContext(context,placement));
     }
     @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){
         if(state.getValue(FACE)==AttachFace.FLOOR)return Shapes.or(box(1,0,1,15,3,15),box(3,0,3,13,15,13),state.getValue(FACING).getAxis()==Direction.Axis.Z?box(1,5,4,15,13,12):box(4,5,1,12,13,15));

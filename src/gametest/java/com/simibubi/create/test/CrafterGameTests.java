@@ -60,6 +60,13 @@ public class CrafterGameTests {
         h.succeedWhen(() -> h.assertValueEqual(count(out, Items.STICK), 4L, "Two vertical ingredients produce sticks"));
     }
     @GameTest(maxTicks = 70)
+    public void pairedCraftersAssembleVanillaTorches(GameTestHelper h) {
+        var bottom = crafter(h, ORIGIN, Pointing.RIGHT); var top = crafter(h, ORIGIN.above(), Pointing.DOWN);
+        power(h, ORIGIN, 256); var out = depot(h, ORIGIN.east());
+        insert(bottom, new ItemStack(Items.STICK), true); insert(top, new ItemStack(Items.COAL), true);
+        h.succeedWhen(() -> h.assertValueEqual(count(out, Items.TORCH), 4L, "Coal above stick produces four native torches"));
+    }
+    @GameTest(maxTicks = 70)
     public void unfilledSlotPreventsAutomaticStart(GameTestHelper h) {
         var bottom = crafter(h, ORIGIN, Pointing.RIGHT); crafter(h, ORIGIN.above(), Pointing.DOWN);
         power(h, ORIGIN, 256); insert(bottom, new ItemStack(Items.OAK_LOG), true);

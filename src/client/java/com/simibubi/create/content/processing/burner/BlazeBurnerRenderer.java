@@ -3,6 +3,7 @@ package com.simibubi.create.content.processing.burner;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 import com.simibubi.create.AllPartialModels;
+import com.simibubi.create.Create;
 import com.simibubi.create.foundation.model.PartialModelRenderState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -12,6 +13,8 @@ import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.util.LightCoordsUtil;
+import net.fabricmc.fabric.api.client.renderer.v1.Renderer;
+import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.world.phys.Vec3;
 
 public final class BlazeBurnerRenderer implements BlockEntityRenderer<BlazeBurnerBlockEntity, BlazeBurnerRenderer.State> {
@@ -70,8 +73,30 @@ public final class BlazeBurnerRenderer implements BlockEntityRenderer<BlazeBurne
         if (active) {
             AllPartialModels.extract(superheated ? AllPartialModels.BLAZE_SUPER_RODS : AllPartialModels.BLAZE_RODS, state.smallRods);
             AllPartialModels.extract(superheated ? AllPartialModels.BLAZE_SUPER_RODS_LARGE : AllPartialModels.BLAZE_RODS_LARGE, state.largeRods);
-            if (above) AllPartialModels.extract(AllPartialModels.BLAZE_FLAME, state.flame);
+            if (above) extractFlame(state, heat, burner.getLevel().getGameTime() + partialTick);
         }
+    }
+    private static void extractFlame(State state, BlazeBurnerBlock.HeatLevel heat, float time) {
+        AllPartialModels.extract(AllPartialModels.BLAZE_FLAME, state.flame);
+        var atlas = Minecraft.getInstance().getAtlasManager().getAtlasOrThrow(net.minecraft.data.AtlasIds.BLOCKS);
+        var source = atlas.getSprite(Create.asResource("block/blaze_burner_flame"));
+        var target = atlas.getSprite(Create.asResource(heat == BlazeBurnerBlock.HeatLevel.SEETHING
+            ? "block/blaze_burner_flame_superheated_scroll" : "block/blaze_burner_flame_scroll"));
+        float speed = 1 / 32f + heat.ordinal() / 64f;
+        float uScroll = (time * speed / 2 % 1) / 2;
+        float vScroll = (time * speed % 1) / 2;
+        var mesh = Renderer.get().mutableMesh();
+        var emitter = mesh.emitter();
+        state.flame.mesh.forEach(quad -> {
+            emitter.copyFrom(quad).chunkLayer(ChunkSectionLayer.CUTOUT);
+            for (int vertex = 0; vertex < 4; vertex++) {
+                float u = (quad.u(vertex) - source.getU0()) / (source.getU1() - source.getU0());
+                float v = (quad.v(vertex) - source.getV0()) / (source.getV1() - source.getV0());
+                emitter.uv(vertex, target.getU(u / 2 + uScroll), target.getV(v / 2 + vScroll));
+            }
+            emitter.emit();
+        });
+        state.flame.mesh = mesh.immutableCopy();
     }
     @Override public void submit(State state, PoseStack pose, SubmitNodeCollector collector, CameraRenderState camera) {draw(state,pose,collector);}
     public static void draw(State state,PoseStack pose,SubmitNodeCollector collector){

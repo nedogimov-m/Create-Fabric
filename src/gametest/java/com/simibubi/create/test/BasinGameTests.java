@@ -51,6 +51,16 @@ public class BasinGameTests {
     }
 
     @GameTest(maxTicks = 300)
+    public void poweredMixerCraftsVanillaShapelessRecipe(GameTestHelper helper) {
+        var basin = basin(helper); mixer(helper, true);
+        insert(basin, Items.DYE.red(), 2); insert(basin, Items.DYE.white(), 2);
+        helper.succeedWhen(() -> {
+            helper.assertValueEqual(count(basin, Items.DYE.pink()), 4L, "Powered mixer completes both ordinary crafting batches");
+            helper.assertValueEqual(count(basin, Items.DYE.red()), 0L, "Red dye paid exactly once");
+            helper.assertValueEqual(count(basin, Items.DYE.white()), 0L, "White dye paid exactly once");
+        });
+    }
+    @GameTest(maxTicks = 300)
     public void mixerProducesAndesiteAlloyFromTwoIngredients(GameTestHelper helper) {
         var basin = basin(helper); mixer(helper, true);
         insert(basin, Items.ANDESITE, 2); insert(basin, Items.IRON_NUGGET, 2);

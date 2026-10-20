@@ -44,6 +44,9 @@ public final class DeployerBlockEntity extends KineticBlockEntity implements Bel
     public UUID owner;
     ItemStack heldItem=ItemStack.EMPTY;
     public ItemStack filter=ItemStack.EMPTY;
+    public final com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour filtering =
+        new com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour(this)
+            .withCallback(sample -> { filter=sample.copy(); inventoryChanged(); });
     List<ItemStack> overflowItems=new ArrayList<>();
     public final DeployerItemHandler inventory=new DeployerItemHandler(this);
     private DeployerFakePlayer player;
@@ -65,7 +68,7 @@ public final class DeployerBlockEntity extends KineticBlockEntity implements Bel
     public boolean isRedstoneLocked(){return redstoneLocked;}
     public void setHeldItem(ItemStack stack){heldItem=stack.copy();inventoryChanged();}
     public boolean accepts(ItemStack stack){return com.simibubi.create.content.logistics.filter.FilterItemStack.of(filter).test(level,stack);}
-    public void setFilter(ItemStack sample){filter=sample.copyWithCount(1);inventoryChanged();}
+    public void setFilter(ItemStack sample){filtering.setFilter(sample);}
     public void inventoryChanged(){if(player!=null)player.setItemInHand(InteractionHand.MAIN_HAND,heldItem.copy());setChanged();sync();}
     public DeployerFakePlayer getPlayer(){
         if(player==null&&level instanceof ServerLevel server){
@@ -205,6 +208,7 @@ public final class DeployerBlockEntity extends KineticBlockEntity implements Bel
     @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
         super.addNativeBehaviours(behaviours);
         if (beltProcessing != null) behaviours.add(beltProcessing);
+        if (filtering != null) behaviours.add(filtering);
     }
     @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
         super.addNativeAdvancementIds(ids);

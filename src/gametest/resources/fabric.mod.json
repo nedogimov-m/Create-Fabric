@@ -106,6 +106,7 @@
       "com.simibubi.create.test.ToolGameTests",
       "com.simibubi.create.test.WaterWheelGameTests",
       "com.simibubi.create.test.BasinGameTests",
+      "com.simibubi.create.test.ReportedInteractionGameTests",
       "com.simibubi.create.test.BurnerGameTests",
       "com.simibubi.create.test.FanGameTests",
       "com.simibubi.create.test.BeltGameTests",
@@ -283,6 +284,8 @@
       "com.simibubi.create.test.RadialWrenchGameTests",
       "com.simibubi.create.test.LargeWaterWheelItemGameTests",
       "com.simibubi.create.test.CogwheelPlacementGameTests",
+      "com.simibubi.create.test.MotorPlacementGameTests",
+      "com.simibubi.create.test.SteamEnginePlacementGameTests",
       "com.simibubi.create.test.RecipeAdvancementParityGameTests",
       "com.simibubi.create.test.MissingTransferSteamAdvancementGameTests",
       "com.simibubi.create.test.ProcessingAdvancementGameTests",
@@ -297,6 +300,9 @@
       "com.simibubi.create.test.PonderCommandGameTests"
     ],
     "fabric-client-gametest": [
+      "com.simibubi.create.test.PipeGeometryRenderingTest",
+      "com.simibubi.create.test.CartAssemblerModeClientTest",
+      "com.simibubi.create.content.processing.burner.BurnerFlameRenderingTest",
       "com.simibubi.create.test.KineticRenderingTest",
       "com.simibubi.create.test.RailGraphSyncRenderingTest",
       "com.simibubi.create.test.MinecartRenderingTest",

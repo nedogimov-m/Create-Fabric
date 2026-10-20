@@ -65,6 +65,7 @@ public final class MechanicalCrafterBlock extends KineticBlock implements ICogWh
         return InteractionResult.PASS;
     }
     @Override protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+        if (stack.isEmpty()) return InteractionResult.TRY_WITH_EMPTY_HAND;
         if (!player.mayBuild() || hit.getDirection() != state.getValue(HORIZONTAL_FACING) || stack.is(AllItems.WRENCH)) return InteractionResult.PASS;
         var crafter = CrafterHelper.getCrafter(level, pos); if (crafter == null) return InteractionResult.PASS;
         if (crafter.phase != MechanicalCrafterBlockEntity.Phase.IDLE) { if (!level.isClientSide()) crafter.ejectWholeGrid(); return InteractionResult.SUCCESS; }

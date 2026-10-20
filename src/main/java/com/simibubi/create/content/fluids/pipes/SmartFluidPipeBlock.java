@@ -50,12 +50,12 @@ public final class SmartFluidPipeBlock extends BaseEntityBlock implements IAxisP
     public static boolean filterHit(BlockState state,BlockPos pos,BlockHitResult hit){return hit.getLocation().subtract(Vec3.atLowerCornerOf(pos)).distanceToSqr(filterPosition(state))<0.25*0.25;}
     @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){
         if(!player.mayBuild()||player.isSpectator()||stack.is(AllItems.WRENCH)||!filterHit(state,pos,hit))return InteractionResult.PASS;
-        if(!level.isClientSide()&&level.getBlockEntity(pos) instanceof SmartFluidPipeBlockEntity pipe)pipe.setFilter(stack);
+        if(!level.isClientSide()&&level.getBlockEntity(pos) instanceof SmartFluidPipeBlockEntity pipe)pipe.filtering.applyPlayerSample(player,hand);
         return InteractionResult.SUCCESS;
     }
     @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){
         if(!player.mayBuild()||!filterHit(state,pos,hit))return InteractionResult.PASS;
-        if(!level.isClientSide()&&level.getBlockEntity(pos) instanceof SmartFluidPipeBlockEntity pipe)pipe.clearContent();return InteractionResult.SUCCESS;
+        if(!level.isClientSide()&&level.getBlockEntity(pos) instanceof SmartFluidPipeBlockEntity pipe)pipe.filtering.applyPlayerSample(player,InteractionHand.MAIN_HAND);return InteractionResult.SUCCESS;
     }
     @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
     @Override protected FluidState getFluidState(BlockState state){return state.getValue(WATERLOGGED)?Fluids.WATER.getSource(false):Fluids.EMPTY.defaultFluidState();}

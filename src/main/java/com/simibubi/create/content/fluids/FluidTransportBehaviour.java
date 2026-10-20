@@ -231,6 +231,14 @@ public abstract class FluidTransportBehaviour extends com.simibubi.create.founda
     }
     public PipeRenderData clientRenderData=new PipeRenderData(java.util.Collections.nCopies(6,AttachmentTypes.NONE),false);
     public Object getRenderData(){return clientRenderData;}
+    @Override public void read(ValueInput input,boolean clientPacket) {
+        var previous=clientRenderData;
+        read(input);
+        var world=getWorld();
+        if(clientPacket&&!previous.equals(clientRenderData)&&world!=null&&world.isClientSide()
+            &&com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(world,getPos())==blockEntity)
+            world.sendBlockUpdated(getPos(),blockEntity.getBlockState(),blockEntity.getBlockState(),net.minecraft.world.level.block.Block.UPDATE_CLIENTS);
+    }
     public void read(ValueInput root) { var in=root.childOrEmpty("Transport"); clientRenderData=new PipeRenderData(in.read("Attachments",com.mojang.serialization.Codec.INT.listOf()).orElse(java.util.List.of()).stream().map(n->AttachmentTypes.values()[Math.clamp(n,0,AttachmentTypes.values().length-1)]).toList(),in.getBooleanOr("Casing",false)); if(clientRenderData.attachments().size()!=6)clientRenderData=new PipeRenderData(java.util.Collections.nCopies(6,AttachmentTypes.NONE),false); interfaces=new IdentityHashMap<>();for(var side:Direction.values())in.child(side.getName()).ifPresent(data->{var connection=new PipeConnection(side);connection.read(data,getPos());interfaces.put(side,connection);});if(interfaces.isEmpty())interfaces=null; }
     public void write(ValueOutput root) { var out=root.child("Transport"); var render=renderData();out.store("Attachments",com.mojang.serialization.Codec.INT.listOf(),render.attachments().stream().map(Enum::ordinal).toList());out.putBoolean("Casing",render.casing());createConnectionData();interfaces.forEach((side,c)->c.write(out.child(side.getName()))); }
 }

@@ -17,6 +17,7 @@
     "ItemDropMixin",
     "SuperGluePlacementMixin",
     "DeployerItemRayMixin",
+    "DeployerBlockPlacementMixin",
     "DeployerBucketMixin",
     "DeployerExperienceMixin",
     "DeployerMobTargetMixin",

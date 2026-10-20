@@ -66,9 +66,9 @@ public final class CartAssemblerBlock extends BaseRailBlock implements EntityBlo
             level.playSound(null,pos,SoundEvents.ITEM_PICKUP,SoundSource.PLAYERS,1,1);
         }return InteractionResult.SUCCESS;
     }
-    @Override protected VoxelShape getShape(BlockState state,BlockGetter world,BlockPos pos,CollisionContext context){return state.getValue(RAIL_SHAPE)==RailShape.NORTH_SOUTH?Z_SHAPE:X_SHAPE;}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter world,BlockPos pos,CollisionContext context){return state.getValue(RAIL_SHAPE)==RailShape.NORTH_SOUTH?X_SHAPE:Z_SHAPE;}
     @Override protected VoxelShape getCollisionShape(BlockState state,BlockGetter world,BlockPos pos,CollisionContext context){
-        if(context instanceof EntityCollisionContext entity){if(entity.getEntity() instanceof AbstractMinecart)return Shapes.empty();if(entity.getEntity() instanceof Player)return state.getValue(RAIL_SHAPE)==RailShape.NORTH_SOUTH?Block.box(1,0,0,15,16,16):Block.box(0,0,1,16,16,15);}
+        if(context instanceof EntityCollisionContext entity){if(entity.getEntity() instanceof AbstractMinecart)return Shapes.empty();if(entity.getEntity() instanceof Player)return state.getValue(RAIL_SHAPE)==RailShape.NORTH_SOUTH?Block.box(0,0,1,16,16,15):Block.box(1,0,0,15,16,16);}
         return Shapes.block();
     }
     @Override protected boolean canSurvive(BlockState state,LevelReader level,BlockPos pos){return false;}

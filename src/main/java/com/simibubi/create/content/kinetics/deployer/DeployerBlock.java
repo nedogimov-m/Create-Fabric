@@ -44,7 +44,7 @@ public final class DeployerBlock extends DirectionalAxisKineticBlock {
             var direction=java.util.Arrays.stream(Direction.values()).filter(side->side.getAxis()!=state.getValue(FACING).getAxis()&&level.isLoaded(pos.relative(side))&&com.simibubi.create.foundation.utility.LoadedLevelAccess.blockState(level,pos.relative(side)).canBeReplaced()).min(java.util.Comparator.comparingDouble(side->Vec3.atCenterOf(pos).add(side.getUnitVec3().scale(0.5)).distanceToSqr(hit.getLocation())));
             if(direction.isPresent()){var placed=item.place(new AlignedPlacementContext(player,hand,hit,pos.relative(direction.get()),state));if(placed.consumesAction())return placed;}
         }
-        if(player.isShiftKeyDown()&&filterSide(state,hit.getDirection())&&hit.getLocation().subtract(Vec3.atLowerCornerOf(pos)).distanceTo(filterPosition(state,hit.getDirection()))<0.25){if(!level.isClientSide()&&level.getBlockEntity(pos) instanceof DeployerBlockEntity deployer)deployer.setFilter(stack);return InteractionResult.SUCCESS;}
+        if(player.isShiftKeyDown()&&filterSide(state,hit.getDirection())&&hit.getLocation().subtract(Vec3.atLowerCornerOf(pos)).distanceTo(filterPosition(state,hit.getDirection()))<0.25){if(!level.isClientSide()&&level.getBlockEntity(pos) instanceof DeployerBlockEntity deployer)deployer.filtering.applyPlayerSample(player,hand);return InteractionResult.SUCCESS;}
         if(!onHand(state,pos,hit.getLocation()))return InteractionResult.PASS;
         if(!level.isClientSide()&&level.getBlockEntity(pos) instanceof DeployerBlockEntity deployer){var old=deployer.getHeldItem().copy();deployer.setHeldItem(stack.copy());player.setItemInHand(hand,old);}return InteractionResult.SUCCESS;
     }

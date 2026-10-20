@@ -45,6 +45,7 @@ public final class BasinBlock extends BaseEntityBlock {
         return fullness == 0 ? 0 : 1 + (int) (fullness * 14);
     }
     @Override protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+        if (stack.isEmpty()) return InteractionResult.TRY_WITH_EMPTY_HAND;
         if (!player.mayBuild() || !(level.getBlockEntity(pos) instanceof BasinBlockEntity basin)) return InteractionResult.PASS;
         if (stack.getItem() instanceof com.simibubi.create.content.processing.AssemblyOperatorBlockItem) return InteractionResult.PASS;
         if (level.isClientSide()) return InteractionResult.SUCCESS;

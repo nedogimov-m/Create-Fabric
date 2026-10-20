@@ -1561,6 +1561,38 @@ public final class AllBlocks {
             .icon(() -> new ItemStack(COGWHEEL))
             .displayItems(
                 (context, output) -> {
+                  output.accept(AllItems.EMPTY_SCHEMATIC);
+                  output.accept(AllItems.SCHEMATIC_AND_QUILL);
+                  output.accept(SCHEMATIC_TABLE);
+                  output.accept(SCHEMATICANNON);
+                  output.accept(CLIPBOARD);
+                  output.accept(MECHANICAL_BEARING);
+                  output.accept(CONTRAPTION_CONTROLS);
+                  output.accept(TRACK_OBSERVER);
+                  output.accept(ANDESITE_DOOR);
+                  output.accept(BRASS_DOOR);
+                  output.accept(COPPER_DOOR);
+                  output.accept(TRAIN_DOOR);
+                  output.accept(FRAMED_GLASS_DOOR);
+                  output.accept(COPYCAT_PANEL);
+                  output.accept(COPYCAT_STEP);
+                  output.accept(ROSE_QUARTZ_LAMP);
+                  POSTBOXES.values().forEach(output::accept);
+                  output.accept(AllItems.WAND_OF_SYMMETRY);
+                  output.accept(AllItems.WORLDSHAPER);
+                  for (var item : java.util.List.of(AllItems.COPPER_BACKTANK, AllItems.NETHERITE_BACKTANK)) {
+                    var stack = new ItemStack(item);
+                    stack.set(AllDataComponents.BACKTANK_AIR, com.simibubi.create.content.equipment.armor.BacktankUtil.maxAirWithoutEnchants());
+                    output.accept(stack);
+                  }
+                  output.accept(AllItems.COPPER_DIVING_HELMET);
+                  output.accept(AllItems.NETHERITE_DIVING_HELMET);
+                  output.accept(AllItems.COPPER_DIVING_BOOTS);
+                  output.accept(AllItems.NETHERITE_DIVING_BOOTS);
+                  output.accept(AllItems.CARDBOARD_HELMET);
+                  output.accept(AllItems.CARDBOARD_CHESTPLATE);
+                  output.accept(AllItems.CARDBOARD_LEGGINGS);
+                  output.accept(AllItems.CARDBOARD_BOOTS);
                   output.accept(METAL_GIRDER);
                   output.accept(ORANGE_NIXIE_TUBE);
                   output.accept(PLACARD);

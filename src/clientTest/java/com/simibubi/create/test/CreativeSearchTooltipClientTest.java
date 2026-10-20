@@ -3,6 +3,7 @@ package com.simibubi.create.test;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.simibubi.create.AllBlocks;
+import com.simibubi.create.AllItems;
 import com.simibubi.create.Create;
 import com.simibubi.create.foundation.item.ItemDescription;
 import com.simibubi.create.foundation.item.TooltipHelper;
@@ -51,6 +52,18 @@ public final class CreativeSearchTooltipClientTest implements FabricClientGameTe
             context.runOnClient(client -> {
                 var tab = BuiltInRegistries.CREATIVE_MODE_TAB.getValue(Identifier.fromNamespaceAndPath("create", "base"));
                 require(tab != null && !tab.getDisplayItems().isEmpty(), "Create creative tab must exist and contain real items");
+                require(tab.getDisplayName().getString().equals("Create"), "Original creative tab name must be Create");
+                for(var item:List.of(AllItems.EMPTY_SCHEMATIC,AllItems.SCHEMATIC_AND_QUILL,AllBlocks.SCHEMATIC_TABLE.asItem(),AllBlocks.SCHEMATICANNON.asItem(),AllBlocks.CLIPBOARD.asItem(),AllItems.WORLDSHAPER,AllItems.WAND_OF_SYMMETRY,AllItems.COPPER_BACKTANK,AllItems.NETHERITE_BACKTANK))
+                    require(tab.getDisplayItems().stream().anyMatch(stack->stack.is(item)),"Creative tab must include "+item);
+                var other=BuiltInRegistries.CREATIVE_MODE_TAB.getValue(Identifier.fromNamespaceAndPath("create","palettes"));
+                var available=new java.util.HashSet<Item>();tab.getSearchTabDisplayItems().forEach(stack->available.add(stack.getItem()));other.getSearchTabDisplayItems().forEach(stack->available.add(stack.getItem()));
+                var missing=BuiltInRegistries.ITEM.stream().filter(item->BuiltInRegistries.ITEM.getKey(item).getNamespace().equals("create")&&!available.contains(item)).map(item->BuiltInRegistries.ITEM.getKey(item).getPath()).sorted().toList();
+                var intentionallyHidden=java.util.Set.of("andesite_encased_cogwheel","andesite_encased_large_cogwheel","andesite_encased_shaft","brass_encased_cogwheel","brass_encased_large_cogwheel","brass_encased_shaft","chest_minecart_contraption","copper_backtank_placeable","furnace_minecart_contraption","incomplete_precision_mechanism","incomplete_track","minecart_contraption","netherite_backtank_placeable","refined_radiance_casing","schematic","shadow_steel_casing","unprocessed_obsidian_sheet");
+                var unexpected=missing.stream().filter(name->!intentionallyHidden.contains(name)&&!name.startsWith("crushed_raw_")).toList();
+                require(unexpected.isEmpty(),"Player items missing from both creative tabs: "+unexpected);
+                for(var item:List.of(AllItems.COPPER_BACKTANK,AllItems.NETHERITE_BACKTANK))
+                    require(tab.getDisplayItems().stream().filter(stack->stack.is(item)).allMatch(stack->stack.getOrDefault(com.simibubi.create.AllDataComponents.BACKTANK_AIR,0)==com.simibubi.create.content.equipment.armor.BacktankUtil.maxAirWithoutEnchants()),"Creative backtanks start with original full air capacity");
+                Create.LOGGER.info("CREATE_CREATIVE_COMPLETENESS_PASS hidden={} visible={}",missing,available.size());
                 selectTab((CreativeModeInventoryScreen) client.gui.screen(), tab);
                 require(((CreativeModeInventoryScreen) client.gui.screen()).getMenu().items.stream().anyMatch(stack -> stack.is(AllBlocks.COGWHEEL.asItem())),
                     "Actual Create creative screen must display the cogwheel");

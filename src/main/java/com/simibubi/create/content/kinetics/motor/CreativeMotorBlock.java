@@ -1,6 +1,6 @@
 package com.simibubi.create.content.kinetics.motor;
 
-import com.simibubi.create.content.kinetics.base.KineticBlock;
+import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -20,7 +20,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.phys.BlockHitResult;
 
-public final class CreativeMotorBlock extends KineticBlock {
+public final class CreativeMotorBlock extends DirectionalKineticBlock {
     public static final EnumProperty<Direction> FACING = BlockStateProperties.FACING;
 
     public CreativeMotorBlock(Properties properties) {
@@ -45,7 +45,10 @@ public final class CreativeMotorBlock extends KineticBlock {
 
     @Override
     public BlockState getStateForPlacement(BlockPlaceContext context) {
-        return defaultBlockState().setValue(FACING, context.getNearestLookingDirection().getOpposite());
+        var preferred = getPreferredFacing(context);
+        if (preferred == null || context.getPlayer() != null && context.getPlayer().isShiftKeyDown())
+            return super.getStateForPlacement(context);
+        return defaultBlockState().setValue(FACING, preferred);
     }
 
     @Override

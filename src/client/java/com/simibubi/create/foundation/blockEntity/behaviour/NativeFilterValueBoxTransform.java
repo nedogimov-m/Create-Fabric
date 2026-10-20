@@ -65,6 +65,8 @@ public final class NativeFilterValueBoxTransform extends ValueBoxTransform {
     }
     @Override public Vec3 getLocalOffset(LevelAccessor level,BlockPos pos,BlockState state){
         var owner=filter.blockEntity;
+        var processing=FilteringSettings.processingFilterPosition(state,side);
+        if(processing!=null)return processing;
         if(filter instanceof FactoryPanelBehaviour panel)return FactoryPanelSlotPositioning.getCenterOfSlot(state,panel.slot);
         if(owner instanceof BrassTunnelBlockEntity)return TunnelSettings.filterPosition(side);
         if(owner instanceof TrackObserverBlockEntity)return new Vec3(.5,15.5/16d,.5);
