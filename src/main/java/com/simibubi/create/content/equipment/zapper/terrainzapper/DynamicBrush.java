@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Set;
 
 import com.simibubi.create.foundation.utility.BlockHelper;
-import com.simibubi.create.foundation.utility.CreateLang;
+
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -26,8 +26,8 @@ public class DynamicBrush extends Brush {
 		this.surface = surface;
 	}
 
-	Component getParamLabel(int paramIndex) {
-		return CreateLang.translateDirect("generic.range");
+	public Component getParamLabel(int paramIndex) {
+		return Component.translatable("create."+"generic.range");
 	}
 
 	@Override
@@ -47,12 +47,12 @@ public class DynamicBrush extends Brush {
 	}
 
 	@Override
-	int getMax(int paramIndex) {
+	public int getMax(int paramIndex) {
 		return MAX_RADIUS;
 	}
 
 	@Override
-	int getMin(int paramIndex) {
+	public int getMin(int paramIndex) {
 		return 1;
 	}
 
@@ -75,7 +75,7 @@ public class DynamicBrush extends Brush {
 		Set<BlockPos> visited = new HashSet<>();
 		List<BlockPos> frontier = new LinkedList<>();
 
-		BlockState state = world.getBlockState(targetPos);
+		BlockState state = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,targetPos);
 		List<BlockPos> offsets = new LinkedList<>();
 
 		for (int x = -1; x <= 1; x++)
@@ -99,8 +99,8 @@ public class DynamicBrush extends Brush {
 
 			// Replace Mode
 			if (replace) {
-				BlockState stateToReplace = world.getBlockState(currentPos);
-				BlockState stateAboveStateToReplace = world.getBlockState(currentPos.relative(targetFace));
+				BlockState stateToReplace = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,currentPos);
+				BlockState stateAboveStateToReplace = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,currentPos.relative(targetFace));
 
 				// Criteria
 				if (stateToReplace.getDestroySpeed(world, currentPos) == -1)
@@ -109,8 +109,7 @@ public class DynamicBrush extends Brush {
 					continue;
 				if (stateToReplace.canBeReplaced())
 					continue;
-				if (BlockHelper.hasBlockSolidSide(stateAboveStateToReplace, world, currentPos.relative(targetFace),
-					targetFace.getOpposite()) && surface)
+				if (stateAboveStateToReplace.isFaceSturdy(world,currentPos.relative(targetFace),targetFace.getOpposite()) && surface)
 					continue;
 				affectedPositions.add(currentPos);
 
@@ -121,8 +120,8 @@ public class DynamicBrush extends Brush {
 			}
 
 			// Place Mode
-			BlockState stateToPlaceAt = world.getBlockState(currentPos);
-			BlockState stateToPlaceOn = world.getBlockState(currentPos.relative(targetFace.getOpposite()));
+			BlockState stateToPlaceAt = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,currentPos);
+			BlockState stateToPlaceOn = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,currentPos.relative(targetFace.getOpposite()));
 
 			// Criteria
 			if (stateToPlaceOn.canBeReplaced())

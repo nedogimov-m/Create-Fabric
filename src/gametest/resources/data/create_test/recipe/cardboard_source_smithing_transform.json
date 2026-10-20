@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:smithing_transform",
+  "template": "minecraft:sentry_armor_trim_smithing_template",
+  "base": "create:cardboard_helmet",
+  "addition": "minecraft:stone",
+  "result": {
+    "id": "create:cardboard_helmet"
+  }
+}

@@ -1,605 +1,198 @@
 package com.simibubi.create.content.contraptions;
 
-import static net.createmod.catnip.math.AngleHelper.angleLerp;
-
-import java.util.Optional;
-import java.util.UUID;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.simibubi.create.AllAttachmentTypes;
-import com.simibubi.create.AllEntityTypes;
-import com.simibubi.create.api.contraption.storage.item.MountedItemStorageWrapper;
 import com.simibubi.create.content.contraptions.bearing.StabilizedContraption;
-import com.simibubi.create.content.contraptions.minecart.MinecartSim2020;
-import com.simibubi.create.content.contraptions.minecart.capability.CapabilityMinecartController;
-import com.simibubi.create.content.contraptions.minecart.capability.MinecartController;
-import com.simibubi.create.content.contraptions.mounted.CartAssemblerBlockEntity.CartMovementMode;
-import com.simibubi.create.content.contraptions.mounted.MountedContraption;
-import com.simibubi.create.foundation.item.ItemHelper;
-import com.simibubi.create.foundation.mixin.accessor.MinecartFurnaceAccessor;
-
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.math.AngleHelper;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.client.Minecraft;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.network.syncher.EntityDataAccessor;
-import net.minecraft.network.syncher.EntityDataSerializers;
-import net.minecraft.network.syncher.SynchedEntityData;
-import net.minecraft.tags.BlockTags;
+import java.util.*;
+import net.minecraft.core.*;
+import net.minecraft.network.syncher.*;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.vehicle.AbstractMinecart;
-import net.minecraft.world.entity.vehicle.MinecartFurnace;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.BaseRailBlock;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.RailShape;
-import net.minecraft.world.phys.Vec3;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+import net.minecraft.world.level.storage.*;
+import net.minecraft.world.phys.*;
+import org.joml.Quaternionf;
+import org.joml.Quaternionfc;
 
-/**
- * Ex: Minecarts, Couplings <br>
- * Oriented Contraption Entities can rotate freely around two axes
- * simultaneously.
- */
+/** A genuine oriented owner, with independent source yaw/pitch and actual native passenger identity. */
 public class OrientedContraptionEntity extends AbstractContraptionEntity {
-
-	private static final Ingredient FUEL_ITEMS = Ingredient.of(Items.COAL, Items.CHARCOAL);
-
-	private static final EntityDataAccessor<Optional<UUID>> COUPLING =
-		SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.OPTIONAL_UUID);
-	private static final EntityDataAccessor<Direction> INITIAL_ORIENTATION =
-		SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.DIRECTION);
-
-	protected Vec3 motionBeforeStall;
-	protected boolean forceAngle;
-	private boolean attachedExtraInventories;
-	private boolean manuallyPlaced;
-
-	public float prevYaw;
-	public float yaw;
-	public float targetYaw;
-
-	public float prevPitch;
-	public float pitch;
-
-	public int nonDamageTicks;
-
-	public OrientedContraptionEntity(EntityType<?> type, Level world) {
-		super(type, world);
-		motionBeforeStall = Vec3.ZERO;
-		attachedExtraInventories = false;
-		nonDamageTicks = 10;
-	}
-
-	public static OrientedContraptionEntity create(Level world, Contraption contraption, Direction initialOrientation) {
-		OrientedContraptionEntity entity =
-			new OrientedContraptionEntity(AllEntityTypes.ORIENTED_CONTRAPTION.get(), world);
-		entity.setContraption(contraption);
-		entity.setInitialOrientation(initialOrientation);
-		entity.startAtInitialYaw();
-		return entity;
-	}
-
-	public static OrientedContraptionEntity createAtYaw(Level world, Contraption contraption,
-														Direction initialOrientation, float initialYaw) {
-		OrientedContraptionEntity entity = create(world, contraption, initialOrientation);
-		entity.startAtYaw(initialYaw);
-		entity.manuallyPlaced = true;
-		return entity;
-	}
-
-	public void setInitialOrientation(Direction direction) {
-		entityData.set(INITIAL_ORIENTATION, direction);
-	}
-
-	public Direction getInitialOrientation() {
-		return entityData.get(INITIAL_ORIENTATION);
-	}
-
-	@Override
-	public float getYawOffset() {
-		return getInitialYaw();
-	}
-
-	public float getInitialYaw() {
-		return (isInitialOrientationPresent() ? entityData.get(INITIAL_ORIENTATION) : Direction.SOUTH).toYRot();
-	}
-
-	@Override
-	protected void defineSynchedData(SynchedEntityData.Builder builder) {
-		super.defineSynchedData(builder);
-		builder.define(COUPLING, Optional.empty());
-		builder.define(INITIAL_ORIENTATION, Direction.UP);
-	}
-
-	@Override
-	public ContraptionRotationState getRotationState() {
-		ContraptionRotationState crs = new ContraptionRotationState();
-
-		float yawOffset = getYawOffset();
-		crs.zRotation = pitch;
-		crs.yRotation = -yaw + yawOffset;
-
-		if (pitch != 0 && yaw != 0) {
-			crs.secondYRotation = -yaw;
-			crs.yRotation = yawOffset;
-		}
-
-		return crs;
-	}
-
-	@Override
-	public void stopRiding() {
-		if (!level().isClientSide && isAlive())
-			disassemble();
-		super.stopRiding();
-	}
-
-	@Override
-	protected void readAdditional(CompoundTag compound, boolean spawnPacket) {
-		super.readAdditional(compound, spawnPacket);
-
-		if (compound.contains("InitialOrientation"))
-			setInitialOrientation(NBTHelper.readEnum(compound, "InitialOrientation", Direction.class));
-
-		yaw = compound.getFloat("Yaw");
-		pitch = compound.getFloat("Pitch");
-		manuallyPlaced = compound.getBoolean("Placed");
-
-		if (compound.contains("ForceYaw"))
-			startAtYaw(compound.getFloat("ForceYaw"));
-
-		ListTag vecNBT = compound.getList("CachedMotion", 6);
-		if (!vecNBT.isEmpty()) {
-			motionBeforeStall = new Vec3(vecNBT.getDouble(0), vecNBT.getDouble(1), vecNBT.getDouble(2));
-			if (!motionBeforeStall.equals(Vec3.ZERO))
-				targetYaw = prevYaw = yaw += yawFromVector(motionBeforeStall);
-			setDeltaMovement(Vec3.ZERO);
-		}
-
-		setCouplingId(compound.contains("OnCoupling") ? compound.getUUID("OnCoupling") : null);
-	}
-
-	@Override
-	protected void writeAdditional(CompoundTag compound, HolderLookup.Provider registries, boolean spawnPacket) {
-		super.writeAdditional(compound, registries, spawnPacket);
-
-		if (motionBeforeStall != null)
-			compound.put("CachedMotion", newDoubleList(motionBeforeStall.x, motionBeforeStall.y, motionBeforeStall.z));
-
-		Direction optional = entityData.get(INITIAL_ORIENTATION);
-		if (optional.getAxis()
-			.isHorizontal())
-			NBTHelper.writeEnum(compound, "InitialOrientation", optional);
-		if (forceAngle) {
-			compound.putFloat("ForceYaw", yaw);
-			forceAngle = false;
-		}
-
-		compound.putBoolean("Placed", manuallyPlaced);
-		compound.putFloat("Yaw", yaw);
-		compound.putFloat("Pitch", pitch);
-
-		if (getCouplingId() != null)
-			compound.putUUID("OnCoupling", getCouplingId());
-	}
-
-	@Override
-	public void onSyncedDataUpdated(EntityDataAccessor<?> key) {
-		super.onSyncedDataUpdated(key);
-		if (INITIAL_ORIENTATION.equals(key) && isInitialOrientationPresent() && !manuallyPlaced)
-			startAtInitialYaw();
-	}
-
-	public boolean isInitialOrientationPresent() {
-		return entityData.get(INITIAL_ORIENTATION)
-			.getAxis()
-			.isHorizontal();
-	}
-
-	public void startAtInitialYaw() {
-		startAtYaw(getInitialYaw());
-	}
-
-	public void startAtYaw(float yaw) {
-		targetYaw = this.yaw = prevYaw = yaw;
-		forceAngle = true;
-	}
-
-	@Override
-	public Vec3 applyRotation(Vec3 localPos, float partialTicks) {
-		localPos = VecHelper.rotate(localPos, getInitialYaw(), Axis.Y);
-		localPos = VecHelper.rotate(localPos, getViewXRot(partialTicks), Axis.Z);
-		localPos = VecHelper.rotate(localPos, getViewYRot(partialTicks), Axis.Y);
-		return localPos;
-	}
-
-	@Override
-	public Vec3 reverseRotation(Vec3 localPos, float partialTicks) {
-		localPos = VecHelper.rotate(localPos, -getViewYRot(partialTicks), Axis.Y);
-		localPos = VecHelper.rotate(localPos, -getViewXRot(partialTicks), Axis.Z);
-		localPos = VecHelper.rotate(localPos, -getInitialYaw(), Axis.Y);
-		return localPos;
-	}
-
-	public float getViewYRot(float partialTicks) {
-		return -(partialTicks == 1.0F ? yaw : angleLerp(partialTicks, prevYaw, yaw));
-	}
-
-	public float getViewXRot(float partialTicks) {
-		return partialTicks == 1.0F ? pitch : angleLerp(partialTicks, prevPitch, pitch);
-	}
-
-	@Override
-	protected void tickContraption() {
-		if (nonDamageTicks > 0)
-			nonDamageTicks--;
-		Entity e = getVehicle();
-		if (e == null)
-			return;
-
-		boolean rotationLock = false;
-		boolean pauseWhileRotating = false;
-		boolean wasStalled = isStalled();
-		if (contraption instanceof MountedContraption mountedContraption) {
-			rotationLock = mountedContraption.rotationMode == CartMovementMode.ROTATION_LOCKED;
-			pauseWhileRotating = mountedContraption.rotationMode == CartMovementMode.ROTATE_PAUSED;
-		}
-
-		Entity riding = e;
-		while (riding.getVehicle() != null && !(contraption instanceof StabilizedContraption))
-			riding = riding.getVehicle();
-
-		boolean isOnCoupling = false;
-		UUID couplingId = getCouplingId();
-		isOnCoupling = couplingId != null && riding instanceof AbstractMinecart;
-
-		if (!attachedExtraInventories) {
-			attachInventoriesFromRidingCarts(riding, isOnCoupling, couplingId);
-			attachedExtraInventories = true;
-		}
-
-		boolean rotating = updateOrientation(rotationLock, wasStalled, riding, isOnCoupling);
-		if (!rotating || !pauseWhileRotating)
-			tickActors();
-		boolean isStalled = isStalled();
-
-		MinecartController controller = riding.getData(AllAttachmentTypes.MINECART_CONTROLLER);
-		if (controller.isPresent()) {
-			if (!level().isClientSide())
-				controller.setStalledExternally(isStalled);
-		} else {
-			if (isStalled) {
-				if (!wasStalled)
-					motionBeforeStall = riding.getDeltaMovement();
-				riding.setDeltaMovement(0, 0, 0);
-			}
-			if (wasStalled && !isStalled) {
-				riding.setDeltaMovement(motionBeforeStall);
-				motionBeforeStall = Vec3.ZERO;
-			}
-		}
-
-		if (level().isClientSide)
-			return;
-
-		if (!isStalled()) {
-			if (isOnCoupling) {
-				Couple<MinecartController> coupledCarts = getCoupledCartsIfPresent();
-				if (coupledCarts == null)
-					return;
-				coupledCarts.map(MinecartController::cart)
-					.forEach(this::powerFurnaceCartWithFuelFromStorage);
-				return;
-			}
-			powerFurnaceCartWithFuelFromStorage(riding);
-		}
-	}
-
-	protected boolean updateOrientation(boolean rotationLock, boolean wasStalled, Entity riding, boolean isOnCoupling) {
-		if (isOnCoupling) {
-			Couple<MinecartController> coupledCarts = getCoupledCartsIfPresent();
-			if (coupledCarts == null)
-				return false;
-
-			Vec3 positionVec = coupledCarts.getFirst()
-				.cart()
-				.position();
-			Vec3 coupledVec = coupledCarts.getSecond()
-				.cart()
-				.position();
-
-			double diffX = positionVec.x - coupledVec.x;
-			double diffY = positionVec.y - coupledVec.y;
-			double diffZ = positionVec.z - coupledVec.z;
-
-			prevYaw = yaw;
-			prevPitch = pitch;
-			yaw = (float) (Mth.atan2(diffZ, diffX) * 180 / Math.PI);
-			pitch = (float) (Math.atan2(diffY, Math.sqrt(diffX * diffX + diffZ * diffZ)) * 180 / Math.PI);
-
-			if (getCouplingId().equals(riding.getUUID())) {
-				pitch *= -1;
-				yaw += 180;
-			}
-			return false;
-		}
-
-		if (contraption instanceof StabilizedContraption stabilized) {
-			if (!(riding instanceof OrientedContraptionEntity parent))
-				return false;
-			Direction facing = stabilized.getFacing();
-			if (facing.getAxis()
-				.isVertical())
-				return false;
-			prevYaw = yaw;
-			yaw = AngleHelper.wrapAngle180(getInitialYaw() - parent.getInitialYaw()) - parent.getViewYRot(1);
-			return false;
-		}
-
-		prevYaw = yaw;
-		if (wasStalled)
-			return false;
-
-		boolean rotating = false;
-		Vec3 movementVector = riding.getDeltaMovement();
-		Vec3 locationDiff = riding.position()
-			.subtract(riding.xo, riding.yo, riding.zo);
-		if (!(riding instanceof AbstractMinecart))
-			movementVector = locationDiff;
-		Vec3 motion = movementVector.normalize();
-
-		if (!rotationLock) {
-			if (riding instanceof AbstractMinecart minecartEntity) {
-				BlockPos railPosition = minecartEntity.getCurrentRailPosition();
-				BlockState blockState = level().getBlockState(railPosition);
-				if (blockState.getBlock() instanceof BaseRailBlock abstractRailBlock) {
-					RailShape railDirection =
-						abstractRailBlock.getRailDirection(blockState, level(), railPosition, minecartEntity);
-					motion = VecHelper.project(motion, MinecartSim2020.getRailVec(railDirection));
-				}
-			}
-
-			if (motion.length() > 0) {
-				targetYaw = yawFromVector(motion);
-				if (targetYaw < 0)
-					targetYaw += 360;
-				if (yaw < 0)
-					yaw += 360;
-			}
-
-			prevYaw = yaw;
-			float maxApproachSpeed = (float) (motion.length() * 12f / (Math.max(1, getBoundingBox().getXsize() / 6f)));
-			float yawHint = AngleHelper.getShortestAngleDiff(yaw, yawFromVector(locationDiff));
-			float approach = AngleHelper.getShortestAngleDiff(yaw, targetYaw, yawHint);
-			approach = Mth.clamp(approach, -maxApproachSpeed, maxApproachSpeed);
-			yaw += approach;
-			if (Math.abs(AngleHelper.getShortestAngleDiff(yaw, targetYaw)) < 1f)
-				yaw = targetYaw;
-			else
-				rotating = true;
-		}
-		return rotating;
-	}
-
-	protected void powerFurnaceCartWithFuelFromStorage(Entity riding) {
-		if (!(riding instanceof MinecartFurnace furnaceCart))
-			return;
-		if (!(riding instanceof MinecartFurnaceAccessor furnaceCartAccessor))
-			return;
-
-		int fuel = furnaceCartAccessor.create$getFuel();
-		int fuelBefore = fuel;
-		double pushX = furnaceCart.xPush;
-		double pushZ = furnaceCart.zPush;
-
-		int i = Mth.floor(furnaceCart.getX());
-		int j = Mth.floor(furnaceCart.getY());
-		int k = Mth.floor(furnaceCart.getZ());
-		if (furnaceCart.level().getBlockState(new BlockPos(i, j - 1, k))
-			.is(BlockTags.RAILS))
-			--j;
-
-		BlockPos blockpos = new BlockPos(i, j, k);
-		BlockState blockstate = this.level().getBlockState(blockpos);
-		if (furnaceCart.canUseRail() && blockstate.is(BlockTags.RAILS))
-			if (fuel > 1)
-				riding.setDeltaMovement(riding.getDeltaMovement()
-					.normalize()
-					.scale(1));
-		if (fuel < 5 && contraption != null) {
-			MountedItemStorageWrapper fuelItems = contraption.getStorage().getFuelItems();
-			if (fuelItems != null) {
-				ItemStack coal = ItemHelper.extract(fuelItems, FUEL_ITEMS, 1, false);
-				if (!coal.isEmpty())
-					fuel += 3600;
-			}
-		}
-
-		if (fuel != fuelBefore || pushX != 0 || pushZ != 0) {
-			furnaceCart.xPush = pushX;
-			furnaceCart.zPush = pushZ;
-			furnaceCartAccessor.create$setFuel(fuel);
-		}
-	}
-
-	@Nullable
-	public Couple<MinecartController> getCoupledCartsIfPresent() {
-		UUID couplingId = getCouplingId();
-		if (couplingId == null)
-			return null;
-		MinecartController controller = CapabilityMinecartController.getIfPresent(level(), couplingId);
-		if (controller == null || !controller.isPresent())
-			return null;
-		UUID coupledCart = controller.getCoupledCart(true);
-		MinecartController coupledController = CapabilityMinecartController.getIfPresent(level(), coupledCart);
-		if (coupledController == null || !coupledController.isPresent())
-			return null;
-		return Couple.create(controller, coupledController);
-	}
-
-	protected void attachInventoriesFromRidingCarts(Entity riding, boolean isOnCoupling, UUID couplingId) {
-		if (!(contraption instanceof MountedContraption mc))
-			return;
-		if (!isOnCoupling) {
-			mc.addExtraInventories(riding);
-			return;
-		}
-		Couple<MinecartController> coupledCarts = getCoupledCartsIfPresent();
-		if (coupledCarts == null)
-			return;
-		coupledCarts.map(MinecartController::cart)
-			.forEach(mc::addExtraInventories);
-	}
-
-	@Nullable
-	public UUID getCouplingId() {
-		Optional<UUID> uuid = entityData.get(COUPLING);
-		return uuid == null ? null : uuid.isPresent() ? uuid.get() : null;
-	}
-
-	public void setCouplingId(UUID id) {
-		entityData.set(COUPLING, Optional.ofNullable(id));
-	}
-
-	@Override
-	public Vec3 getVehicleAttachmentPoint(Entity entity) {
-		return entity instanceof AbstractContraptionEntity ? Vec3.ZERO : new Vec3(0, 0.19, 0);
-	}
-
-	@Override
-	public Vec3 getAnchorVec() {
-		Vec3 anchorVec = super.getAnchorVec();
-		return anchorVec.subtract(.5, 0, .5);
-	}
-
-	@Override
-	public Vec3 getPrevAnchorVec() {
-		Vec3 prevAnchorVec = super.getPrevAnchorVec();
-		return prevAnchorVec.subtract(.5, 0, .5);
-	}
-
-	@Override
-	protected StructureTransform makeStructureTransform() {
-		BlockPos offset = BlockPos.containing(getAnchorVec().add(.5, .5, .5));
-		return new StructureTransform(offset, 0, -yaw + getInitialYaw(), 0);
-	}
-
-	@Override
-	protected float getStalledAngle() {
-		return yaw;
-	}
-
-	@Override
-	protected void handleStallInformation(double x, double y, double z, float angle) {
-		yaw = angle;
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void applyLocalTransforms(PoseStack matrixStack, float partialTicks) {
-		float angleInitialYaw = getInitialYaw();
-		float angleYaw = getViewYRot(partialTicks);
-		float anglePitch = getViewXRot(partialTicks);
-
-		matrixStack.translate(-.5f, 0, -.5f);
-
-		Entity ridingEntity = getVehicle();
-		if (ridingEntity instanceof AbstractMinecart)
-			repositionOnCart(matrixStack, partialTicks, ridingEntity);
-		else if (ridingEntity instanceof AbstractContraptionEntity) {
-			if (ridingEntity.getVehicle() instanceof AbstractMinecart)
-				repositionOnCart(matrixStack, partialTicks, ridingEntity.getVehicle());
-			else
-				repositionOnContraption(matrixStack, partialTicks, ridingEntity);
-		}
-
-		TransformStack.of(matrixStack)
-			.nudge(getId())
-			.center()
-			.rotateYDegrees(angleYaw)
-			.rotateZDegrees(anglePitch)
-			.rotateYDegrees(angleInitialYaw)
-			.uncenter();
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private void repositionOnContraption(PoseStack matrixStack, float partialTicks, Entity ridingEntity) {
-		Vec3 pos = getContraptionOffset(partialTicks, ridingEntity);
-		matrixStack.translate(pos.x, pos.y, pos.z);
-	}
-
-	// Minecarts do not always render at their exact location, so the contraption
-	// has to adjust aswell
-	@OnlyIn(Dist.CLIENT)
-	private void repositionOnCart(PoseStack matrixStack, float partialTicks, Entity ridingEntity) {
-		Vec3 cartPos = getCartOffset(partialTicks, ridingEntity);
-
-		if (cartPos == Vec3.ZERO)
-			return;
-
-		matrixStack.translate(cartPos.x, cartPos.y, cartPos.z);
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private Vec3 getContraptionOffset(float partialTicks, Entity ridingEntity) {
-		AbstractContraptionEntity parent = (AbstractContraptionEntity) ridingEntity;
-		Vec3 passengerPosition = parent.getPassengerPosition(this, partialTicks);
-		if (passengerPosition == null)
-			return Vec3.ZERO;
-
-		double x = passengerPosition.x - Mth.lerp(partialTicks, this.xOld, this.getX());
-		double y = passengerPosition.y - Mth.lerp(partialTicks, this.yOld, this.getY());
-		double z = passengerPosition.z - Mth.lerp(partialTicks, this.zOld, this.getZ());
-
-		return new Vec3(x, y, z);
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private Vec3 getCartOffset(float partialTicks, Entity ridingEntity) {
-		AbstractMinecart cart = (AbstractMinecart) ridingEntity;
-		double cartX = Mth.lerp(partialTicks, cart.xOld, cart.getX());
-		double cartY = Mth.lerp(partialTicks, cart.yOld, cart.getY());
-		double cartZ = Mth.lerp(partialTicks, cart.zOld, cart.getZ());
-		Vec3 cartPos = cart.getPos(cartX, cartY, cartZ);
-
-		if (cartPos != null) {
-			Vec3 cartPosFront = cart.getPosOffs(cartX, cartY, cartZ, (double) 0.3F);
-			Vec3 cartPosBack = cart.getPosOffs(cartX, cartY, cartZ, (double) -0.3F);
-			if (cartPosFront == null)
-				cartPosFront = cartPos;
-			if (cartPosBack == null)
-				cartPosBack = cartPos;
-
-			cartX = cartPos.x - cartX;
-			cartY = (cartPosFront.y + cartPosBack.y) / 2.0D - cartY;
-			cartZ = cartPos.z - cartZ;
-
-			return new Vec3(cartX, cartY, cartZ);
-		}
-
-		return Vec3.ZERO;
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	public static void handleRelocationPacket(ContraptionRelocationPacket packet) {
-		if (Minecraft.getInstance().level.getEntity(packet.entityId()) instanceof OrientedContraptionEntity oce)
-			oce.nonDamageTicks = 10;
-	}
+    private static final EntityDataAccessor<Direction> INITIAL = SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.DIRECTION);
+    private static final EntityDataAccessor<Float> YAW = SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> PITCH = SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Quaternionfc> ORIENTATION = SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.QUATERNION);
+    private static final EntityDataAccessor<String> PARENT_ID = SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<BlockPos> PARENT_BEARING = SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<Direction> PARENT_FACING = SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.DIRECTION);
+    private static final EntityDataAccessor<String> MOUNTED_CART = SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<String> COUPLING = SynchedEntityData.defineId(OrientedContraptionEntity.class, EntityDataSerializers.STRING);
+    private float previousYaw, previousPitch;
+    public int nonDamageTicks = 10;
+    // Server ownership topology is authoritative before any synchronized-data callback.
+    private UUID serverCouplingId,serverMountedCartId;
+    private boolean nativeCartRetirementComplete,nativeCartRetirementPending;
+    public OrientedContraptionEntity(EntityType<? extends OrientedContraptionEntity> type, Level level) { super(type, level); }
+    @Override protected void defineSynchedData(SynchedEntityData.Builder data) {
+        super.defineSynchedData(data); data.define(INITIAL, Direction.UP); data.define(YAW, 0f); data.define(PITCH, 0f); data.define(ORIENTATION, new Quaternionf());
+        data.define(MOUNTED_CART, "");data.define(COUPLING, "");
+        data.define(PARENT_ID, ""); data.define(PARENT_BEARING, BlockPos.ZERO); data.define(PARENT_FACING, Direction.UP);
+    }
+    public UUID getMountedCartId(){if(!level().isClientSide())return serverMountedCartId;var value=entityData.get(MOUNTED_CART);return value.isEmpty()?null:UUID.fromString(value);}
+    public void setMountedCartId(UUID id){serverMountedCartId=id;entityData.set(MOUNTED_CART,id==null?"":id.toString());}
+    public UUID getCouplingId(){if(!level().isClientSide())return serverCouplingId;var value=entityData.get(COUPLING);return value.isEmpty()?null:UUID.fromString(value);}
+    public void setCouplingId(UUID id){serverCouplingId=id;entityData.set(COUPLING,id==null?"":id.toString());}
+    /** Callback-free counterpart of the native coupling graph's fully preflighted reversal. */
+    public void replaceCouplingLeadingCartPure(UUID expected,UUID actualLeading){
+        if(!(level() instanceof ServerLevel server)||server.getEntity(getUUID())!=this||!hasOwnedStructure()||!Objects.equals(serverCouplingId,expected))throw new IllegalStateException("Actual structural coupling direction changed");
+        serverCouplingId=Objects.requireNonNull(actualLeading);
+    }
+    /** Synchronization follows the complete native topology and durable root metadata commit. */
+    public void syncCouplingLeadingCart(){var id=getCouplingId();entityData.set(COUPLING,id==null?"":id.toString());}
+    public net.createmod.catnip.data.Couple<com.simibubi.create.content.contraptions.minecart.capability.MinecartController> getCoupledCartsIfPresent(){
+        var id=getCouplingId();if(id==null)return null;
+        var main=com.simibubi.create.content.contraptions.minecart.capability.CapabilityMinecartController.getIfPresent(level(),id);
+        if(main==null||!main.hasContraptionCoupling(true)||main.ownsPackedReceipt())return null;
+        var other=com.simibubi.create.content.contraptions.minecart.capability.CapabilityMinecartController.getIfPresent(level(),main.getCoupledCart(true));
+        if(other==null||!other.hasContraptionCoupling(false)||!Objects.equals(other.getCoupledCart(false),main.cart().getUUID())||other.ownsPackedReceipt())return null;
+        return net.createmod.catnip.data.Couple.create(main,other);
+    }
+    public UUID getParentId() { var value = entityData.get(PARENT_ID); return value.isEmpty() ? null : UUID.fromString(value); }
+    public StabilizedSubContraptions.Location getParentLocation() { return getParentId() == null ? null : new StabilizedSubContraptions.Location(entityData.get(PARENT_BEARING), entityData.get(PARENT_FACING)); }
+    public void setParent(UUID parent, StabilizedSubContraptions.Location location) { entityData.set(PARENT_BEARING, location.bearing()); entityData.set(PARENT_FACING, location.facing()); entityData.set(PARENT_ID, Objects.requireNonNull(parent).toString()); }
+    public Direction getInitialOrientation() { return entityData.get(INITIAL); }
+    public boolean isInitialOrientationPresent() { return getInitialOrientation().getAxis().isHorizontal(); }
+    public float getInitialYaw() { return (isInitialOrientationPresent() ? getInitialOrientation() : Direction.SOUTH).toYRot(); }
+    public void setInitialOrientation(Direction direction) { entityData.set(INITIAL, Objects.requireNonNull(direction)); setAngles(getInitialYaw(), 0); previousYaw = entityData.get(YAW); previousPitch = 0; }
+    public void setAngles(float yaw, float pitch) {
+        if (!Float.isFinite(yaw) || !Float.isFinite(pitch)) throw new IllegalArgumentException("Nonfinite oriented pose");
+        entityData.set(YAW, yaw); entityData.set(PITCH, pitch); entityData.set(ORIENTATION, ContraptionOrientation.source(yaw, pitch, getInitialYaw()));
+        setYRot(yaw); setXRot(pitch); setBoundingBox(makeBoundingBox(position()));
+    }
+    /** Exact synchronized current pose; visual interpolation may differ by a whole turn. */
+    boolean hasCurrentAngles(float yaw,float pitch){return Float.compare(entityData.get(YAW),yaw)==0&&Float.compare(entityData.get(PITCH),pitch)==0;}
+    public float getViewYRot(float partial) { return -ContraptionOrientation.lerp(previousYaw, entityData.get(YAW), partial); }
+    public float getViewXRot(float partial) { return ContraptionOrientation.lerp(previousPitch, entityData.get(PITCH), partial); }
+    @Override public Quaternionf getOrientationQuaternion(float partial) {
+        if (partial == 1) return ContraptionOrientation.validated(entityData.get(ORIENTATION));
+        return ContraptionOrientation.source(-getViewYRot(partial), getViewXRot(partial), getInitialYaw());
+    }
+    @Override public Vec3 applyRotation(Vec3 local, float partial) { return ContraptionOrientation.apply(getOrientationQuaternion(partial), local); }
+    @Override public Vec3 reverseRotation(Vec3 local, float partial) { return ContraptionOrientation.inverse(getOrientationQuaternion(partial), local); }
+    @Override public Vec3 getAnchorVec() { return super.getAnchorVec().subtract(.5, 0, .5); }
+    @Override public Vec3 getPrevAnchorVec() { return super.getPrevAnchorVec().subtract(.5, 0, .5); }
+    @Override public Vec3 getVehicleAttachmentPoint(Entity vehicle) { return vehicle instanceof AbstractContraptionEntity ? Vec3.ZERO : new Vec3(0, .19, 0); }
+    @Override public ContraptionRotationState getRotationState() {
+        var state = new ContraptionRotationState(); state.orientation = getOrientationQuaternion(1); return state;
+    }
+    public StructureTransform restorationAt(BlockPos anchor) { return new StructureTransform(anchor, 0, -entityData.get(YAW) + getInitialYaw(), 0); }
+    @Override protected StructureTransform disassemblyTransform() { return restorationAt(BlockPos.containing(getAnchorVec().add(.5, .5, .5))); }
+    @Override public void setContraption(Contraption structure) { super.setContraption(structure); setBoundingBox(makeBoundingBox(position())); }
+    @Override public void setPos(double x, double y, double z) { super.setPos(x, y, z); if (contraption != null) setBoundingBox(makeBoundingBox(position())); }
+    @Override protected AABB makeBoundingBox(Vec3 nativePosition) {
+        if (contraption == null || contraption.bounds == null) return super.makeBoundingBox(nativePosition);
+        var bounds = contraption.bounds; AABB result = null; var anchor = nativePosition.subtract(.5, 0, .5);
+        for (double x : new double[]{bounds.minX, bounds.maxX}) for (double y : new double[]{bounds.minY, bounds.maxY}) for (double z : new double[]{bounds.minZ, bounds.maxZ}) {
+            var point = applyRotation(new Vec3(x - .5, y - .5, z - .5), 1).add(.5, .5, .5).add(anchor);
+            var corner = new AABB(point, point); result = result == null ? corner : result.minmax(corner);
+        }
+        return result;
+    }
+    public boolean isNativeCartRetirementComplete(){return nativeCartRetirementComplete;}
+    public boolean isNativeCartRetirementPending(){return nativeCartRetirementPending;}
+    private boolean hasActuallyRetiredMountedStructure(){return contraption instanceof com.simibubi.create.content.contraptions.mounted.MountedContraption&&contraption.disassembled&&!contraption.getStorage().ownsContents();}
+    public void markNativeCartRetirementCompletePure(){
+        if(!nativeCartRetirementPending&&!hasActuallyRetiredMountedStructure())throw new IllegalStateException("Actual world-retired mounted source or its real durable completion journal required");
+        nativeCartRetirementComplete=true;
+    }
+    @Override public void tick(){
+        if(!level().isClientSide()&&hasOwnedStructure()&&contraption instanceof com.simibubi.create.content.contraptions.mounted.MountedContraption)com.simibubi.create.content.contraptions.mounted.NativeCartBinding.recover(this);
+        if(!level().isClientSide()&&(nativeCartRetirementPending||hasActuallyRetiredMountedStructure())){
+            nativeCartRetirementPending=true;if(com.simibubi.create.content.contraptions.mounted.NativeCartRetirement.tryFinish(this))discard();return;
+        }
+        super.tick();
+    }
+    @Override public void remove(RemovalReason reason){
+        if(!level().isClientSide()&&!isRemoved()&&reason.shouldDestroy()&&(nativeCartRetirementPending||hasActuallyRetiredMountedStructure())){
+            nativeCartRetirementPending=true;if(!com.simibubi.create.content.contraptions.mounted.NativeCartRetirement.tryFinish(this))return;
+        }
+        super.remove(reason);
+    }
+    @Override protected void tickContraption() {
+        if(nonDamageTicks>0)nonDamageTicks--;
+        previousYaw = entityData.get(YAW); previousPitch = entityData.get(PITCH);
+        if(contraption.getStabilizedSubContraptions().isRecovering()){if(!level().isClientSide())ContraptionAssemblyGraph.restore(this);return;}
+        if (contraption.disassembled) return;
+        boolean stabilizedWasStalled=isStalled();
+        AbstractContraptionEntity parent = getVehicle() instanceof AbstractContraptionEntity riding ? riding : null;
+        var parentId = getParentId();
+        if (!level().isClientSide() && parentId != null && parent == null && level() instanceof ServerLevel server && server.getEntity(parentId) instanceof AbstractContraptionEntity candidate && candidate.getContraption() != null && candidate.getContraption().getStabilizedSubContraptions().accepts(this)) {
+            if (startRiding(candidate, true, true)) parent = candidate;
+        }
+        if (parent != null && contraption instanceof StabilizedContraption stabilized) {
+            // Controlled parents move this anchor, not this independent world orientation.
+            if (parent instanceof OrientedContraptionEntity oriented && stabilized.getFacing().getAxis().isHorizontal()) {
+                float yaw = Mth.wrapDegrees(getInitialYaw() - oriented.getInitialYaw()) - oriented.getViewYRot(1); setAngles(yaw, entityData.get(PITCH));
+            }
+        }
+        if(contraption instanceof com.simibubi.create.content.contraptions.mounted.MountedContraption){
+            if(!ContraptionAssemblyGraph.isRecovering(this)&&com.simibubi.create.content.contraptions.mounted.MountedCartMotion.updateOrientation(this))tickActors();
+            com.simibubi.create.content.contraptions.mounted.MountedCartMotion.afterActors(this);return;
+        }
+        // A saved unresolved parent identity keeps the real child/cargo durable and motionless.
+        if ((parentId == null || parent != null)&&!ContraptionAssemblyGraph.isRecovering(this)) {
+            tickActors();continueStabilizedParentMotion(parent,stabilizedWasStalled);
+        }
+    }
+    /** The original stabilized fallback changes only its real immediate parent's delta movement. */
+    private void continueStabilizedParentMotion(AbstractContraptionEntity actualParent,boolean wasStalled){
+        if(level().isClientSide()||!(contraption instanceof StabilizedContraption)||actualParent==null||!hasOwnedStructure()||!actualParent.hasOwnedStructure()
+                ||!(level() instanceof ServerLevel server)||server.getEntity(getUUID())!=this||server.getEntity(actualParent.getUUID())!=actualParent
+                ||getVehicle()!=actualParent||!actualParent.getUUID().equals(getParentId())||!actualParent.getContraption().getStabilizedSubContraptions().accepts(this)
+                ||!com.simibubi.create.foundation.utility.LoadedEntityAccess.isReady(server,actualParent.blockPosition()))return;
+        if(stabilizedParentMotion!=null&&!stabilizedParentMotion.parent().equals(actualParent.getUUID()))throw new IllegalStateException("Current stabilized motion belongs to another actual parent");
+        if(isStalled()){
+            if(!wasStalled&&stabilizedParentMotion==null)stabilizedParentMotion=new com.simibubi.create.foundation.utility.StabilizedParentMotion(actualParent.getUUID(),actualParent.getDeltaMovement());
+            if(stabilizedParentMotion==null)throw new IllegalStateException("Frozen current stabilized child lost its actual parent-motion continuation");
+            actualParent.setDeltaMovement(Vec3.ZERO);
+        }else if(stabilizedParentMotion!=null){
+            var consumed=stabilizedParentMotion;stabilizedParentMotion=null;actualParent.setDeltaMovement(consumed.motion());
+        }
+    }
+    @Override public boolean disassemble() { return ContraptionAssemblyGraph.restore(this); }
+    @Override public void stopRiding() {
+        // Native setRemoved invokes stopRiding on passengers during chunk unload as well.
+        // The actual passenger graph was saved already; unloading must never restore its blocks.
+        var vehicle = getVehicle();
+        if (vehicle != null && vehicle.getRemovalReason() != null && !vehicle.getRemovalReason().shouldDestroy()) { super.stopRiding(); return; }
+        if (!level().isClientSide() && isAlive() && contraption != null && !contraption.disassembled && !ContraptionAssemblyGraph.restore(this)) return;
+        super.stopRiding();
+    }
+    @Override protected void addAdditionalSaveData(ValueOutput out) {
+        if(hasActuallyRetiredMountedStructure())nativeCartRetirementPending=true;
+        // A pending post-restoration record owns topology cleanup only. The actual world already
+        // owns its former blocks/actors, so saving/loading a second actor payload would be wrong.
+        if(!nativeCartRetirementPending)super.addAdditionalSaveData(out);
+        if(originalOrientedSource!=null)out.store(com.simibubi.create.foundation.utility.NeoForgeOrientedSource.KEY,com.simibubi.create.foundation.utility.NeoForgeOrientedSource.CODEC,originalOrientedSource);
+        if(originalStabilizedSource!=null)out.store(com.simibubi.create.foundation.utility.NeoForgeStabilizedSource.KEY,com.simibubi.create.foundation.utility.NeoForgeStabilizedSource.CODEC,originalStabilizedSource);
+        if(stabilizedParentMotion!=null)out.store(com.simibubi.create.foundation.utility.StabilizedParentMotion.KEY,com.simibubi.create.foundation.utility.StabilizedParentMotion.CODEC,stabilizedParentMotion);
+        out.putBoolean("NativeCartRetirementPending",nativeCartRetirementPending);out.putBoolean("NativeCartRetirementComplete",nativeCartRetirementComplete); out.putString("InitialOrientation", getInitialOrientation().name()); out.putFloat("Yaw", entityData.get(YAW)); out.putFloat("Pitch", entityData.get(PITCH));
+        if(getMountedCartId()!=null)out.store("MountedCart",UUIDUtil.CODEC,getMountedCartId());if(getCouplingId()!=null)out.store("OnCoupling",UUIDUtil.CODEC,getCouplingId());
+        if (getParentId() != null) out.store("ParentContraption", UUIDUtil.CODEC, getParentId());
+        if (getParentLocation() != null) out.store("ParentBearing", net.minecraft.nbt.CompoundTag.CODEC, getParentLocation().write());
+    }
+    private com.simibubi.create.foundation.utility.NeoForgeOrientedSource originalOrientedSource;
+    private com.simibubi.create.foundation.utility.NeoForgeStabilizedSource originalStabilizedSource;
+    private com.simibubi.create.foundation.utility.StabilizedParentMotion stabilizedParentMotion;
+    @Override protected void readAdditionalSaveData(ValueInput in) {
+        originalOrientedSource=in.read(com.simibubi.create.foundation.utility.NeoForgeOrientedSource.KEY,com.simibubi.create.foundation.utility.NeoForgeOrientedSource.CODEC).orElse(null);
+        originalStabilizedSource=in.read(com.simibubi.create.foundation.utility.NeoForgeStabilizedSource.KEY,com.simibubi.create.foundation.utility.NeoForgeStabilizedSource.CODEC).orElse(null);
+        stabilizedParentMotion=in.read(com.simibubi.create.foundation.utility.StabilizedParentMotion.KEY,com.simibubi.create.foundation.utility.StabilizedParentMotion.CODEC).orElse(null);
+        nativeCartRetirementPending=in.getBooleanOr("NativeCartRetirementPending",false);nativeCartRetirementComplete=in.getBooleanOr("NativeCartRetirementComplete",false);
+        var initial = Direction.valueOf(in.getStringOr("InitialOrientation", "UP").toUpperCase(Locale.ROOT)); entityData.set(INITIAL, initial);
+        setAngles(in.getFloatOr("Yaw", 0), in.getFloatOr("Pitch", 0)); previousYaw = entityData.get(YAW); previousPitch = entityData.get(PITCH);
+        setMountedCartId(in.read("MountedCart",UUIDUtil.CODEC).orElse(null));setCouplingId(in.read("OnCoupling",UUIDUtil.CODEC).orElse(null));
+        var parentId = in.read("ParentContraption", UUIDUtil.CODEC).orElse(null); var parentLocation = in.read("ParentBearing", net.minecraft.nbt.CompoundTag.CODEC).map(StabilizedSubContraptions.Location::read).orElse(null);
+        if ((parentId == null) != (parentLocation == null)) throw new IllegalArgumentException("Incomplete stabilized parent identity");
+        if(stabilizedParentMotion!=null&&(parentId==null||!stabilizedParentMotion.parent().equals(parentId)))throw new IllegalArgumentException("Current stabilized motion lost its genuine actual parent identity");
+        if (parentId != null) setParent(parentId, parentLocation); else entityData.set(PARENT_ID, "");
+        if(!nativeCartRetirementPending)super.readAdditionalSaveData(in);
+    }
 }

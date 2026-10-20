@@ -1,56 +1,22 @@
 package com.simibubi.create.content.schematics.packet;
 
-import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllItems;
-import com.simibubi.create.AllPackets;
-import com.simibubi.create.content.schematics.SchematicInstances;
-import net.createmod.catnip.net.base.ServerboundPacketPayload;
-
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecs;
-import io.netty.buffer.ByteBuf;
+import com.simibubi.create.*;
+import net.fabricmc.fabric.api.networking.v1.*;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.Mirror;
-import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructurePlaceSettings;
 
-public record SchematicSyncPacket(int slot, boolean deployed, BlockPos anchor, Rotation rotation, Mirror mirror) implements ServerboundPacketPayload {
-	public static final StreamCodec<ByteBuf, SchematicSyncPacket> STREAM_CODEC = StreamCodec.composite(
-			ByteBufCodecs.VAR_INT, SchematicSyncPacket::slot,
-			ByteBufCodecs.BOOL, SchematicSyncPacket::deployed,
-			BlockPos.STREAM_CODEC, SchematicSyncPacket::anchor,
-			CatnipStreamCodecs.ROTATION, SchematicSyncPacket::rotation,
-			CatnipStreamCodecs.MIRROR, SchematicSyncPacket::mirror,
-	        SchematicSyncPacket::new
-	);
-
-	public SchematicSyncPacket(int slot, StructurePlaceSettings settings, BlockPos anchor, boolean deployed) {
-		this(slot, deployed, anchor, settings.getRotation(), settings.getMirror());
-	}
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.SYNC_SCHEMATIC;
-	}
-
-	@Override
-	public void handle(ServerPlayer player) {
-		ItemStack stack;
-		if (slot == -1) {
-			stack = player.getMainHandItem();
-		} else {
-			stack = player.getInventory().getItem(slot);
-		}
-		if (!AllItems.SCHEMATIC.isIn(stack)) {
-			return;
-		}
-		stack.set(AllDataComponents.SCHEMATIC_DEPLOYED, deployed);
-		stack.set(AllDataComponents.SCHEMATIC_ANCHOR, anchor);
-		stack.set(AllDataComponents.SCHEMATIC_ROTATION, rotation);
-		stack.set(AllDataComponents.SCHEMATIC_MIRROR, mirror);
-		SchematicInstances.clearHash(stack);
-	}
+/** Native held-slot transform synchronization; source file and owner components are never client supplied. */
+public record SchematicSyncPacket(int slot,boolean deployed,BlockPos anchor,Rotation rotation,Mirror mirror) implements CustomPacketPayload {
+    public SchematicSyncPacket{anchor=anchor.immutable();java.util.Objects.requireNonNull(rotation);java.util.Objects.requireNonNull(mirror);}
+    public SchematicSyncPacket(int slot,StructurePlaceSettings settings,BlockPos anchor,boolean deployed){this(slot,deployed,anchor,settings.getRotation(),settings.getMirror());}
+    public static final Type<SchematicSyncPacket> TYPE=new Type<>(Create.asResource("sync_schematic"));
+    public static final StreamCodec<RegistryFriendlyByteBuf,SchematicSyncPacket> STREAM_CODEC=StreamCodec.of((buffer,packet)->{buffer.writeVarInt(packet.slot);buffer.writeBoolean(packet.deployed);buffer.writeBlockPos(packet.anchor);buffer.writeEnum(packet.rotation);buffer.writeEnum(packet.mirror);},buffer->new SchematicSyncPacket(buffer.readVarInt(),buffer.readBoolean(),buffer.readBlockPos(),buffer.readEnum(Rotation.class),buffer.readEnum(Mirror.class)));
+    public boolean handle(ServerPlayer player){if(player.level().getServer().getPlayerList().getPlayer(player.getUUID())!=player||slot< -1||slot>=player.getInventory().getContainerSize())return false;var stack=slot== -1?player.getMainHandItem():player.getInventory().getItem(slot);if(!stack.is(AllItems.SCHEMATIC))return false;stack.set(AllDataComponents.SCHEMATIC_DEPLOYED,deployed);stack.set(AllDataComponents.SCHEMATIC_ANCHOR,anchor);stack.set(AllDataComponents.SCHEMATIC_ROTATION,rotation);stack.set(AllDataComponents.SCHEMATIC_MIRROR,mirror);stack.remove(AllDataComponents.SCHEMATIC_HASH);player.getInventory().setChanged();return true;}
+    @Override public Type<SchematicSyncPacket> type(){return TYPE;}
+    public static void register(){PayloadTypeRegistry.serverboundPlay().register(TYPE,STREAM_CODEC);ServerPlayNetworking.registerGlobalReceiver(TYPE,(packet,context)->packet.handle(context.player()));}
 }

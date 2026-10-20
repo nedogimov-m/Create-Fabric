@@ -1,59 +1,30 @@
 package com.simibubi.create.content.contraptions;
 
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
-
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
 
+/** Leading block cells for the original directional terrain checks. */
 public abstract class TranslatingContraption extends Contraption {
-
-	protected Set<BlockPos> cachedColliders;
-	protected Direction cachedColliderDirection;
-
-	public Set<BlockPos> getOrCreateColliders(Level world, Direction movementDirection) {
-		if (getBlocks() == null)
-			return Collections.emptySet();
-		if (cachedColliders == null || cachedColliderDirection != movementDirection) {
-			cachedColliderDirection = movementDirection;
-			cachedColliders = createColliders(world, movementDirection);
-		}
-		return cachedColliders;
-	}
-
-	public Set<BlockPos> createColliders(Level world, Direction movementDirection) {
-		Set<BlockPos> colliders = new HashSet<>();
-		for (StructureBlockInfo info : getBlocks().values()) {
-			BlockPos offsetPos = info.pos().relative(movementDirection);
-			if (info.state().getCollisionShape(world, offsetPos)
-				.isEmpty())
-				continue;
-			if (getBlocks().containsKey(offsetPos)
-				&& !getBlocks().get(offsetPos).state().getCollisionShape(world, offsetPos)
-					.isEmpty())
-				continue;
-			colliders.add(info.pos());
-		}
-		return colliders;
-	}
-
-	@Override
-	public void removeBlocksFromWorld(Level world, BlockPos offset) {
-		int count = blocks.size();
-		super.removeBlocksFromWorld(world, offset);
-		if (count != blocks.size()) {
-			cachedColliders = null;
-		}
-	}
-
-	@Override
-	public boolean canBeStabilized(Direction facing, BlockPos localPos) {
-		return AllConfigs.server().kinetics.stabiliseStableContraptions.get();
-	}
-
+    public net.minecraft.world.phys.Vec3 positionAtProgress(float progress){throw new UnsupportedOperationException("This translating structure has no stationary linear actuator progress");}
+    public StructureTransform restorationAtProgress(float progress){return new StructureTransform(BlockPos.containing(positionAtProgress(Math.round(progress))),0,0,0);}
+    private Set<BlockPos> cachedColliders;
+    private Direction cachedDirection;
+    public Set<BlockPos> getOrCreateColliders(Level level,Direction direction){
+        if(cachedColliders==null||cachedDirection!=direction){cachedDirection=direction;cachedColliders=Set.copyOf(createColliders(level,direction));}
+        return cachedColliders;
+    }
+    public Set<BlockPos> createColliders(Level level,Direction direction){
+        var result=new HashSet<BlockPos>();var view=getCollisionLevel();
+        for(var info:blocks.values()){
+            if(info.state().getCollisionShape(view,info.pos()).isEmpty())continue;
+            var next=info.pos().relative(direction);var other=blocks.get(next);
+            if(other!=null&&!other.state().getCollisionShape(view,next).isEmpty())continue;
+            result.add(info.pos().immutable());
+        }return result;
+    }
+    protected void invalidateColliders(){cachedColliders=null;cachedDirection=null;}
+    @Override public boolean canBeStabilized(Direction facing,BlockPos localPos){return ContraptionSettings.stabiliseStableContraptions;}
 }

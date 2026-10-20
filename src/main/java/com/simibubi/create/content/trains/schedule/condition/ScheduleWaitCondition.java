@@ -6,7 +6,7 @@ import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Train;
 import com.simibubi.create.content.trains.schedule.Schedule;
 import com.simibubi.create.content.trains.schedule.ScheduleDataEntry;
-import com.simibubi.create.foundation.codec.CreateStreamCodecs;
+import com.simibubi.create.content.trains.schedule.ScheduleSerialization;
 
 import net.createmod.catnip.data.Pair;
 import net.minecraft.core.HolderLookup;
@@ -14,18 +14,18 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.Level;
 
 public abstract class ScheduleWaitCondition extends ScheduleDataEntry {
-	public static final StreamCodec<RegistryFriendlyByteBuf, ScheduleWaitCondition> STREAM_CODEC = CreateStreamCodecs.ofLegacyNbtWithRegistries(
+	public static final StreamCodec<RegistryFriendlyByteBuf, ScheduleWaitCondition> STREAM_CODEC = ScheduleSerialization.ofLegacyNbtWithRegistries(
 			ScheduleWaitCondition::write, ScheduleWaitCondition::fromTag
 	);
 
 	public abstract boolean tickCompletion(Level level, Train train, CompoundTag context);
 
 	protected void requestStatusToUpdate(CompoundTag context) {
-		context.putInt("StatusVersion", context.getInt("StatusVersion") + 1);
+		context.putInt("StatusVersion", context.getIntOr("StatusVersion", 0) + 1);
 	}
 
 	public final CompoundTag write(HolderLookup.Provider registries) {
@@ -38,9 +38,9 @@ public abstract class ScheduleWaitCondition extends ScheduleDataEntry {
 	}
 
 	public static ScheduleWaitCondition fromTag(HolderLookup.Provider registries, CompoundTag tag) {
-		ResourceLocation location = ResourceLocation.parse(tag.getString("Id"));
+		Identifier location = Identifier.parse(tag.getStringOr("Id", ""));
 		Supplier<? extends ScheduleWaitCondition> supplier = null;
-		for (Pair<ResourceLocation, Supplier<? extends ScheduleWaitCondition>> pair : Schedule.CONDITION_TYPES)
+		for (Pair<Identifier, Supplier<? extends ScheduleWaitCondition>> pair : Schedule.CONDITION_TYPES)
 			if (pair.getFirst()
 				.equals(location))
 				supplier = pair.getSecond();
@@ -53,7 +53,7 @@ public abstract class ScheduleWaitCondition extends ScheduleDataEntry {
 		ScheduleWaitCondition condition = supplier.get();
 		// Left around for migration purposes. Data added in writeAdditional has moved into the "Data" tag
 		condition.readAdditional(registries, tag);
-		CompoundTag data = tag.getCompound("Data");
+		CompoundTag data = tag.getCompoundOrEmpty("Data");
 		condition.readAdditional(registries, data);
 		condition.data = data;
 		return condition;

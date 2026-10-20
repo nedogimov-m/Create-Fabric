@@ -1,0 +1,14 @@
+// Genuine Create6.0.10 Ponder source; native26.3 adaptation.
+package com.simibubi.create.foundation.ponder.element;
+
+import com.simibubi.create.content.kinetics.belt.transport.TransportedItemStack;
+
+import net.createmod.ponder.foundation.element.TrackedElementBase;
+
+public class BeltItemElement extends TrackedElementBase<TransportedItemStack> {
+
+	public BeltItemElement(TransportedItemStack wrapped) {
+		super(wrapped);
+	}
+
+}

@@ -1,0 +1,13 @@
+{
+  "type": "create:crushing",
+  "ingredients": [
+    "#create:stone_types/diorite"
+  ],
+  "processing_time": 350,
+  "results": [
+    {
+      "chance": 0.25,
+      "id": "minecraft:quartz"
+    }
+  ]
+}

@@ -1,72 +1,49 @@
 package com.simibubi.create.content.kinetics.mechanicalArm;
 
-import java.util.Collection;
-
-import com.simibubi.create.AllPackets;
-import net.createmod.catnip.net.base.ClientboundPacketPayload;
-import net.createmod.catnip.net.base.ServerboundPacketPayload;
-
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecs;
-import io.netty.buffer.ByteBuf;
-import net.minecraft.client.player.LocalPlayer;
+import com.simibubi.create.Create;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.ArrayList;
+import java.util.List;
+import net.fabricmc.fabric.api.networking.v1.*;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-
-public record ArmPlacementPacket(ListTag tag, BlockPos pos) implements ServerboundPacketPayload {
-	public static final StreamCodec<FriendlyByteBuf, ArmPlacementPacket> STREAM_CODEC = StreamCodec.composite(
-			CatnipStreamCodecs.COMPOUND_LIST_TAG, ArmPlacementPacket::tag,
-			BlockPos.STREAM_CODEC, ArmPlacementPacket::pos,
-			ArmPlacementPacket::new
-	);
-
-	public ArmPlacementPacket(Collection<ArmInteractionPoint> points, BlockPos pos) {
-		this(new ListTag(), pos);
-
-		for (ArmInteractionPoint point : points) {
-			this.tag.add(point.serialize(pos));
-		}
-	}
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.PLACE_ARM;
-	}
-
-	@Override
-	public void handle(ServerPlayer player) {
-		Level world = player.level();
-		if (!world.isLoaded(pos))
-			return;
-		BlockEntity blockEntity = world.getBlockEntity(pos);
-		if (!(blockEntity instanceof ArmBlockEntity arm))
-			return;
-
-		arm.interactionPointTag = this.tag;
-	}
-
-	public record ClientBoundRequest(BlockPos pos) implements ClientboundPacketPayload {
-		public static final StreamCodec<ByteBuf, ClientBoundRequest> STREAM_CODEC = BlockPos.STREAM_CODEC.map(
-				ClientBoundRequest::new, ClientBoundRequest::pos
-		);
-
-		@Override
-		public PacketTypeProvider getTypeProvider() {
-			return AllPackets.S_PLACE_ARM;
-		}
-
-		@Override
-		@OnlyIn(Dist.CLIENT)
-		public void handle(LocalPlayer player) {
-			ArmInteractionPointHandler.flushSettings(pos);
-		}
-	}
-
+/** Source relative target payload, bound to a real placement's one-use server nonce and placer. */
+public record ArmPlacementPacket(List<ArmInteractionPoint.PointData> points,BlockPos pos,long nonce) implements CustomPacketPayload {
+    public static final Type<ArmPlacementPacket> TYPE=new Type<>(Create.asResource("place_arm"));
+    public static final StreamCodec<RegistryFriendlyByteBuf,ArmPlacementPacket> STREAM_CODEC=StreamCodec.of((buffer,packet)->{
+        buffer.writeBlockPos(packet.pos);buffer.writeLong(packet.nonce);buffer.writeVarInt(packet.points.size());
+        for(var point:packet.points){buffer.writeUtf(point.type().toString(),128);buffer.writeBlockPos(point.pos());buffer.writeBoolean(point.mode()==ArmInteractionPoint.Mode.TAKE);buffer.writeNbt(point.extra());}
+    },buffer->{
+        var pos=buffer.readBlockPos();long nonce=buffer.readLong();int count=buffer.readVarInt();
+        // Every real row needs at least its encoded type, position, mode and NBT bytes.
+        // Bound allocation by this actual native packet, not an arbitrary number of valid points.
+        if(count<0||count>buffer.readableBytes()/12)throw new io.netty.handler.codec.DecoderException("Mechanical arm point count exceeds actual remaining payload");
+        var points=new ArrayList<ArmInteractionPoint.PointData>(count);
+        for(int i=0;i<count;i++){
+            var type=Identifier.parse(buffer.readUtf(128));var relative=buffer.readBlockPos();var mode=buffer.readBoolean()?ArmInteractionPoint.Mode.TAKE:ArmInteractionPoint.Mode.DEPOSIT;
+            var raw=buffer.readNbt(net.minecraft.nbt.NbtAccounter.create(8192));if(!(raw instanceof net.minecraft.nbt.CompoundTag extra))throw new io.netty.handler.codec.DecoderException("Arm target addon data must be a compound");
+            points.add(new ArmInteractionPoint.PointData(type,relative,mode,extra));
+        }
+        return new ArmPlacementPacket(points,pos,nonce);
+    });
+    public ArmPlacementPacket{
+        points=List.copyOf(points);pos=pos.immutable();var positions=new java.util.HashSet<BlockPos>();
+        for(var point:points)if(!positions.add(point.pos()))throw new IllegalArgumentException("Duplicate mechanical arm target location");
+    }
+    @Override public Type<ArmPlacementPacket> type(){return TYPE;}
+    public boolean apply(ServerPlayer player){
+        if(player.isSpectator()||!player.mayBuild()||!player.isWithinBlockInteractionRange(pos,1)||!player.level().mayInteract(player,pos)||!LoadedLevelAccess.isLoaded(player.level(),pos))return false;
+        return LoadedLevelAccess.blockEntity(player.level(),pos) instanceof ArmBlockEntity arm&&arm.acceptPlacement(player,nonce,points);
+    }
+    public record ClientBoundRequest(BlockPos pos,long nonce) implements CustomPacketPayload {
+        public static final Type<ClientBoundRequest> TYPE=new Type<>(Create.asResource("s_place_arm"));
+        public static final StreamCodec<RegistryFriendlyByteBuf,ClientBoundRequest> STREAM_CODEC=StreamCodec.of((buffer,packet)->{buffer.writeBlockPos(packet.pos);buffer.writeLong(packet.nonce);},buffer->new ClientBoundRequest(buffer.readBlockPos(),buffer.readLong()));
+        public ClientBoundRequest{pos=pos.immutable();}
+        @Override public Type<ClientBoundRequest> type(){return TYPE;}
+    }
 }

@@ -11,7 +11,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.neoforge.fluids.FluidStack;
+import com.simibubi.create.foundation.fluid.FluidStack;
 
 
 /**
@@ -33,12 +33,12 @@ public interface BlockSpoutingBehaviour {
 	 */
 	@Nullable
 	static BlockSpoutingBehaviour get(Level level, BlockPos pos) {
-		BlockState state = level.getBlockState(pos);
+		BlockState state = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockState(level,pos);
 		BlockSpoutingBehaviour byBlock = BY_BLOCK.get(state.getBlock());
 		if (byBlock != null)
 			return byBlock;
 
-		BlockEntity be = level.getBlockEntity(pos);
+		BlockEntity be = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,pos);
 		if (be == null)
 			return null;
 
@@ -58,7 +58,7 @@ public interface BlockSpoutingBehaviour {
 	 * @param spout          The spout block entity that is calling this
 	 * @param availableFluid A copy of the fluidStack that is available, modifying this will do nothing, return the amount to be subtracted instead
 	 * @param simulate       Whether the spout is testing or actually performing this behaviour
-	 * @return The amount filled into the block, 0 to idle/cancel
+     * @return The amount in Fabric fluid units (81 units = 1 mB), 0 to idle/cancel
 	 */
-	int fillBlock(Level level, BlockPos pos, SpoutBlockEntity spout, FluidStack availableFluid, boolean simulate);
+	long fillBlock(Level level, BlockPos pos, SpoutBlockEntity spout, FluidStack availableFluid, boolean simulate);
 }

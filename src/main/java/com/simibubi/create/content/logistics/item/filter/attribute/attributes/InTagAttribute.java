@@ -11,7 +11,6 @@ import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttribute
 import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttributeType;
 
 import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -26,7 +25,7 @@ public record InTagAttribute(TagKey<Item> tag) implements ItemAttribute {
 			.xmap(InTagAttribute::new, InTagAttribute::tag)
 			.fieldOf("value");
 
-	public static final StreamCodec<ByteBuf, InTagAttribute> STREAM_CODEC = CatnipStreamCodecBuilders.tagKey(Registries.ITEM)
+	public static final StreamCodec<ByteBuf, InTagAttribute> STREAM_CODEC = net.minecraft.resources.Identifier.STREAM_CODEC.map(id->TagKey.create(Registries.ITEM,id),TagKey::location)
 		.map(InTagAttribute::new, InTagAttribute::tag);
 
 	@Override
@@ -57,7 +56,7 @@ public record InTagAttribute(TagKey<Item> tag) implements ItemAttribute {
 
 		@Override
 		public List<ItemAttribute> getAllAttributes(ItemStack stack, Level level) {
-			return stack.getTags()
+			return stack.getItem().builtInRegistryHolder().tags()
 				.map(InTagAttribute::new)
 				.collect(Collectors.toList());
 		}

@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/bar_of_chocolate",
+    "particle": "create:item/bar_of_chocolate"
+  }
+}

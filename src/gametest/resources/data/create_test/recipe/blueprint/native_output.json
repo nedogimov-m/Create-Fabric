@@ -1,0 +1,6 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": ["minecraft:milk_bucket"],
+  "result": {"id": "create_test:native_blueprint_output", "count": 4}
+}

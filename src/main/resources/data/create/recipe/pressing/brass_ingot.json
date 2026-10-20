@@ -1,0 +1,11 @@
+{
+  "type": "create:pressing",
+  "ingredients": [
+    "#c:ingots/brass"
+  ],
+  "results": [
+    {
+      "id": "create:brass_sheet"
+    }
+  ]
+}

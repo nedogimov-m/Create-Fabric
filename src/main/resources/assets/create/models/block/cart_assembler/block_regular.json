@@ -1,6 +1,7 @@
 {
-	"parent": "create:block/cart_assembler/block",
-    "textures": {
-        "rail": "block/rail"
-    }
+  "parent": "create:block/cart_assembler/block",
+  "textures": {
+    "rail": "block/rail",
+    "particle": "block/rail"
+  }
 }

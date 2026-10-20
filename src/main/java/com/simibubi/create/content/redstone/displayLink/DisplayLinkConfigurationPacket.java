@@ -1,65 +1,21 @@
 package com.simibubi.create.content.redstone.displayLink;
 
-import com.simibubi.create.AllPackets;
-import com.simibubi.create.api.behaviour.display.DisplaySource;
-import com.simibubi.create.foundation.networking.BlockEntityConfigurationPacket;
-
-import io.netty.buffer.ByteBuf;
-
+import com.simibubi.create.Create;
+import net.fabricmc.fabric.api.networking.v1.*;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.nbt.*;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
 
-public class DisplayLinkConfigurationPacket extends BlockEntityConfigurationPacket<DisplayLinkBlockEntity> {
-	public static final StreamCodec<ByteBuf, DisplayLinkConfigurationPacket> STREAM_CODEC = StreamCodec.composite(
-			BlockPos.STREAM_CODEC, packet -> packet.pos,
-			ByteBufCodecs.COMPOUND_TAG, packet -> packet.configData,
-			ByteBufCodecs.VAR_INT, packet -> packet.targetLine,
-			DisplayLinkConfigurationPacket::new
-	);
-
-	private final CompoundTag configData;
-	private final int targetLine;
-
-	public DisplayLinkConfigurationPacket(BlockPos pos, CompoundTag configData, int targetLine) {
-		super(pos);
-		this.configData = configData;
-		this.targetLine = targetLine;
-	}
-
-	@Override
-	protected void applySettings(ServerPlayer player, DisplayLinkBlockEntity be) {
-		be.targetLine = targetLine;
-
-		if (!configData.contains("Id")) {
-			be.notifyUpdate();
-			return;
-		}
-
-		ResourceLocation id = ResourceLocation.tryParse(configData.getString("Id"));
-		DisplaySource source = DisplaySource.get(id);
-		if (source == null) {
-			be.notifyUpdate();
-			return;
-		}
-
-		if (be.activeSource == null || be.activeSource != source) {
-			be.activeSource = source;
-			be.setSourceConfig(configData.copy());
-		} else {
-			be.getSourceConfig()
-				.merge(configData);
-		}
-
-		be.updateGatheredData();
-		be.notifyUpdate();
-	}
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.CONFIGURE_DATA_GATHERER;
-	}
+/** Real bounded config packet, bound to the exact open native menu and actual owner identity. */
+public record DisplayLinkConfigurationPacket(int containerId,BlockPos pos,CompoundTag configData,int targetLine)implements CustomPacketPayload {
+    public static final Type<DisplayLinkConfigurationPacket> TYPE=new Type<>(Create.asResource("configure_data_gatherer"));
+    public static final StreamCodec<RegistryFriendlyByteBuf,DisplayLinkConfigurationPacket> STREAM_CODEC=StreamCodec.of((buffer,packet)->{buffer.writeContainerId(packet.containerId);buffer.writeBlockPos(packet.pos);buffer.writeNbt(packet.configData);buffer.writeVarInt(packet.targetLine);},buffer->{int menu=buffer.readContainerId();var pos=buffer.readBlockPos();var raw=buffer.readNbt(NbtAccounter.create(8192));if(!(raw instanceof CompoundTag tag))throw new io.netty.handler.codec.DecoderException("Display link configuration must be a compound");return new DisplayLinkConfigurationPacket(menu,pos,tag,buffer.readVarInt());});
+    public DisplayLinkConfigurationPacket{pos=pos.immutable();configData=configData.copy();if(configData.sizeInBytes()>8192)throw new IllegalArgumentException("Display configuration exceeds8KiB");}
+    @Override public Type<DisplayLinkConfigurationPacket> type(){return TYPE;}
+    public boolean apply(ServerPlayer player){if(!(player.containerMenu instanceof DisplayLinkMenu menu)||menu.containerId!=containerId||!menu.opening().pos().equals(pos)||!menu.stillValid(player)||menu.owner()==null)return false;return menu.owner().configure(configData,targetLine);}
+    private static boolean registered;
+    public static void register(){if(registered)return;registered=true;PayloadTypeRegistry.serverboundPlay().register(TYPE,STREAM_CODEC);ServerPlayNetworking.registerGlobalReceiver(TYPE,(packet,context)->packet.apply(context.player()));}
 }

@@ -1,100 +1,30 @@
 package com.simibubi.create.content.logistics.packagePort.frogport;
-
-import net.minecraft.world.ItemInteractionResult;
-
-import org.jetbrains.annotations.Nullable;
-
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-import com.simibubi.create.foundation.advancement.AdvancementBehaviour;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.util.Mth;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.LivingEntity;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.world.*;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.item.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.material.PushReaction;
 import net.minecraft.world.level.pathfinder.PathComputationType;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
-
-public class FrogportBlock extends Block implements IBE<FrogportBlockEntity>, IWrenchable {
-
-	public FrogportBlock(Properties pProperties) {
-		super(pProperties);
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState pState, BlockGetter pLevel, BlockPos pPos, CollisionContext pContext) {
-		return AllShapes.PACKAGE_PORT;
-	}
-
-	@Override
-	public @Nullable PushReaction getPistonPushReaction(BlockState state) {
-		return PushReaction.NORMAL;
-	}
-
-	@Override
-	public void setPlacedBy(Level pLevel, BlockPos pPos, BlockState pState, LivingEntity pPlacer, ItemStack pStack) {
-		super.setPlacedBy(pLevel, pPos, pState, pPlacer, pStack);
-		if (pPlacer == null)
-			return;
-		AdvancementBehaviour.setPlacedBy(pLevel, pPos, pPlacer);
-		withBlockEntityDo(pLevel, pPos, be -> {
-			Vec3 diff = VecHelper.getCenterOf(pPos)
-				.subtract(pPlacer.position());
-			be.passiveYaw = (float) (Mth.atan2(diff.x, diff.z) * Mth.RAD_TO_DEG);
-			be.passiveYaw = Math.round(be.passiveYaw / 11.25f) * 11.25f;
-			be.notifyUpdate();
-		});
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		return onBlockEntityUseItemOn(level, pos, be -> be.use(player));
-	}
-
-	@Override
-	public Class<FrogportBlockEntity> getBlockEntityClass() {
-		return FrogportBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends FrogportBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.PACKAGE_FROGPORT.get();
-	}
-
-	@Override
-	public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pMovedByPiston) {
-		IBE.onRemove(pState, pLevel, pPos, pNewState);
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	public boolean hasAnalogOutputSignal(BlockState pState) {
-		return true;
-	}
-
-	@Override
-	public int getAnalogOutputSignal(BlockState pState, Level pLevel, BlockPos pPos) {
-		return getBlockEntityOptional(pLevel, pPos).map(pbe -> pbe.getComparatorOutput())
-			.orElse(0);
-	}
-
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
+public final class FrogportBlock extends BaseEntityBlock {
+    private static final VoxelShape SHAPE=Shapes.or(box(0,0,0,16,4,16),box(2,2,2,14,14,14));
+    public FrogportBlock(Properties properties){super(properties.strength(3,6).requiresCorrectToolForDrops().sound(SoundType.NETHERITE_BLOCK).mapColor(net.minecraft.world.level.material.MapColor.TERRACOTTA_BLUE).noOcclusion());}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new FrogportBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity>BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.PACKAGE_FROGPORT,(l,p,s,port)->port.tick());}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return SHAPE;}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override protected boolean isPathfindable(BlockState state,PathComputationType type){return false;}
+    @Override public void setPlacedBy(Level level,BlockPos pos,BlockState state,LivingEntity placer,ItemStack stack){super.setPlacedBy(level,pos,state,placer,stack);if(placer!=null&&LoadedLevelAccess.blockEntity(level,pos) instanceof FrogportBlockEntity port){var diff=Vec3.atCenterOf(pos).subtract(placer.position());port.sourceAdvancements.place(placer);port.passiveYaw=Math.round((float)Math.toDegrees(Math.atan2(diff.x,diff.z))/11.25f)*11.25f;port.notifyUpdate();if(!level.isClientSide()&&placer instanceof Player player)com.simibubi.create.content.logistics.packagePort.PackagePortPlacement.placed(player,port);}}
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){return use(level,pos,player);}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){if(stack.is(com.simibubi.create.AllItems.WRENCH))return InteractionResult.PASS;return use(level,pos,player);}
+    private InteractionResult use(Level level,BlockPos pos,Player player){if(player.isSpectator()||!player.mayBuild()||!level.mayInteract(player,pos))return InteractionResult.PASS;return LoadedLevelAccess.blockEntity(level,pos) instanceof FrogportBlockEntity port&&port.use(player)?InteractionResult.SUCCESS:InteractionResult.PASS;}
+    @Override protected boolean hasAnalogOutputSignal(BlockState state){return true;}
+    @Override protected int getAnalogOutputSignal(BlockState state,Level level,BlockPos pos,Direction side){return LoadedLevelAccess.blockEntity(level,pos) instanceof FrogportBlockEntity port?port.getComparatorOutput():0;}
 }

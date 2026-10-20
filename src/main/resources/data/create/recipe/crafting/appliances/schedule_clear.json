@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "create:schedule"
+  ],
+  "result": {
+    "id": "create:schedule",
+    "count": 1
+  }
+}

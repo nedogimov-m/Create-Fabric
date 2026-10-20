@@ -1,57 +1,13 @@
 package com.simibubi.create.content.logistics.chute;
 
-import com.simibubi.create.foundation.block.ProperWaterloggedBlock;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluids;
 
-public class ChuteItem extends BlockItem {
-
-	public ChuteItem(Block p_i48527_1_, Properties p_i48527_2_) {
-		super(p_i48527_1_, p_i48527_2_);
-	}
-
-	@Override
-	public InteractionResult place(BlockPlaceContext context) {
-		Direction face = context.getClickedFace();
-		BlockPos placedOnPos = context.getClickedPos()
-			.relative(face.getOpposite());
-		Level world = context.getLevel();
-		BlockState placedOnState = world.getBlockState(placedOnPos);
-
-		if (!AbstractChuteBlock.isChute(placedOnState) || context.isSecondaryUseActive())
-			return super.place(context);
-		if (face.getAxis()
-			.isVertical())
-			return super.place(context);
-
-		BlockPos correctPos = context.getClickedPos()
-			.above();
-
-		BlockState blockState = world.getBlockState(correctPos);
-		if (blockState.canBeReplaced())
-			context = BlockPlaceContext.at(context, correctPos, face);
-		else {
-			if (!(blockState.getBlock() instanceof ChuteBlock block) || world.isClientSide)
-				return InteractionResult.FAIL;
-			if (block.getFacing(blockState) == Direction.DOWN) {
-				world.setBlockAndUpdate(correctPos,
-					ProperWaterloggedBlock.withWater(world,
-						block.updateChuteState(blockState.setValue(ChuteBlock.FACING, face),
-							world.getBlockState(correctPos.above()), world, correctPos),
-						correctPos));
-				return InteractionResult.SUCCESS;
-			}
-			return InteractionResult.FAIL;
-		}
-
-		return super.place(context);
-	}
-
+public final class ChuteItem extends BlockItem {
+    public ChuteItem(ChuteBlock block,Properties properties){super(block,properties);}
+    @Override public InteractionResult place(BlockPlaceContext context){var face=context.getClickedFace();var placedOn=context.getClickedPos().relative(face.getOpposite());var level=context.getLevel();if(!AbstractChuteBlock.isChute(LoadedLevelAccess.blockState(level,placedOn))||context.isSecondaryUseActive()||face.getAxis().isVertical())return super.place(context);var correct=context.getClickedPos().above();var state=LoadedLevelAccess.blockState(level,correct);if(state.canBeReplaced())return super.place(BlockPlaceContext.at(context,correct,face));if(!(state.getBlock() instanceof ChuteBlock chute)||level.isClientSide())return InteractionResult.FAIL;if(chute.getFacing(state)!=Direction.DOWN)return InteractionResult.FAIL;level.setBlockAndUpdate(correct,chute.updateChuteState(state.setValue(ChuteBlock.FACING,face),LoadedLevelAccess.blockState(level,correct.above()),level,correct).setValue(ChuteBlock.WATERLOGGED,level.getFluidState(correct).getType()==Fluids.WATER));return InteractionResult.SUCCESS;}
 }

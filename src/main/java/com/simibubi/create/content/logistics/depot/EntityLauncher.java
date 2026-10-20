@@ -1,6 +1,6 @@
 package com.simibubi.create.content.logistics.depot;
 
-import net.createmod.catnip.math.VecHelper;
+import com.simibubi.create.foundation.utility.SourceVectorMath;
 import net.createmod.catnip.math.AngleHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -34,7 +34,7 @@ public class EntityLauncher {
 
 	public void applyMotion(Entity entity, Direction facing) {
 		Vec3 motionVec = new Vec3(0, yMotion, xMotion);
-		motionVec = VecHelper.rotate(motionVec, AngleHelper.horizontalAngle(facing), Axis.Y);
+		motionVec = SourceVectorMath.rotate(motionVec, AngleHelper.horizontalAngle(facing), Axis.Y);
 		entity.setDeltaMovement(motionVec.x * .91, motionVec.y * .98, motionVec.z * .91);
 	}
 
@@ -60,12 +60,12 @@ public class EntityLauncher {
 
 		Vec3 vec = new Vec3(0, yt + (verticalDistance - yt) * correctionStrength * 0.5f,
 			xt + (horizontalDistance - xt) * correctionStrength);
-		return VecHelper.rotate(vec, 180 + AngleHelper.horizontalAngle(d), Axis.Y)
+		return SourceVectorMath.rotate(vec, 180 + AngleHelper.horizontalAngle(d), Axis.Y)
 			.add(start);
 	}
 
 	public Vec3 getGlobalVelocity(double t, Direction d, BlockPos launcher) {
-		return VecHelper.rotate(new Vec3(0, dy(t), dx(t)), 180 + AngleHelper.horizontalAngle(d), Axis.Y);
+		return SourceVectorMath.rotate(new Vec3(0, dy(t), dx(t)), 180 + AngleHelper.horizontalAngle(d), Axis.Y);
 	}
 
 	public float x(double t) {

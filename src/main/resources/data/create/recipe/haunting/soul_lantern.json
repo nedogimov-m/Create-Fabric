@@ -1,0 +1,11 @@
+{
+  "type": "create:haunting",
+  "ingredients": [
+    "minecraft:lantern"
+  ],
+  "results": [
+    {
+      "id": "minecraft:soul_lantern"
+    }
+  ]
+}

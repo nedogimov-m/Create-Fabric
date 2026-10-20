@@ -1,13 +1,13 @@
 package com.simibubi.create.infrastructure.worldgen;
 
 import com.simibubi.create.content.decoration.palettes.AllPaletteStoneTypes;
-import com.tterrag.registrate.util.nullness.NonNullSupplier;
+import java.util.function.Supplier;
 
 import net.minecraft.world.level.block.Blocks;
 
 public class AllLayerPatterns {
 
-	public static final NonNullSupplier<LayerPattern>
+	public static final Supplier<LayerPattern>
 
 	CINNABAR = () -> LayerPattern.builder()
 		.layer(l -> l.weight(2)
@@ -25,7 +25,7 @@ public class AllLayerPatterns {
 			.size(1, 2))
 		.build();
 
-	public static final NonNullSupplier<LayerPattern> MAGNETITE = () -> LayerPattern.builder()
+	public static final Supplier<LayerPattern> MAGNETITE = () -> LayerPattern.builder()
 		.layer(l -> l.weight(2)
 			.block(AllPaletteStoneTypes.ASURINE.getBaseBlock())
 			.size(2, 5))
@@ -41,7 +41,7 @@ public class AllLayerPatterns {
 			.size(1, 2))
 		.build();
 
-	public static final NonNullSupplier<LayerPattern> OCHRESTONE = () -> LayerPattern.builder()
+	public static final Supplier<LayerPattern> OCHRESTONE = () -> LayerPattern.builder()
 		.layer(l -> l.weight(2)
 			.block(AllPaletteStoneTypes.OCHRUM.getBaseBlock())
 			.size(2, 5))
@@ -54,7 +54,7 @@ public class AllLayerPatterns {
 			.size(1, 2))
 		.build();
 
-	public static final NonNullSupplier<LayerPattern> MALACHITE = () -> LayerPattern.builder()
+	public static final Supplier<LayerPattern> MALACHITE = () -> LayerPattern.builder()
 		.layer(l -> l.weight(4)
 			.block(AllPaletteStoneTypes.VERIDIUM.getBaseBlock())
 			.size(2, 5))
@@ -70,7 +70,7 @@ public class AllLayerPatterns {
 			.size(1, 2))
 		.build();
 
-	public static final NonNullSupplier<LayerPattern> SCORIA = () -> LayerPattern.builder()
+	public static final Supplier<LayerPattern> SCORIA = () -> LayerPattern.builder()
 		.layer(l -> l.weight(2)
 			.block(AllPaletteStoneTypes.SCORIA.getBaseBlock())
 			.size(2, 5))
@@ -86,7 +86,7 @@ public class AllLayerPatterns {
 			.size(1, 2))
 		.build();
 
-	public static final NonNullSupplier<LayerPattern> LIMESTONE = () -> LayerPattern.builder()
+	public static final Supplier<LayerPattern> LIMESTONE = () -> LayerPattern.builder()
 		.layer(l -> l.weight(1)
 			.passiveBlock())
 		.layer(l -> l.weight(2)
@@ -98,7 +98,7 @@ public class AllLayerPatterns {
 			.size(2, 4))
 		.build();
 
-	public static final NonNullSupplier<LayerPattern> SCORIA_NETHER = () -> LayerPattern.builder()
+	public static final Supplier<LayerPattern> SCORIA_NETHER = () -> LayerPattern.builder()
 		.inNether()
 		.layer(l -> l.weight(1)
 			.passiveBlock())
@@ -114,7 +114,7 @@ public class AllLayerPatterns {
 			.size(2, 3))
 		.build();
 
-	public static final NonNullSupplier<LayerPattern> SCORCHIA_NETHER = () -> LayerPattern.builder()
+	public static final Supplier<LayerPattern> SCORCHIA_NETHER = () -> LayerPattern.builder()
 		.inNether()
 		.layer(l -> l.weight(4)
 			.passiveBlock())

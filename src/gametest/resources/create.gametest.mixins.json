@@ -1,0 +1,31 @@
+{
+  "required": true,
+  "package": "com.simibubi.create.test.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "GameTestEntityPreparationMixin",
+    "GameTestOriginMixin",
+    "GameTestChunkCacheAccessor",
+    "GameTestEntityLoadStateAccessor",
+    "GameTestServerPreparationPacingMixin",
+    "PortalFrameWriteFaultMixin",
+    "NativeBarrelSaveFaultMixin",
+    "PostboxSelectionAccessor",
+    "GameTestHelperNativeInfoAccessor",
+    "BlueprintAdmissionFaultMixin",
+    "BlueprintEarlySaveFaultMixin",
+    "AssemblyBindingBoundsFaultMixin",
+    "CartNativeCreationObservationMixin",
+    "LegacyMaterialAdmissionFaultMixin",
+    "LegacyMaterialEarlySaveFaultMixin",
+    "LegacyMaterialDestroyFaultMixin",
+    "CarriagePassengerRemovalObservationMixin",
+    "CarriageNativeStorageObservationMixin",
+    "CarriageNativeUnloadObservationMixin",
+    "StationMapStorageAccessor",
+    "GameTestBatchSizeMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

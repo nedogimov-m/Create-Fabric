@@ -1,6 +1,6 @@
 package com.simibubi.create.content.kinetics.mechanicalArm;
 
-import net.createmod.catnip.math.VecHelper;
+import com.simibubi.create.content.contraptions.StructureTransform;
 import net.createmod.catnip.math.AngleHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -10,12 +10,12 @@ import net.minecraft.world.phys.Vec3;
 
 public class ArmAngleTarget {
 
-	static final ArmAngleTarget NO_TARGET = new ArmAngleTarget();
+	public static final ArmAngleTarget NO_TARGET = new ArmAngleTarget();
 
-	float baseAngle;
-	float lowerArmAngle;
-	float upperArmAngle;
-	float headAngle;
+	public float baseAngle;
+	public float lowerArmAngle;
+	public float upperArmAngle;
+	public float headAngle;
 
 	private ArmAngleTarget() {
 		lowerArmAngle = 135;
@@ -25,11 +25,11 @@ public class ArmAngleTarget {
 
 	public ArmAngleTarget(BlockPos armPos, Vec3 pointTarget, Direction clawFacing, boolean ceiling) {
 		Vec3 target = pointTarget;
-		Vec3 origin = VecHelper.getCenterOf(armPos)
+		Vec3 origin = Vec3.atCenterOf(armPos)
 			.add(0, ceiling ? -6 / 16f : 6 / 16f, 0);
 		Vec3 clawTarget = target;
 		target = target.add(Vec3.atLowerCornerOf(clawFacing.getOpposite()
-			.getNormal())
+			.getUnitVec3i())
 			.scale(.5f));
 
 		Vec3 diff = target.subtract(origin);
@@ -53,9 +53,9 @@ public class ArmAngleTarget {
 		float diffLength2 = diffLength * diffLength;
 
 		float alphaRatio = (-b2 + a2 + diffLength2) / (2 * a * diffLength);
-		float alpha = AngleHelper.deg(Math.acos(alphaRatio)) + alphaOffset;
+		float alpha = AngleHelper.deg(Math.acos(Mth.clamp(alphaRatio,-1,1))) + alphaOffset;
 		float betaRatio = (-diffLength2 + a2 + b2) / (2 * b * a);
-		float beta = AngleHelper.deg(Math.acos(betaRatio));
+		float beta = AngleHelper.deg(Math.acos(Mth.clamp(betaRatio,-1,1)));
 
 		if (Float.isNaN(alpha))
 			alpha = 0;
@@ -63,10 +63,10 @@ public class ArmAngleTarget {
 			beta = 0;
 
 		Vec3 headPos = new Vec3(0, 0, 0);
-		headPos = VecHelper.rotate(headPos.add(0, b, 0), beta + 180, Axis.X);
-		headPos = VecHelper.rotate(headPos.add(0, a, 0), alpha - 90, Axis.X);
-		headPos = VecHelper.rotate(headPos, baseAngle, Axis.Y);
-		headPos = VecHelper.rotate(headPos, ceiling ? 180 : 0, Axis.X);
+		headPos = StructureTransform.rotate(headPos.add(0, b, 0), beta + 180, Axis.X);
+		headPos = StructureTransform.rotate(headPos.add(0, a, 0), alpha - 90, Axis.X);
+		headPos = StructureTransform.rotate(headPos, baseAngle, Axis.Y);
+		headPos = StructureTransform.rotate(headPos, ceiling ? 180 : 0, Axis.X);
 		headPos = headPos.add(origin);
 		Vec3 headDiff = clawTarget.subtract(headPos);
 

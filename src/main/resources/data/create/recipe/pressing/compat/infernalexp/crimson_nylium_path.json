@@ -1,0 +1,19 @@
+{
+  "type": "create:pressing",
+  "ingredients": [
+    "minecraft:crimson_nylium"
+  ],
+  "results": [
+    {
+      "id": "infernalexp:crimson_nylium_path"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "infernalexp"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "com.simibubi.create.test.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": ["PonderFanAirFlowExtraObserverMixin"],
+  "injectors": {"defaultRequire": 1}
+}

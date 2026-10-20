@@ -4,6 +4,10 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 public class Matrix3d {
+    public Matrix3d asQuaternion(org.joml.Quaternionfc value){
+        var x=value.transform(new org.joml.Vector3d(1,0,0));var y=value.transform(new org.joml.Vector3d(0,1,0));var z=value.transform(new org.joml.Vector3d(0,0,1));
+        m00=x.x;m10=x.y;m20=x.z;m01=y.x;m11=y.y;m21=y.z;m02=z.x;m12=z.y;m22=z.z;return this;
+    }
 
 	double m00, m01, m02;
 	double m10, m11, m12;
@@ -20,8 +24,8 @@ public class Matrix3d {
 		if (radians == 0)
 			return this;
 
-		double s = Mth.sin(radians);
-		double c = Mth.cos(radians);
+		double s = Math.sin(radians);
+		double c = Math.cos(radians);
 		m22 = m11 = c;
 		m21 = s;
 		m12 = -s;
@@ -33,8 +37,8 @@ public class Matrix3d {
 		if (radians == 0)
 			return this;
 
-		double s = Mth.sin(radians);
-		double c = Mth.cos(radians);
+		double s = Math.sin(radians);
+		double c = Math.cos(radians);
 		m00 = m22 = c;
 		m02 = s;
 		m20 = -s;
@@ -46,8 +50,8 @@ public class Matrix3d {
 		if (radians == 0)
 			return this;
 
-		double s = Mth.sin(radians);
-		double c = Mth.cos(radians);
+		double s = Math.sin(radians);
+		double c = Math.cos(radians);
 		m00 = m11 = c;
 		m01 = -s;
 		m10 = s;

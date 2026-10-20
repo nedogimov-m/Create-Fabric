@@ -1,322 +1,116 @@
 package com.simibubi.create.content.contraptions.mounted;
 
-import java.util.List;
-import java.util.UUID;
-
-import com.simibubi.create.AllAttachmentTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.content.contraptions.AssemblyException;
-import com.simibubi.create.content.contraptions.IDisplayAssemblyExceptions;
-import com.simibubi.create.content.contraptions.OrientedContraptionEntity;
-import com.simibubi.create.content.contraptions.minecart.CouplingHandler;
-import com.simibubi.create.content.contraptions.minecart.capability.MinecartController;
+import com.simibubi.create.*;
+import com.simibubi.create.content.contraptions.*;
+import com.simibubi.create.content.contraptions.minecart.*;
+import com.simibubi.create.content.contraptions.minecart.capability.*;
 import com.simibubi.create.content.redstone.rail.ControllerRailBlock;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.CenteredSideValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.INamedIconOptions;
-import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollOptionBehaviour;
-import com.simibubi.create.foundation.gui.AllIcons;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.lang.Lang;
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.Vec3i;
+import com.simibubi.create.foundation.utility.*;
+import java.lang.ref.WeakReference;
+import java.util.*;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.vehicle.AbstractMinecart;
-import net.minecraft.world.entity.vehicle.MinecartFurnace;
+import net.minecraft.world.entity.vehicle.minecart.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.RailShape;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.Vec3;
 
-public class CartAssemblerBlockEntity extends SmartBlockEntity implements IDisplayAssemblyExceptions {
-	private static final int assemblyCooldown = 8;
+/** Source eight-tick assembly action/cooldown and three modes, on genuine reserved native forest owners. */
+public final class CartAssemblerBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity {
+    public enum CartMovementMode { ROTATE,ROTATE_PAUSED,ROTATION_LOCKED }
+    public final com.simibubi.create.foundation.advancement.PrerequisiteAdvancements.Owner sourceAdvancements=new com.simibubi.create.foundation.advancement.PrerequisiteAdvancements.Owner(this,"contraption_actors");
+    private CartMovementMode movementMode=CartMovementMode.ROTATE;
+    private int ticksSinceMinecartUpdate=8;
+    private WeakReference<AbstractMinecart> cartToAssemble=new WeakReference<>(null);
+    private AssemblyException lastException;
+    private CompoundTag savedError;
+    public CartAssemblerBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.CART_ASSEMBLER,pos,state);}
+    public CartMovementMode getMovementMode(){return movementMode;}
+    public void setMovementMode(CartMovementMode mode){movementMode=Objects.requireNonNull(mode);changed();}
+    public AssemblyException getLastAssemblyException(){return lastException;}
+    public void assembleNextTick(AbstractMinecart cart){if(cartToAssemble.get()==null)cartToAssemble=new WeakReference<>(cart);}
+    public boolean isMinecartUpdateValid(){return ticksSinceMinecartUpdate>=8;}
+    public void resetTicksSinceMinecartUpdate(){ticksSinceMinecartUpdate=0;}
+    private void changed(){setChanged();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS);}
+    public static void tick(Level world,BlockPos pos,BlockState state,CartAssemblerBlockEntity assembler){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(world, pos, state, assembler)) {
+            if (!createTick.shouldTick()) return;
 
-	protected ScrollOptionBehaviour<CartMovementMode> movementMode;
-	private int ticksSinceMinecartUpdate;
-	protected AssemblyException lastException;
-	protected AbstractMinecart cartToAssemble;
-
-	public CartAssemblerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		ticksSinceMinecartUpdate = assemblyCooldown;
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		if (ticksSinceMinecartUpdate < assemblyCooldown) {
-			ticksSinceMinecartUpdate++;
-		}
-
-		tryAssemble(cartToAssemble);
-		cartToAssemble = null;
-	}
-
-	public void tryAssemble(AbstractMinecart cart) {
-		if (cart == null)
-			return;
-
-		if (!isMinecartUpdateValid())
-			return;
-		resetTicksSinceMinecartUpdate();
-
-		BlockState state = level.getBlockState(worldPosition);
-		if (!AllBlocks.CART_ASSEMBLER.has(state))
-			return;
-		CartAssemblerBlock block = (CartAssemblerBlock) state.getBlock();
-
-		CartAssemblerBlock.CartAssemblerAction action = CartAssemblerBlock.getActionForCart(state, cart);
-		if (action.shouldAssemble())
-			assemble(level, worldPosition, cart);
-		if (action.shouldDisassemble())
-			disassemble(level, worldPosition, cart);
-		if (action == CartAssemblerBlock.CartAssemblerAction.ASSEMBLE_ACCELERATE) {
-			if (cart.getDeltaMovement()
-				.length() > 1 / 128f) {
-				Direction facing = cart.getMotionDirection();
-				RailShape railShape = state.getValue(CartAssemblerBlock.RAIL_SHAPE);
-				for (Direction d : Iterate.directionsInAxis(railShape == RailShape.EAST_WEST ? Axis.X : Axis.Z))
-					if (level.getBlockState(worldPosition.relative(d))
-						.isRedstoneConductor(level, worldPosition.relative(d)))
-						facing = d.getOpposite();
-
-				float speed = block.getRailMaxSpeed(state, level, worldPosition, cart);
-				cart.setDeltaMovement(facing.getStepX() * speed, facing.getStepY() * speed, facing.getStepZ() * speed);
-			}
-		}
-		if (action == CartAssemblerBlock.CartAssemblerAction.ASSEMBLE_ACCELERATE_DIRECTIONAL) {
-			Vec3i accelerationVector =
-				ControllerRailBlock.getAccelerationVector(AllBlocks.CONTROLLER_RAIL.getDefaultState()
-					.setValue(ControllerRailBlock.SHAPE, state.getValue(CartAssemblerBlock.RAIL_SHAPE))
-					.setValue(ControllerRailBlock.BACKWARDS, state.getValue(CartAssemblerBlock.BACKWARDS)));
-			float speed = block.getRailMaxSpeed(state, level, worldPosition, cart);
-			cart.setDeltaMovement(Vec3.atLowerCornerOf(accelerationVector)
-				.scale(speed));
-		}
-		if (action == CartAssemblerBlock.CartAssemblerAction.DISASSEMBLE_BRAKE) {
-			Vec3 diff = VecHelper.getCenterOf(worldPosition)
-				.subtract(cart.position());
-			cart.setDeltaMovement(diff.x / 16f, 0, diff.z / 16f);
-		}
-	}
-
-	protected void assemble(Level world, BlockPos pos, AbstractMinecart cart) {
-		if (!cart.getPassengers().isEmpty())
-			return;
-
-		MinecartController controller = cart.getData(AllAttachmentTypes.MINECART_CONTROLLER);
-		if (controller != MinecartController.EMPTY && controller.isCoupledThroughContraption())
-			return;
-
-		CartMovementMode mode = CartMovementMode.values()[movementMode.value];
-
-		MountedContraption contraption = new MountedContraption(mode);
-		try {
-			if (!contraption.assemble(world, pos))
-				return;
-
-			lastException = null;
-			sendData();
-		} catch (AssemblyException e) {
-			lastException = e;
-			sendData();
-			return;
-		}
-
-		boolean couplingFound = contraption.connectedCart != null;
-		Direction initialOrientation = CartAssemblerBlock.getHorizontalDirection(getBlockState());
-
-		if (couplingFound) {
-			cart.setPos(pos.getX() + .5f, pos.getY(), pos.getZ() + .5f);
-			if (!CouplingHandler.tryToCoupleCarts(null, world, cart.getId(),
-				contraption.connectedCart.getId()))
-				return;
-		}
-
-		contraption.removeBlocksFromWorld(world, BlockPos.ZERO);
-		contraption.startMoving(world);
-		contraption.expandBoundsAroundAxis(Axis.Y);
-
-		if (couplingFound) {
-			Vec3 diff = contraption.connectedCart.position()
-				.subtract(cart.position());
-			initialOrientation = Direction.fromYRot(Mth.atan2(diff.z, diff.x) * 180 / Math.PI);
-		}
-
-		OrientedContraptionEntity entity = OrientedContraptionEntity.create(world, contraption, initialOrientation);
-		if (couplingFound)
-			entity.setCouplingId(cart.getUUID());
-		entity.setPos(pos.getX() + .5, pos.getY(), pos.getZ() + .5);
-		world.addFreshEntity(entity);
-		entity.startRiding(cart);
-
-		if (cart instanceof MinecartFurnace) {
-			CompoundTag nbt = new CompoundTag();
-			if (cart.save(nbt)) {
-				nbt.putDouble("PushZ", 0);
-				nbt.putDouble("PushX", 0);
-				cart.load(nbt);
-			}
-		}
-
-		if (contraption.containsBlockBreakers())
-			award(AllAdvancements.CONTRAPTION_ACTORS);
-	}
-
-	protected void disassemble(Level world, BlockPos pos, AbstractMinecart cart) {
-		if (cart.getPassengers()
-			.isEmpty())
-			return;
-		Entity entity = cart.getPassengers()
-			.get(0);
-		if (!(entity instanceof OrientedContraptionEntity contraption))
-			return;
-		UUID couplingId = contraption.getCouplingId();
-
-		if (couplingId == null) {
-			contraption.yaw = CartAssemblerBlock.getHorizontalDirection(getBlockState())
-				.toYRot();
-			disassembleCart(cart);
-			return;
-		}
-
-		Couple<MinecartController> coupledCarts = contraption.getCoupledCartsIfPresent();
-		if (coupledCarts == null)
-			return;
-
-		// Make sure connected cart is present and being disassembled
-		for (boolean current : Iterate.trueAndFalse) {
-			MinecartController minecartController = coupledCarts.get(current);
-			if (minecartController.cart() == cart)
-				continue;
-			BlockPos otherPos = minecartController.cart()
-				.blockPosition();
-			BlockState blockState = world.getBlockState(otherPos);
-			if (!AllBlocks.CART_ASSEMBLER.has(blockState))
-				return;
-			if (!CartAssemblerBlock.getActionForCart(blockState, minecartController.cart())
-				.shouldDisassemble())
-				return;
-		}
-
-		for (boolean current : Iterate.trueAndFalse)
-			coupledCarts.get(current)
-				.removeConnection(current);
-		disassembleCart(cart);
-	}
-
-	protected void disassembleCart(AbstractMinecart cart) {
-		cart.ejectPassengers();
-		if (cart instanceof MinecartFurnace) {
-			CompoundTag nbt = new CompoundTag();
-			cart.saveAsPassenger(nbt);
-			nbt.putDouble("PushZ", cart.getDeltaMovement().x);
-			nbt.putDouble("PushX", cart.getDeltaMovement().z);
-			cart.load(nbt);
-		}
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		movementMode = new ScrollOptionBehaviour<>(CartMovementMode.class,
-			CreateLang.translateDirect("contraptions.cart_movement_mode"), this, getMovementModeSlot());
-		behaviours.add(movementMode);
-		registerAwardables(behaviours, AllAdvancements.CONTRAPTION_ACTORS);
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		AssemblyException.write(compound, registries, lastException);
-		super.write(compound, registries, clientPacket);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		lastException = AssemblyException.read(compound, registries);
-		super.read(compound, registries, clientPacket);
-	}
-
-	@Override
-	public AssemblyException getLastAssemblyException() {
-		return lastException;
-	}
-
-	protected ValueBoxTransform getMovementModeSlot() {
-		return new CartAssemblerValueBoxTransform();
-	}
-
-	private class CartAssemblerValueBoxTransform extends CenteredSideValueBoxTransform {
-
-		public CartAssemblerValueBoxTransform() {
-			super((state, d) -> {
-				if (d.getAxis()
-					.isVertical())
-					return false;
-				if (!state.hasProperty(CartAssemblerBlock.RAIL_SHAPE))
-					return false;
-				RailShape railShape = state.getValue(CartAssemblerBlock.RAIL_SHAPE);
-				return (d.getAxis() == Axis.X) == (railShape == RailShape.NORTH_SOUTH);
-			});
-		}
-
-		@Override
-		protected Vec3 getSouthLocation() {
-			return VecHelper.voxelSpace(8, 7, 17.5);
-		}
-
-	}
-
-	public enum CartMovementMode implements INamedIconOptions {
-
-		ROTATE(AllIcons.I_CART_ROTATE),
-		ROTATE_PAUSED(AllIcons.I_CART_ROTATE_PAUSED),
-		ROTATION_LOCKED(AllIcons.I_CART_ROTATE_LOCKED),
-
-		;
-
-		private String translationKey;
-		private AllIcons icon;
-
-		CartMovementMode(AllIcons icon) {
-			this.icon = icon;
-			translationKey = "create.contraptions.cart_movement_mode." + Lang.asId(name());
-		}
-
-		@Override
-		public AllIcons getIcon() {
-			return icon;
-		}
-
-		@Override
-		public String getTranslationKey() {
-			return translationKey;
-		}
-	}
-
-	public void resetTicksSinceMinecartUpdate() {
-		ticksSinceMinecartUpdate = 0;
-	}
-
-	public void assembleNextTick(AbstractMinecart cart) {
-		if (cartToAssemble == null)
-			cartToAssemble = cart;
-	}
-
-	public boolean isMinecartUpdateValid() {
-		return ticksSinceMinecartUpdate >= assemblyCooldown;
-	}
-
+        if(assembler.ticksSinceMinecartUpdate<8)assembler.ticksSinceMinecartUpdate++;
+        var cart=assembler.cartToAssemble.get();assembler.cartToAssemble.clear();if(!world.isClientSide())assembler.tryAssemble(cart);
+    
+        }
+    }
+    public void tryAssemble(AbstractMinecart cart){
+        if(!(level instanceof ServerLevel server)||cart==null||!isMinecartUpdateValid()||server.getEntity(cart.getUUID())!=cart||!LoadedEntityAccess.isReady(server,cart.blockPosition())||!getBlockState().is(AllBlocks.CART_ASSEMBLER))return;
+        var controller=CapabilityMinecartController.getIfPresent(level,cart.getUUID());if(controller==null||controller.ownsPackedReceipt())return;
+        resetTicksSinceMinecartUpdate();var state=getBlockState();var action=CartAssemblerBlock.getActionForCart(state,cart);
+        if(action.shouldAssemble())assemble(server,worldPosition,cart);
+        if(action.shouldDisassemble())disassemble(server,worldPosition,cart);
+        double speed=MinecartSim2020.maxSpeed(cart);
+        if(action==CartAssemblerBlock.CartAssemblerAction.ASSEMBLE_ACCELERATE&&cart.getDeltaMovement().length()>1/128f){
+            var facing=cart.getMotionDirection();var axis=state.getValue(CartAssemblerBlock.RAIL_SHAPE)==RailShape.EAST_WEST?Direction.Axis.X:Direction.Axis.Z;
+            for(var side:Direction.values())if(side.getAxis()==axis){var neighbor=worldPosition.relative(side);if(LoadedLevelAccess.isLoaded(level,neighbor)&&LoadedLevelAccess.blockState(level,neighbor).isRedstoneConductor(level,neighbor))facing=side.getOpposite();}
+            cart.setDeltaMovement(facing.getUnitVec3().scale(speed));
+        }
+        if(action==CartAssemblerBlock.CartAssemblerAction.ASSEMBLE_ACCELERATE_DIRECTIONAL){var rail=AllBlocks.CONTROLLER_RAIL.defaultBlockState().setValue(ControllerRailBlock.SHAPE,state.getValue(CartAssemblerBlock.RAIL_SHAPE)).setValue(ControllerRailBlock.BACKWARDS,state.getValue(CartAssemblerBlock.BACKWARDS));cart.setDeltaMovement(Vec3.atLowerCornerOf(ControllerRailBlock.getAccelerationVector(rail)).scale(speed));}
+        if(action==CartAssemblerBlock.CartAssemblerAction.DISASSEMBLE_BRAKE){var diff=Vec3.atCenterOf(worldPosition).subtract(cart.position());cart.setDeltaMovement(diff.x/16,0,diff.z/16);}
+    }
+    private void assemble(ServerLevel world,BlockPos pos,AbstractMinecart cart){
+        var controller=CapabilityMinecartController.getIfPresent(world,cart.getUUID());if(controller==null||!cart.getPassengers().isEmpty()||controller.isCoupledThroughContraption()||controller.getMountedRoot()!=null)return;
+        var structure=new MountedContraption(movementMode);OrientedContraptionEntity root=null;MinecartController secondary=null;boolean joined=false;
+        try{
+            if(!structure.assemble(world,pos))return;
+            if(structure.connectedCart!=null){secondary=CapabilityMinecartController.getIfPresent(world,structure.connectedCart.getUUID());if(secondary==null||secondary.getMountedRoot()!=null)return;if(!CouplingHandler.tryToCoupleCarts(null,world,cart.getId(),structure.connectedCart.getId()))return;joined=true;}
+            var orientation=CartAssemblerBlock.getHorizontalDirection(getBlockState());
+            if(joined){var diff=structure.connectedCart.position().subtract(cart.position());orientation=Direction.fromYRot(Mth.atan2(diff.z,diff.x)*180/Math.PI);}
+            root=new OrientedContraptionEntity(AllEntityTypes.ORIENTED_CONTRAPTION,world);root.setInitialOrientation(orientation);root.setMountedCartId(cart.getUUID());if(joined)root.setCouplingId(cart.getUUID());root.setPos(pos.getX()+.5,pos.getY(),pos.getZ()+.5);
+            if(!world.addFreshEntity(root)||root.isRemoved()||world.getEntity(root.getUUID())!=root)throw AssemblyException.structureChanged(pos);
+            var actual=root;var other=secondary;boolean structural=joined;
+            structure.expandBoundsAroundAxis(Direction.Axis.Y);
+            var result=ContraptionAssemblyGraph.assemble(world,List.of(new ContraptionAssemblyGraph.Root(actual,structure)),complete->{
+                controller.setMountedRoot(actual.getUUID());if(other!=null)other.setMountedRoot(actual.getUUID());
+                actual.setMountedCartId(cart.getUUID());if(structural)actual.setCouplingId(cart.getUUID());
+                if(!actual.startRiding(cart,true,true))structure.getStabilizedSubContraptions().setRecovering(true);
+                if(cart instanceof MinecartFurnace furnace)furnace.push=Vec3.ZERO;
+                controller.sendData();if(other!=null)other.sendData();
+            });
+            if(!result.complete())throw result.failure()==null?AssemblyException.entitiesNotReady(pos):result.failure();if(structure.getActors().stream().anyMatch(actor->{var behavior=com.simibubi.create.api.behaviour.movement.MovementBehaviour.REGISTRY.get(actor.left.state());return behavior instanceof com.simibubi.create.content.kinetics.base.BlockBreakingMovementBehaviour||behavior instanceof com.simibubi.create.content.contraptions.actors.harvester.HarvesterMovementBehaviour;}))sourceAdvancements.award("contraption_actors");lastException=null;changed();
+        }catch(AssemblyException refused){lastException=refused;changed();}
+        finally{
+            if(root!=null&&root.getContraption()==null)root.discard();
+            if(joined&&(root==null||!root.hasOwnedStructure())){
+                // No source blocks moved: the structural metadata can retire without another value owner.
+                if(controller.getMountedRoot()==null&&secondary.getMountedRoot()==null&&CouplingHandler.detachRetiredStructuralPair(controller,secondary)){controller.sendData();secondary.sendData();}
+            }
+        }
+    }
+    private void disassemble(ServerLevel world,BlockPos pos,AbstractMinecart cart){
+        var controller=CapabilityMinecartController.getIfPresent(world,cart.getUUID());if(controller==null||controller.getMountedRoot()==null)return;
+        if(!(world.getEntity(controller.getMountedRoot()) instanceof OrientedContraptionEntity root)||!root.hasOwnedStructure())return;
+        var coupled=root.getCoupledCartsIfPresent();var controllers=coupled==null?List.of(controller):List.of(coupled.getFirst(),coupled.getSecond());
+        if(root.getCouplingId()!=null&&coupled==null)return;
+        for(var other:controllers){var actual=other.cart();var at=actual.getCurrentBlockPosOrRailBelow();if(!LoadedEntityAccess.isReady(world,at))return;var state=LoadedLevelAccess.blockState(world,at);if(!state.is(AllBlocks.CART_ASSEMBLER)||!CartAssemblerBlock.getActionForCart(state,actual).shouldDisassemble())return;}
+        if(coupled==null)root.setAngles(CartAssemblerBlock.getHorizontalDirection(getBlockState()).toYRot(),0);
+        // The actual root's shared retirement endpoint owns link/controller cleanup, including
+        // automatic recovery and callback/unload retries after the last world placement.
+        root.disassemble();
+    }
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);out.putInt("ScrollValue",movementMode.ordinal());var error=savedError==null?new CompoundTag():savedError.copy();if(level!=null)AssemblyException.write(error,level.registryAccess(),lastException);out.store("AssemblyError",CompoundTag.CODEC,error);}
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);movementMode=CartMovementMode.values()[Math.clamp(in.getIntOr("ScrollValue",0),0,2)];savedError=in.read("AssemblyError",CompoundTag.CODEC).orElse(new CompoundTag()).copy();if(level!=null){lastException=AssemblyException.read(savedError,level.registryAccess());savedError=null;}}
+    @Override public void setLevel(Level level){super.setLevel(level);if(savedError!=null){lastException=AssemblyException.read(savedError,level.registryAccess());savedError=null;}}
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){return super.getUpdateTag(registries);}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
+    @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
+        ids.clear();
+        ids.add("contraption_actors");
+    }
+    @Override protected com.simibubi.create.foundation.advancement.AdvancementBehaviour.OwnerStorage nativeAdvancementOwnerStorage() {return sourceAdvancements;}
 }

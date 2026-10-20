@@ -1,928 +1,155 @@
 package com.simibubi.create.content.schematics.cannon;
 
-import java.util.Arrays;
-import java.util.LinkedHashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Objects;
-
-import org.jetbrains.annotations.Nullable;
-
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllItems;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.kinetics.belt.BeltBlock;
-import com.simibubi.create.content.kinetics.belt.BeltBlockEntity;
-import com.simibubi.create.content.kinetics.belt.BeltBlockEntity.CasingType;
-import com.simibubi.create.content.kinetics.belt.BeltPart;
-import com.simibubi.create.content.kinetics.belt.BeltSlope;
-import com.simibubi.create.content.kinetics.simpleRelays.AbstractSimpleShaftBlock;
-import com.simibubi.create.content.schematics.SchematicPrinter;
+import com.simibubi.create.*;
+import com.simibubi.create.content.kinetics.belt.*;
+import com.simibubi.create.content.schematics.*;
 import com.simibubi.create.content.schematics.requirement.ItemRequirement;
-import com.simibubi.create.content.schematics.requirement.ItemRequirement.ItemUseType;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.item.ItemHelper;
-import com.simibubi.create.foundation.item.ItemHelper.ExtractionCountMode;
-import com.simibubi.create.foundation.mixin.accessor.ItemStackHandlerAccessor;
-import com.simibubi.create.foundation.utility.BlockHelper;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-import com.simibubi.create.infrastructure.config.CSchematics;
-
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.CatnipCodecUtils;
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.Direction.AxisDirection;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.component.DataComponentMap.Builder;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
+import java.util.*;
+import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
+import net.fabricmc.fabric.api.transfer.v1.item.*;
+import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
+import net.fabricmc.fabric.api.transfer.v1.transaction.*;
+import net.fabricmc.fabric.api.transfer.v1.transaction.base.SnapshotParticipant;
+import net.minecraft.core.*;
+import net.minecraft.core.component.*;
+import net.minecraft.nbt.*;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.world.Clearable;
-import net.minecraft.world.MenuProvider;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.network.codec.*;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.server.level.*;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.player.*;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.item.*;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.piston.PistonHeadBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BedPart;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
-import net.minecraft.world.phys.AABB;
-
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.items.IItemHandler;
-import net.neoforged.neoforge.items.ItemHandlerHelper;
-import net.neoforged.neoforge.items.wrapper.EmptyItemHandler;
-
-public class SchematicannonBlockEntity extends SmartBlockEntity implements MenuProvider, Clearable {
-	public static final int NEIGHBOUR_CHECKING = 100;
-	public static final int MAX_ANCHOR_DISTANCE = 256;
-
-	// Inventory
-	public SchematicannonInventory inventory;
-
-	public boolean sendUpdate;
-	// Sync
-	public boolean dontUpdateChecklist;
-	public int neighbourCheckCooldown;
-
-	// Printer
-	public SchematicPrinter printer;
-	public ItemStack missingItem;
-	public boolean positionNotLoaded;
-	public boolean hasCreativeCrate;
-	private int printerCooldown;
-	private int skipsLeft;
-	private boolean blockSkipped;
-
-	public BlockPos previousTarget;
-	public LinkedHashSet<IItemHandler> attachedInventories;
-	public List<LaunchedItem> flyingBlocks;
-	public MaterialChecklist checklist;
-
-	// Gui information
-	public int remainingFuel;
-	public float bookPrintingProgress;
-	public float schematicProgress;
-	public String statusMsg;
-	public State state;
-	public int blocksPlaced;
-	public int blocksToPlace;
-
-	// Settings
-	public int replaceMode;
-	public boolean skipMissing;
-	public boolean replaceBlockEntities;
-
-	// Render
-	public boolean firstRenderTick;
-	public float defaultYaw;
-
-	public SchematicannonBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		setLazyTickRate(30);
-		attachedInventories = new LinkedHashSet<>();
-		flyingBlocks = new LinkedList<>();
-		inventory = new SchematicannonInventory(this);
-		statusMsg = "idle";
-		this.state = State.STOPPED;
-		replaceMode = 2;
-		checklist = new MaterialChecklist();
-		printer = new SchematicPrinter();
-	}
-
-	public void findInventories() {
-		hasCreativeCrate = false;
-		attachedInventories.clear();
-		for (Direction facing : Iterate.directions) {
-
-			if (!level.isLoaded(worldPosition.relative(facing)))
-				continue;
-
-			if (AllBlocks.CREATIVE_CRATE.has(level.getBlockState(worldPosition.relative(facing))))
-				hasCreativeCrate = true;
-
-			BlockEntity blockEntity = level.getBlockEntity(worldPosition.relative(facing));
-			if (blockEntity != null) {
-				IItemHandler capability =
-					level.getCapability(Capabilities.ItemHandler.BLOCK, blockEntity.getBlockPos(), facing.getOpposite());
-				if (capability != null) {
-					attachedInventories.add(capability);
-				}
-			}
-		}
-	}
-
-	@Override
-	public void clearContent() {
-		((ItemStackHandlerAccessor) inventory).create$getStacks().clear();
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		if (!clientPacket) {
-			inventory.deserializeNBT(registries, compound.getCompound("Inventory"));
-		}
-
-		// Gui information
-		statusMsg = compound.getString("Status");
-		schematicProgress = compound.getFloat("Progress");
-		bookPrintingProgress = compound.getFloat("PaperProgress");
-		remainingFuel = compound.getInt("RemainingFuel");
-		String stateString = compound.getString("State");
-		state = stateString.isEmpty() ? State.STOPPED : State.valueOf(compound.getString("State"));
-		blocksPlaced = compound.getInt("AmountPlaced");
-		blocksToPlace = compound.getInt("AmountToPlace");
-
-		missingItem = null;
-		if (compound.contains("MissingItem")) {
-			ItemStack.parse(registries, compound.getCompound("MissingItem")).ifPresent(i -> missingItem = i);
-		}
-
-		// Settings
-		SchematicannonOptions options = CatnipCodecUtils.decode(SchematicannonOptions.CODEC, registries, compound.getCompound("Options"))
-			.orElse(new SchematicannonOptions(2, false, false));
-		replaceMode = options.replaceMode;
-		skipMissing = options.skipMissing;
-		replaceBlockEntities = options.replaceBlockEntities;
-
-		// Printer & Flying Blocks
-		if (compound.contains("Printer"))
-			printer.fromTag(compound.getCompound("Printer"), clientPacket);
-		if (compound.contains("FlyingBlocks"))
-			readFlyingBlocks(compound, registries);
-
-		defaultYaw = compound.getFloat("DefaultYaw");
-
-		super.read(compound, registries, clientPacket);
-	}
-
-	protected void readFlyingBlocks(CompoundTag compound, HolderLookup.Provider registries) {
-		ListTag tagBlocks = compound.getList("FlyingBlocks", 10);
-		if (tagBlocks.isEmpty())
-			flyingBlocks.clear();
-
-		boolean pastDead = false;
-
-		for (int i = 0; i < tagBlocks.size(); i++) {
-			CompoundTag c = tagBlocks.getCompound(i);
-			LaunchedItem launched = LaunchedItem.fromNBT(c, registries, blockHolderGetter());
-			BlockPos readBlockPos = launched.target;
-
-			// Always write to Server block entity
-			if (level == null || !level.isClientSide) {
-				flyingBlocks.add(launched);
-				continue;
-			}
-
-			// Delete all Client side blocks that are now missing on the server
-			while (!pastDead && !flyingBlocks.isEmpty() && !flyingBlocks.get(0).target.equals(readBlockPos)) {
-				flyingBlocks.remove(0);
-			}
-
-			pastDead = true;
-
-			// Add new server side blocks
-			if (i >= flyingBlocks.size()) {
-				flyingBlocks.add(launched);
-				continue;
-			}
-
-			// Don't do anything with existing
-		}
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		if (!clientPacket) {
-			compound.put("Inventory", inventory.serializeNBT(registries));
-			if (state == State.RUNNING) {
-				compound.putBoolean("Running", true);
-			}
-		}
-
-		// Gui information
-		compound.putFloat("Progress", schematicProgress);
-		compound.putFloat("PaperProgress", bookPrintingProgress);
-		compound.putInt("RemainingFuel", remainingFuel);
-		compound.putString("Status", statusMsg);
-		compound.putString("State", state.name());
-		compound.putInt("AmountPlaced", blocksPlaced);
-		compound.putInt("AmountToPlace", blocksToPlace);
-
-		if (missingItem != null)
-			compound.put("MissingItem", missingItem.saveOptional(registries));
-
-		// Settings
-		Tag options = CatnipCodecUtils.encode(SchematicannonOptions.CODEC, registries, new SchematicannonOptions(replaceMode, skipMissing, replaceBlockEntities)).orElseThrow();
-		compound.put("Options", options);
-
-		// Printer & Flying Blocks
-		CompoundTag printerData = new CompoundTag();
-		printer.write(printerData);
-		compound.put("Printer", printerData);
-
-		ListTag tagFlyingBlocks = new ListTag();
-		for (LaunchedItem b : flyingBlocks)
-			tagFlyingBlocks.add(b.serializeNBT(registries));
-		compound.put("FlyingBlocks", tagFlyingBlocks);
-
-		compound.putFloat("DefaultYaw", defaultYaw);
-
-		super.write(compound, registries, clientPacket);
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		if (state != State.STOPPED && neighbourCheckCooldown-- <= 0) {
-			neighbourCheckCooldown = NEIGHBOUR_CHECKING;
-			findInventories();
-		}
-
-		firstRenderTick = true;
-		previousTarget = printer.getCurrentTarget();
-		tickFlyingBlocks();
-
-		if (level.isClientSide)
-			return;
-
-		// Update Fuel and Paper
-		tickPaperPrinter();
-		refillFuelIfPossible();
-
-		// Update Printer
-		skipsLeft = 1000;
-		blockSkipped = true;
-
-		while (blockSkipped && skipsLeft-- > 0)
-			tickPrinter();
-
-		schematicProgress = 0;
-		if (blocksToPlace > 0)
-			schematicProgress = (float) blocksPlaced / blocksToPlace;
-
-		// Update Client block entity
-		if (sendUpdate) {
-			sendUpdate = false;
-			level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 6);
-		}
-	}
-
-	public CSchematics config() {
-		return AllConfigs.server().schematics;
-	}
-
-	protected void tickPrinter() {
-		ItemStack blueprint = inventory.getStackInSlot(0);
-		blockSkipped = false;
-
-		if (blueprint.isEmpty() && !statusMsg.equals("idle") && inventory.getStackInSlot(1)
-			.isEmpty()) {
-			state = State.STOPPED;
-			statusMsg = "idle";
-			sendUpdate = true;
-			return;
-		}
-
-		// Skip if not Active
-		if (state == State.STOPPED) {
-			if (printer.isLoaded())
-				resetPrinter();
-			return;
-		}
-
-		if (state == State.PAUSED && !positionNotLoaded && missingItem == null && remainingFuel > 0)
-			return;
-
-		// Initialize Printer
-		if (!printer.isLoaded()) {
-			initializePrinter(blueprint);
-			return;
-		}
-
-		// Cooldown from last shot
-		if (printerCooldown > 0) {
-			printerCooldown--;
-			return;
-		}
-
-		// Check Fuel
-		if (remainingFuel <= 0 && !hasCreativeCrate) {
-			refillFuelIfPossible();
-			if (remainingFuel <= 0) {
-				state = State.PAUSED;
-				statusMsg = "noGunpowder";
-				sendUpdate = true;
-				return;
-			}
-		}
-
-		if (hasCreativeCrate) {
-			remainingFuel = 0;
-			if (missingItem != null) {
-				missingItem = null;
-				state = State.RUNNING;
-			}
-		}
-
-		// Update Target
-		if (missingItem == null && !positionNotLoaded) {
-			if (!printer.advanceCurrentPos()) {
-				finishedPrinting();
-				return;
-			}
-			sendUpdate = true;
-		}
-
-		// Check block
-		if (!getLevel().isLoaded(printer.getCurrentTarget())) {
-			positionNotLoaded = true;
-			statusMsg = "targetNotLoaded";
-			state = State.PAUSED;
-			return;
-		} else {
-			if (positionNotLoaded) {
-				positionNotLoaded = false;
-				state = State.RUNNING;
-			}
-		}
-
-		// Get item requirement
-		ItemRequirement requirement = printer.getCurrentRequirement();
-		if (requirement.isInvalid() || !printer.shouldPlaceCurrent(level, this::shouldPlace)) {
-			sendUpdate = !statusMsg.equals("searching");
-			statusMsg = "searching";
-			blockSkipped = true;
-			return;
-		}
-
-		// Find item
-		List<ItemRequirement.StackRequirement> requiredItems = requirement.getRequiredItems();
-		if (!requirement.isEmpty()) {
-			for (ItemRequirement.StackRequirement required : requiredItems) {
-				if (!grabItemsFromAttachedInventories(required, true)) {
-					if (skipMissing) {
-						statusMsg = "skipping";
-						blockSkipped = true;
-						if (missingItem != null) {
-							missingItem = null;
-							state = State.RUNNING;
-						}
-						return;
-					}
-
-					missingItem = required.stack;
-					state = State.PAUSED;
-					statusMsg = "missingBlock";
-					return;
-				}
-			}
-
-			for (ItemRequirement.StackRequirement required : requiredItems)
-				grabItemsFromAttachedInventories(required, false);
-		}
-
-		// Success
-		state = State.RUNNING;
-		ItemStack icon = requirement.isEmpty() || requiredItems.isEmpty() ? ItemStack.EMPTY : requiredItems.get(0).stack;
-		printer.handleCurrentTarget((target, blockState, blockEntity) -> {
-			// Launch block
-			statusMsg = blockState.getBlock() != Blocks.AIR ? "placing" : "clearing";
-			launchBlockOrBelt(target, icon, blockState, blockEntity);
-		}, (target, entity) -> {
-			// Launch entity
-			statusMsg = "placing";
-			launchEntity(target, icon, entity);
-		});
-
-		printerCooldown = config().schematicannonDelay.get();
-		remainingFuel -= 1;
-		sendUpdate = true;
-		missingItem = null;
-	}
-
-	public int getShotsPerGunpowder() {
-		return hasCreativeCrate ? 0 : config().schematicannonShotsPerGunpowder.get();
-	}
-
-	protected void initializePrinter(ItemStack blueprint) {
-		if (!blueprint.has(AllDataComponents.SCHEMATIC_ANCHOR)) {
-			state = State.STOPPED;
-			statusMsg = "schematicInvalid";
-			sendUpdate = true;
-			return;
-		}
-
-		if (!blueprint.getOrDefault(AllDataComponents.SCHEMATIC_DEPLOYED, false)) {
-			state = State.STOPPED;
-			statusMsg = "schematicNotPlaced";
-			sendUpdate = true;
-			return;
-		}
-
-		// Load blocks into reader
-		printer.loadSchematic(blueprint, level, true);
-
-		if (printer.isErrored()) {
-			state = State.STOPPED;
-			statusMsg = "schematicErrored";
-			inventory.setStackInSlot(0, ItemStack.EMPTY);
-			inventory.setStackInSlot(1, new ItemStack(AllItems.EMPTY_SCHEMATIC.get()));
-			printer.resetSchematic();
-			sendUpdate = true;
-			return;
-		}
-
-		if (printer.isWorldEmpty()) {
-			state = State.STOPPED;
-			statusMsg = "schematicExpired";
-			inventory.setStackInSlot(0, ItemStack.EMPTY);
-			inventory.setStackInSlot(1, new ItemStack(AllItems.EMPTY_SCHEMATIC.get()));
-			printer.resetSchematic();
-			sendUpdate = true;
-			return;
-		}
-
-		if (!printer.getAnchor()
-			.closerThan(getBlockPos(), MAX_ANCHOR_DISTANCE)) {
-			state = State.STOPPED;
-			statusMsg = "targetOutsideRange";
-			printer.resetSchematic();
-			sendUpdate = true;
-			return;
-		}
-
-		state = State.PAUSED;
-		statusMsg = "ready";
-		updateChecklist();
-		sendUpdate = true;
-		blocksToPlace += blocksPlaced;
-	}
-
-	protected ItemStack getItemForBlock(BlockState blockState) {
-		Item item = BlockItem.BY_BLOCK.getOrDefault(blockState.getBlock(), Items.AIR);
-		return item == Items.AIR ? ItemStack.EMPTY : new ItemStack(item);
-	}
-
-	protected boolean grabItemsFromAttachedInventories(ItemRequirement.StackRequirement required, boolean simulate) {
-		if (hasCreativeCrate)
-			return true;
-
-		attachedInventories.removeIf(Objects::isNull);
-
-		ItemUseType usage = required.usage;
-
-		// Find and apply damage
-		if (usage == ItemUseType.DAMAGE) {
-			for (IItemHandler cap : attachedInventories) {
-				if (cap == null)
-					cap = EmptyItemHandler.INSTANCE;
-				for (int slot = 0; slot < cap.getSlots(); slot++) {
-					ItemStack extractItem = cap.extractItem(slot, 1, true);
-					if (!required.matches(extractItem))
-						continue;
-					if (!extractItem.isDamageableItem())
-						continue;
-
-					if (!simulate) {
-						ItemStack stack = cap.extractItem(slot, 1, false);
-						stack.setDamageValue(stack.getDamageValue() + 1);
-						if (stack.getDamageValue() <= stack.getMaxDamage()) {
-							if (cap.getStackInSlot(slot)
-								.isEmpty())
-								cap.insertItem(slot, stack, false);
-							else
-								ItemHandlerHelper.insertItem(cap, stack, false);
-						}
-					}
-
-					return true;
-				}
-			}
-
-			return false;
-		}
-
-		// Find and remove
-		boolean success = false;
-		int amountFound = 0;
-		for (IItemHandler cap : attachedInventories) {
-			if (cap == null)
-				cap = EmptyItemHandler.INSTANCE;
-			amountFound += ItemHelper
-				.extract(cap, required::matches, ExtractionCountMode.UPTO,
-					required.stack.getCount(), true)
-				.getCount();
-
-			if (amountFound < required.stack.getCount())
-				continue;
-
-			success = true;
-			break;
-		}
-
-		if (!simulate && success) {
-			amountFound = 0;
-			for (IItemHandler cap : attachedInventories) {
-				if (cap == null)
-					cap = EmptyItemHandler.INSTANCE;
-				amountFound += ItemHelper
-					.extract(cap, required::matches, ExtractionCountMode.UPTO,
-						required.stack.getCount(), false)
-					.getCount();
-				if (amountFound < required.stack.getCount())
-					continue;
-				break;
-			}
-		}
-
-		return success;
-	}
-
-	public void finishedPrinting() {
-		if (replaceMode == ConfigureSchematicannonPacket.Option.REPLACE_EMPTY.ordinal())
-			printer.sendBlockUpdates(level);
-		inventory.setStackInSlot(0, ItemStack.EMPTY);
-		inventory.setStackInSlot(1, new ItemStack(AllItems.EMPTY_SCHEMATIC.get(), inventory.getStackInSlot(1)
-			.getCount() + 1));
-		state = State.STOPPED;
-		statusMsg = "finished";
-		resetPrinter();
-		AllSoundEvents.SCHEMATICANNON_FINISH.playOnServer(level, worldPosition);
-		sendUpdate = true;
-	}
-
-	protected void resetPrinter() {
-		printer.resetSchematic();
-		missingItem = null;
-		sendUpdate = true;
-		schematicProgress = 0;
-		blocksPlaced = 0;
-		blocksToPlace = 0;
-	}
-
-	protected boolean shouldPlace(BlockPos pos, BlockState state, BlockEntity be, BlockState toReplace,
-		BlockState toReplaceOther, boolean isNormalCube) {
-		if (pos.closerThan(getBlockPos(), 2f))
-			return false;
-		if (!replaceBlockEntities
-			&& (toReplace.hasBlockEntity() || (toReplaceOther != null && toReplaceOther.hasBlockEntity())))
-			return false;
-
-		if (shouldIgnoreBlockState(state, be))
-			return false;
-
-		boolean placingAir = state.isAir();
-
-		if (replaceMode == 3)
-			return true;
-		if (replaceMode == 2 && !placingAir)
-			return true;
-		if (replaceMode == 1 && (isNormalCube || (!toReplace.isRedstoneConductor(level, pos)
-			&& (toReplaceOther == null || !toReplaceOther.isRedstoneConductor(level, pos)))) && !placingAir)
-			return true;
-		if (replaceMode == 0 && !toReplace.isRedstoneConductor(level, pos)
-			&& (toReplaceOther == null || !toReplaceOther.isRedstoneConductor(level, pos)) && !placingAir)
-			return true;
-
-		return false;
-	}
-
-	protected boolean shouldIgnoreBlockState(BlockState state, BlockEntity be) {
-		// Block doesn't have a mapping (Water, lava, etc)
-		if (state.getBlock() == Blocks.STRUCTURE_VOID)
-			return true;
-
-		ItemRequirement requirement = ItemRequirement.of(state, be);
-		if (requirement.isEmpty())
-			return false;
-		if (requirement.isInvalid())
-			return false;
-
-		// Block doesn't need to be placed twice (Doors, beds, double plants)
-		if (state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
-			&& state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER)
-			return true;
-		if (state.hasProperty(BlockStateProperties.BED_PART)
-			&& state.getValue(BlockStateProperties.BED_PART) == BedPart.HEAD)
-			return true;
-		if (state.getBlock() instanceof PistonHeadBlock)
-			return true;
-		if (AllBlocks.BELT.has(state))
-			return state.getValue(BeltBlock.PART) == BeltPart.MIDDLE;
-
-		return false;
-	}
-
-	protected void tickFlyingBlocks() {
-		List<LaunchedItem> toRemove = new LinkedList<>();
-		for (LaunchedItem b : flyingBlocks)
-			if (b.update(level))
-				toRemove.add(b);
-		flyingBlocks.removeAll(toRemove);
-	}
-
-	protected void refillFuelIfPossible() {
-		if (hasCreativeCrate)
-			return;
-		if (remainingFuel > getShotsPerGunpowder()) {
-			remainingFuel = getShotsPerGunpowder();
-			sendUpdate = true;
-			return;
-		}
-
-		if (remainingFuel > 0)
-			return;
-
-		if (!inventory.getStackInSlot(4)
-			.isEmpty())
-			inventory.getStackInSlot(4)
-				.shrink(1);
-		else {
-			boolean externalGunpowderFound = false;
-			for (IItemHandler cap : attachedInventories) {
-				IItemHandler itemHandler = cap;
-
-				if (itemHandler == null)
-					itemHandler = EmptyItemHandler.INSTANCE;
-
-				if (ItemHelper.extract(itemHandler, stack -> inventory.isItemValid(4, stack), 1, false)
-					.isEmpty())
-					continue;
-				externalGunpowderFound = true;
-				break;
-			}
-			if (!externalGunpowderFound)
-				return;
-		}
-
-		remainingFuel += getShotsPerGunpowder();
-		if (statusMsg.equals("noGunpowder")) {
-			if (blocksPlaced > 0)
-				state = State.RUNNING;
-			statusMsg = "ready";
-		}
-		sendUpdate = true;
-	}
-
-	protected void tickPaperPrinter() {
-		int BookInput = 2;
-		int BookOutput = 3;
-
-		ItemStack blueprint = inventory.getStackInSlot(0);
-		ItemStack paper = inventory.extractItem(BookInput, 1, true);
-		boolean outputFull = inventory.getStackInSlot(BookOutput)
-			.getCount() == inventory.getSlotLimit(BookOutput);
-
-		if (printer.isErrored())
-			return;
-
-		if (!printer.isLoaded()) {
-			if (!blueprint.isEmpty())
-				initializePrinter(blueprint);
-			return;
-		}
-
-		if (paper.isEmpty() || outputFull) {
-			if (bookPrintingProgress != 0)
-				sendUpdate = true;
-			bookPrintingProgress = 0;
-			dontUpdateChecklist = false;
-			return;
-		}
-
-		if (bookPrintingProgress >= 1) {
-			bookPrintingProgress = 0;
-
-			if (!dontUpdateChecklist)
-				updateChecklist();
-
-			dontUpdateChecklist = true;
-			ItemStack extractItem = inventory.extractItem(BookInput, 1, false);
-			ItemStack stack = AllBlocks.CLIPBOARD.isIn(extractItem) ? checklist.createWrittenClipboard()
-				: checklist.createWrittenBook();
-			stack.setCount(inventory.getStackInSlot(BookOutput)
-				.getCount() + 1);
-			inventory.setStackInSlot(BookOutput, stack);
-			sendUpdate = true;
-			return;
-		}
-
-		bookPrintingProgress += 0.05f;
-		sendUpdate = true;
-	}
-
-	public static BlockState stripBeltIfNotLast(BlockState blockState) {
-		BeltPart part = blockState.getValue(BeltBlock.PART);
-		if (part == BeltPart.MIDDLE)
-			return Blocks.AIR.defaultBlockState();
-
-		// is highest belt?
-		boolean isLastSegment = false;
-		Direction facing = blockState.getValue(BeltBlock.HORIZONTAL_FACING);
-		BeltSlope slope = blockState.getValue(BeltBlock.SLOPE);
-		boolean positive = facing.getAxisDirection() == AxisDirection.POSITIVE;
-		boolean start = part == BeltPart.START;
-		boolean end = part == BeltPart.END;
-
-		switch (slope) {
-		case DOWNWARD:
-			isLastSegment = start;
-			break;
-		case UPWARD:
-			isLastSegment = end;
-			break;
-		default:
-			isLastSegment = positive && end || !positive && start;
-		}
-		if (isLastSegment)
-			return blockState;
-
-		return AllBlocks.SHAFT.getDefaultState()
-			.setValue(AbstractSimpleShaftBlock.AXIS, slope == BeltSlope.SIDEWAYS ? Axis.Y
-				: facing.getClockWise()
-					.getAxis());
-	}
-
-	protected void launchBlockOrBelt(BlockPos target, ItemStack icon, BlockState blockState, BlockEntity blockEntity) {
-		if (AllBlocks.BELT.has(blockState)) {
-			blockState = stripBeltIfNotLast(blockState);
-			if (blockEntity instanceof BeltBlockEntity bbe && AllBlocks.BELT.has(blockState)) {
-				CasingType[] casings = new CasingType[bbe.beltLength];
-				Arrays.fill(casings, CasingType.NONE);
-				BlockPos currentPos = target;
-				for (int i = 0; i < bbe.beltLength; i++) {
-					BlockState currentState = bbe.getLevel()
-						.getBlockState(currentPos);
-					if (!(currentState.getBlock() instanceof BeltBlock))
-						break;
-					if (!(bbe.getLevel()
-						.getBlockEntity(currentPos) instanceof BeltBlockEntity beltAtSegment))
-						break;
-					casings[i] = beltAtSegment.casing;
-					currentPos = BeltBlock.nextSegmentPosition(currentState, currentPos,
-						blockState.getValue(BeltBlock.PART) != BeltPart.END);
-				}
-				launchBelt(target, blockState, bbe.beltLength, casings);
-			} else if (blockState != Blocks.AIR.defaultBlockState())
-				launchBlock(target, icon, blockState, null);
-			return;
-		}
-
-		CompoundTag data = BlockHelper.prepareBlockEntityData(level, blockState, blockEntity);
-		launchBlock(target, icon, blockState, data);
-	}
-
-	protected void launchBelt(BlockPos target, BlockState state, int length, CasingType[] casings) {
-		blocksPlaced++;
-		ItemStack connector = AllItems.BELT_CONNECTOR.asStack();
-		flyingBlocks.add(new LaunchedItem.ForBelt(this.getBlockPos(), target, connector, state, casings));
-		playFiringSound();
-	}
-
-	protected void launchBlock(BlockPos target, ItemStack stack, BlockState state, @Nullable CompoundTag data) {
-		if (!state.isAir())
-			blocksPlaced++;
-		flyingBlocks.add(new LaunchedItem.ForBlockState(this.getBlockPos(), target, stack, state, data));
-		playFiringSound();
-	}
-
-	protected void launchEntity(BlockPos target, ItemStack stack, Entity entity) {
-		blocksPlaced++;
-		flyingBlocks.add(new LaunchedItem.ForEntity(this.getBlockPos(), target, stack, entity));
-		playFiringSound();
-	}
-
-	public void playFiringSound() {
-		AllSoundEvents.SCHEMATICANNON_LAUNCH_BLOCK.playOnServer(level, worldPosition);
-	}
-
-	@Override
-	public AbstractContainerMenu createMenu(int id, Inventory inv, Player player) {
-		return SchematicannonMenu.create(id, inv, this);
-	}
-
-	@Override
-	public Component getDisplayName() {
-		return CreateLang.translateDirect("gui.schematicannon.title");
-	}
-
-	public void updateChecklist() {
-		checklist.required.clear();
-		checklist.damageRequired.clear();
-		checklist.blocksNotLoaded = false;
-
-		if (printer.isLoaded() && !printer.isErrored()) {
-			blocksToPlace = blocksPlaced;
-			blocksToPlace += printer.markAllBlockRequirements(checklist, level, this::shouldPlace);
-			printer.markAllEntityRequirements(checklist);
-		}
-
-		checklist.gathered.clear();
-		findInventories();
-		for (IItemHandler cap : attachedInventories) {
-			if (cap == null)
-				continue;
-			for (int slot = 0; slot < cap.getSlots(); slot++) {
-				ItemStack stackInSlot = cap.getStackInSlot(slot);
-				if (cap.extractItem(slot, 1, true)
-					.isEmpty())
-					continue;
-				checklist.collect(stackInSlot);
-			}
-		}
-		sendUpdate = true;
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		findInventories();
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public AABB getRenderBoundingBox() {
-		return AABB.INFINITE;
-	}
-
-	@Override
-	protected void applyImplicitComponents(DataComponentInput componentInput) {
-		SchematicannonOptions options = componentInput.getOrDefault(AllDataComponents.SCHEMATICANNON_OPTIONS,
-				new SchematicannonOptions(2, true, false));
-		replaceMode = options.replaceMode;
-		skipMissing = options.skipMissing;
-		replaceBlockEntities = options.replaceBlockEntities;
-	}
-
-	@Override
-	protected void collectImplicitComponents(Builder components) {
-		components.set(AllDataComponents.SCHEMATICANNON_OPTIONS,
-			new SchematicannonOptions(replaceMode, skipMissing, replaceBlockEntities));
-	}
-
-	public enum State {
-		STOPPED, PAUSED, RUNNING;
-	}
-
-	public record SchematicannonOptions(int replaceMode, boolean skipMissing, boolean replaceBlockEntities) {
-		public static final Codec<SchematicannonOptions> CODEC = RecordCodecBuilder.create(i -> i.group(
-				Codec.INT.fieldOf("replace_mode").forGetter(SchematicannonOptions::replaceMode),
-				Codec.BOOL.fieldOf("skip_missing").forGetter(SchematicannonOptions::skipMissing),
-				Codec.BOOL.fieldOf("replace_block_entities").forGetter(SchematicannonOptions::replaceBlockEntities)
-		).apply(i, SchematicannonOptions::new));
-
-		public static final StreamCodec<ByteBuf, SchematicannonOptions> STREAM_CODEC = StreamCodec.composite(
-				ByteBufCodecs.INT, SchematicannonOptions::replaceMode,
-				ByteBufCodecs.BOOL, SchematicannonOptions::skipMissing,
-				ByteBufCodecs.BOOL, SchematicannonOptions::replaceBlockEntities,
-				SchematicannonOptions::new
-		);
-	}
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.storage.*;
+
+/** Actual source cannon, native material transactions and persisted paid launches. */
+public final class SchematicannonBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements Container,ExtendedMenuProvider<com.simibubi.create.content.schematics.table.SchematicTableMenu.Opening> {
+    public static java.util.function.Consumer<SchematicannonBlockEntity> CLIENT_TICK;
+    public static final int NEIGHBOUR_CHECKING=100,MAX_ANCHOR_DISTANCE=256;
+    public enum State {STOPPED,PAUSED,RUNNING}
+    public record SchematicannonOptions(int replaceMode,boolean skipMissing,boolean replaceBlockEntities){
+        public SchematicannonOptions{if(replaceMode<0||replaceMode>3)throw new IllegalArgumentException("Invalid source cannon replacement mode");}
+        public static final Codec<SchematicannonOptions> CODEC=RecordCodecBuilder.create(i->i.group(Codec.intRange(0,3).fieldOf("replace_mode").forGetter(SchematicannonOptions::replaceMode),Codec.BOOL.fieldOf("skip_missing").forGetter(SchematicannonOptions::skipMissing),Codec.BOOL.fieldOf("replace_block_entities").forGetter(SchematicannonOptions::replaceBlockEntities)).apply(i,SchematicannonOptions::new));
+        public static final StreamCodec<ByteBuf,SchematicannonOptions> STREAM_CODEC=StreamCodec.composite(ByteBufCodecs.INT,SchematicannonOptions::replaceMode,ByteBufCodecs.BOOL,SchematicannonOptions::skipMissing,ByteBufCodecs.BOOL,SchematicannonOptions::replaceBlockEntities,SchematicannonOptions::new);
+    }
+    public final SchematicannonInventory inventory=new SchematicannonInventory(this);
+    public final SchematicPrinter printer=new SchematicPrinter();
+    public final List<LaunchedItem> flyingBlocks=new ArrayList<>();
+    public final Set<Storage<ItemVariant>> attachedInventories=new LinkedHashSet<>();
+    public final MaterialChecklist checklist=new MaterialChecklist();
+    public ItemStack missingItem;
+    public boolean positionNotLoaded,hasCreativeCrate,dontUpdateChecklist;
+    public int remainingFuel,neighbourCheckCooldown,blocksPlaced,blocksToPlace,replaceMode=2;
+    public boolean skipMissing,replaceBlockEntities;
+    public float bookPrintingProgress,schematicProgress,defaultYaw;
+    public String statusMsg="idle";
+    public State state=State.STOPPED;
+    public BlockPos previousTarget;
+    private int printerCooldown;
+    private boolean hasTarget,sourceFinished;
+    private ItemStack activeBlueprint=ItemStack.EMPTY;
+    private final Set<UUID> reportedFailedJobs=new HashSet<>();
+    private record LaunchSnapshot(List<LaunchedItem> jobs,int fuel,int placed,int cooldown,boolean hasTarget,State state,String status,ItemStack missing){}
+    private final SnapshotParticipant<LaunchSnapshot> paymentOwner=new SnapshotParticipant<>(){
+        @Override protected LaunchSnapshot createSnapshot(){return new LaunchSnapshot(List.copyOf(flyingBlocks),remainingFuel,blocksPlaced,printerCooldown,hasTarget,state,statusMsg,missingItem==null?null:missingItem.copy());}
+        @Override protected void readSnapshot(LaunchSnapshot saved){flyingBlocks.clear();flyingBlocks.addAll(saved.jobs);remainingFuel=saved.fuel;blocksPlaced=saved.placed;printerCooldown=saved.cooldown;hasTarget=saved.hasTarget;state=saved.state;statusMsg=saved.status;missingItem=saved.missing;}
+        @Override protected void onFinalCommit(){notifyUpdate();}
+    };
+    public SchematicannonBlockEntity(BlockPos pos,BlockState block){super(AllBlockEntityTypes.SCHEMATICANNON,pos,block);}
+    public boolean canPlayerUse(Player player){return level!=null&&player.level()==level&&!isRemoved()&&!player.isSpectator()&&player.mayBuild()&&player.isWithinBlockInteractionRange(worldPosition,1)&&level.mayInteract(player,worldPosition)&&(level.isClientSide()||isActualOwner());}
+    private boolean isActualOwner(){return level!=null&&!level.isClientSide()&&!isRemoved()&&com.simibubi.create.content.schematics.SchematicWorldAccess.blockEntity(level,worldPosition)==this;}
+    public void notifyUpdate(){setChanged();if(isActualOwner())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS);}
+    public void setState(State next){state=Objects.requireNonNull(next);if(next==State.STOPPED){printer.resetSchematic();activeBlueprint=ItemStack.EMPTY;hasTarget=false;sourceFinished=false;missingItem=null;positionNotLoaded=false;blocksPlaced=blocksToPlace=0;schematicProgress=0;statusMsg="idle";}else if(!printer.isLoaded()&&!inventory.getItem(0).isEmpty())initializePrinter(inventory.getItem(0));notifyUpdate();}
+    public static void tick(Level level,BlockPos pos,BlockState block,SchematicannonBlockEntity cannon){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, block, cannon)) {
+            if (!createTick.shouldTick()) return;
+
+        if(level.isClientSide()){if(CLIENT_TICK!=null)CLIENT_TICK.accept(cannon);return;}if(!cannon.isActualOwner())return;
+        if(--cannon.neighbourCheckCooldown<=0){cannon.findInventories();cannon.neighbourCheckCooldown=NEIGHBOUR_CHECKING;}
+        boolean changed=false;for(var launch:List.copyOf(cannon.flyingBlocks)){if(!cannon.isActualOwner())break;int before=launch.ticksRemaining;long custodyBefore=launch.custodyRevision();try{if(launch.update(level)){cannon.flyingBlocks.remove(launch);cannon.reportedFailedJobs.remove(launch.jobId());changed=true;}else if(before!=launch.ticksRemaining||custodyBefore!=launch.custodyRevision())changed=true;}catch(RuntimeException failure){if(cannon.reportedFailedJobs.add(launch.jobId()))Create.LOGGER.error("Actual paid schematic launch remains retained after placement failure at {}",launch.target,failure);cannon.state=State.STOPPED;cannon.statusMsg="schematicErrored";changed=true;}}
+        if(!cannon.isActualOwner())return;
+        cannon.previousTarget=cannon.printer.getCurrentTarget();
+        if(!cannon.activeBlueprint.isEmpty()&&!ItemStack.matches(cannon.activeBlueprint,cannon.inventory.getItem(0))){cannon.printer.resetSchematic();cannon.activeBlueprint=ItemStack.EMPTY;cannon.hasTarget=false;cannon.sourceFinished=false;cannon.missingItem=null;cannon.state=State.STOPPED;cannon.statusMsg="idle";changed=true;}
+        if(!cannon.inventory.getItem(0).isEmpty()&&!cannon.printer.isLoaded())cannon.initializePrinter(cannon.inventory.getItem(0));
+        cannon.tickPaperPrinter();
+        if(cannon.printerCooldown>0)cannon.printerCooldown--;
+        else if(cannon.state!=State.STOPPED&&!cannon.sourceFinished)try{for(int skipped=0;skipped<1000&&cannon.tickPrinter();skipped++){}}catch(RuntimeException failure){cannon.state=State.STOPPED;cannon.statusMsg="schematicErrored";Create.LOGGER.error("Actual schematic cannon retains source and paid launches after printer failure at {}",pos,failure);changed=true;}
+        if(cannon.sourceFinished&&cannon.flyingBlocks.isEmpty())cannon.finishedPrinting();
+        cannon.schematicProgress=cannon.blocksToPlace==0?0:Math.clamp(cannon.blocksPlaced/(float)cannon.blocksToPlace,0,1);
+        if(changed)cannon.notifyUpdate();
+    
+        }
+    }
+    public void findInventories(){attachedInventories.clear();hasCreativeCrate=false;if(!isActualOwner())return;for(var side:Direction.values()){var pos=worldPosition.relative(side);if(!LoadedLevelAccess.isLoaded(level,pos))continue;if(LoadedLevelAccess.blockState(level,pos).is(AllBlocks.CREATIVE_CRATE))hasCreativeCrate=true;var storage=ItemStorage.SIDED.find(level,pos,side.getOpposite());if(storage!=null)attachedInventories.add(storage);}}
+    private void initializePrinter(ItemStack blueprint){
+        boolean continuing=!activeBlueprint.isEmpty()&&state!=State.STOPPED;var oldStatus=statusMsg;boolean finished=sourceFinished;
+        if(!blueprint.is(AllItems.SCHEMATIC)||!blueprint.has(AllDataComponents.SCHEMATIC_ANCHOR)){state=State.STOPPED;statusMsg="schematicInvalid";notifyUpdate();return;}
+        if(!blueprint.getOrDefault(AllDataComponents.SCHEMATIC_DEPLOYED,false)){state=State.STOPPED;statusMsg="schematicNotPlaced";notifyUpdate();return;}
+        printer.loadSchematic(blueprint,level,true);if(printer.isErrored()){state=State.STOPPED;statusMsg="schematicErrored";notifyUpdate();return;}
+        if(printer.isWorldEmpty()){state=State.STOPPED;statusMsg="schematicExpired";notifyUpdate();return;}
+        if(!printer.getAnchor().closerThan(worldPosition,MAX_ANCHOR_DISTANCE)){printer.resetSchematic();state=State.STOPPED;statusMsg="targetOutsideRange";notifyUpdate();return;}
+        activeBlueprint=blueprint.copy();hasTarget=printer.getCurrentTarget()!=null&&hasTarget;sourceFinished=finished;if(state==State.STOPPED)state=State.PAUSED;statusMsg=continuing?oldStatus:"ready";updateChecklist();notifyUpdate();
+    }
+    /** True only when a source block was deliberately skipped and this tick may scan again. */
+    private boolean tickPrinter(){
+        if(!printer.isLoaded()||printer.isErrored())return false;
+        if(state==State.PAUSED&&missingItem==null&&!positionNotLoaded&&!statusMsg.equals("noGunpowder"))return false;
+        if(!hasTarget){if(!printer.advanceCurrentPos()){sourceFinished=true;statusMsg="finishing";notifyUpdate();return false;}hasTarget=true;}
+        var target=printer.getCurrentTarget();if(target==null)return false;
+        if(!LoadedLevelAccess.isLoaded(level,target)||!SchematicWorldAccess.readyForPlacement(level,printer.getBlockReader().getBlockState(target),target)){positionNotLoaded=true;state=State.PAUSED;statusMsg="targetNotLoaded";notifyUpdate();return false;}if(positionNotLoaded){positionNotLoaded=false;state=State.RUNNING;}
+        var requirement=printer.getCurrentRequirement();if(requirement.isInvalid()||!printer.shouldPlaceCurrent(level,this::shouldPlace)){hasTarget=false;missingItem=null;statusMsg="searching";notifyUpdate();return true;}
+        if(!refillFuelIfPossible()){state=State.PAUSED;statusMsg="noGunpowder";notifyUpdate();return false;}
+        final LaunchedItem[] prepared={null};printer.handleCurrentTarget((pos,block,be)->prepared[0]=prepareBlockOrBelt(pos,requirement,block,be),(pos,entity)->prepared[0]=new LaunchedItem.ForEntity(worldPosition,pos,icon(requirement),entity));
+        if(prepared[0]==null){hasTarget=false;statusMsg="searching";notifyUpdate();return true;}
+        try(var transaction=Transaction.openOuter()){
+            var payment=hasCreativeCrate?new SchematicPayment.Result(new SchematicPayment.Receipt(List.of()),ItemStack.EMPTY):SchematicPayment.collect(requirement,attachedInventories,transaction);
+            if(!payment.complete()){missingItem=payment.missing().copy();if(skipMissing){hasTarget=false;missingItem=null;state=State.RUNNING;statusMsg="skipping";notifyUpdate();return true;}state=State.PAUSED;statusMsg="missingBlock";notifyUpdate();return false;}
+            if(!isActualOwner())return false;paymentOwner.updateSnapshots(transaction);prepared[0].paid(payment.receipt());flyingBlocks.add(prepared[0]);if(!hasCreativeCrate)remainingFuel--;if(!(prepared[0] instanceof LaunchedItem.ForBlockState block)||!block.state.isAir())blocksPlaced=Math.incrementExact(blocksPlaced);printerCooldown=SchematicConfig.get().schematicannonDelay();hasTarget=false;missingItem=null;state=State.RUNNING;statusMsg=prepared[0] instanceof LaunchedItem.ForBlockState block&&block.state.isAir()?"clearing":"placing";transaction.commit();
+        }
+        if(isActualOwner())level.playSound(null,worldPosition,AllSoundEvents.SCHEMATICANNON_LAUNCH_BLOCK,SoundSource.BLOCKS,1,1);return false;
+    }
+    private static ItemStack icon(ItemRequirement requirement){return requirement.getRequiredItems().isEmpty()?ItemStack.EMPTY:requirement.getRequiredItems().getFirst().stack.copy();}
+    private LaunchedItem prepareBlockOrBelt(BlockPos pos,ItemRequirement requirement,BlockState requested,BlockEntity be){
+        var state=requested;if(state.is(AllBlocks.BELT)){state=stripBeltIfNotLast(state);if(state.isAir())return null;if(state.is(AllBlocks.BELT)&&be instanceof BeltBlockEntity belt){int length=belt.beltLength;if(length<2)throw new IllegalArgumentException("Actual source schematic belt has no complete native length");var casings=new BeltBlockEntity.CasingType[length];Arrays.fill(casings,BeltBlockEntity.CasingType.NONE);var current=pos;for(int i=0;i<length;i++){var member=printer.getBlockReader().getBlockEntity(current);var memberState=printer.getBlockReader().getBlockState(current);if(!(member instanceof BeltBlockEntity segment)||!memberState.is(AllBlocks.BELT))throw new IllegalArgumentException("Actual source schematic belt is incomplete");casings[i]=segment.getCasingType();current=BeltBlock.nextSegmentPosition(memberState,current,state.getValue(BeltBlock.PART)!=BeltPart.END);}return new LaunchedItem.ForBelt(worldPosition,pos,new ItemStack(AllItems.BELT_CONNECTOR),state,casings);}}
+        return new LaunchedItem.ForBlockState(worldPosition,pos,icon(requirement),state,SchematicNbt.prepare(level,state,be));
+    }
+    public static BlockState stripBeltIfNotLast(BlockState state){var part=state.getValue(BeltBlock.PART);if(part==BeltPart.MIDDLE)return Blocks.AIR.defaultBlockState();var facing=state.getValue(BeltBlock.HORIZONTAL_FACING);var slope=state.getValue(BeltBlock.SLOPE);boolean last=switch(slope){case DOWNWARD->part==BeltPart.START;case UPWARD->part==BeltPart.END;default->facing.getAxisDirection()==Direction.AxisDirection.POSITIVE&&part==BeltPart.END||facing.getAxisDirection()==Direction.AxisDirection.NEGATIVE&&part==BeltPart.START;};return last?state:AllBlocks.SHAFT.defaultBlockState().setValue(BlockStateProperties.AXIS,slope==BeltSlope.SIDEWAYS?Direction.Axis.Y:facing.getClockWise().getAxis());}
+    private boolean refillFuelIfPossible(){
+        if(hasCreativeCrate){remainingFuel=0;return true;}int yield=SchematicConfig.get().schematicannonShotsPerGunpowder();if(remainingFuel>yield)remainingFuel=yield;if(remainingFuel>0)return true;
+        try(var transaction=Transaction.openOuter()){
+            var internal=inventory.getItem(4);boolean paid=!internal.isEmpty()&&internal.is(Items.GUNPOWDER)&&inventory.extractSlot(4,ItemVariant.of(internal),1,transaction)==1;
+            if(!paid)paid=SchematicPayment.collect(new ItemRequirement(ItemRequirement.ItemUseType.CONSUME,Items.GUNPOWDER),attachedInventories,transaction).complete();if(!paid||!isActualOwner())return false;paymentOwner.updateSnapshots(transaction);remainingFuel=yield;transaction.commit();return true;
+        }
+    }
+    public int getShotsPerGunpowder(){return hasCreativeCrate?0:SchematicConfig.get().schematicannonShotsPerGunpowder();}
+    public boolean shouldPlace(BlockPos pos,BlockState state,BlockEntity be,BlockState replaced,BlockState other,boolean normal){if(pos.closerThan(worldPosition,2)||!replaceBlockEntities&&(replaced.hasBlockEntity()||other!=null&&other.hasBlockEntity())||shouldIgnoreBlockState(state,be))return false;boolean air=state.isAir();return replaceMode==3||replaceMode==2&&!air||replaceMode==1&&!air&&(normal||!replaced.isRedstoneConductor(level,pos)&&(other==null||!other.isRedstoneConductor(level,pos)))||replaceMode==0&&!air&&!replaced.isRedstoneConductor(level,pos)&&(other==null||!other.isRedstoneConductor(level,pos));}
+    public boolean shouldIgnoreBlockState(BlockState state,BlockEntity be){if(state.is(Blocks.STRUCTURE_VOID))return true;var requirement=ItemRequirement.of(state,be);if(requirement.isEmpty()||requirement.isInvalid())return false;return state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)&&state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF)==DoubleBlockHalf.UPPER||state.hasProperty(BlockStateProperties.BED_PART)&&state.getValue(BlockStateProperties.BED_PART)==BedPart.HEAD||state.getBlock() instanceof net.minecraft.world.level.block.piston.PistonHeadBlock||state.is(AllBlocks.BELT)&&state.getValue(BeltBlock.PART)==BeltPart.MIDDLE;}
+    public void updateChecklist(){checklist.required.clear();checklist.damageRequired.clear();checklist.gathered.clear();checklist.blocksNotLoaded=false;blocksToPlace=printer.markAllBlockRequirements(checklist,level,this::shouldPlace);printer.markAllEntityRequirements(checklist);findInventories();for(var inventory:attachedInventories)for(var view:inventory)if(!view.isResourceBlank()&&view.getAmount()>0)checklist.collect(view.getResource().toStack((int)Math.min(Integer.MAX_VALUE,view.getAmount())));if(hasCreativeCrate)for(var item:checklist.required.keySet())checklist.gathered.put(item,checklist.getRequiredAmount(item));blocksToPlace=Math.addExact(blocksPlaced,blocksToPlace);}
+    private void tickPaperPrinter(){var input=inventory.getItem(2);if(input.isEmpty()||!printer.isLoaded()||printer.isErrored()){bookPrintingProgress=0;dontUpdateChecklist=false;return;}if(!dontUpdateChecklist)updateChecklist();var output=input.is(AllBlocks.CLIPBOARD.asItem())?checklist.createWrittenClipboard():checklist.createWrittenBook();var existing=inventory.getItem(3);if(!existing.isEmpty()&&(!ItemStack.isSameItemSameComponents(existing,output)||existing.getCount()>=existing.getMaxStackSize())){bookPrintingProgress=0;return;}bookPrintingProgress+=.05f;if(bookPrintingProgress<1){notifyUpdate();return;}inventory.removeItem(2,1);output.setCount(existing.getCount()+1);inventory.setItem(3,output);bookPrintingProgress=0;dontUpdateChecklist=true;notifyUpdate();}
+    private void finishedPrinting(){if(!sourceFinished||!flyingBlocks.isEmpty())return;var output=inventory.getItem(1);if(!output.isEmpty()&&(!output.is(AllItems.EMPTY_SCHEMATIC)||output.getCount()>=output.getMaxStackSize())){statusMsg="outputFull";notifyUpdate();return;}if(!activeBlueprint.isEmpty()&&ItemStack.matches(activeBlueprint,inventory.getItem(0))){inventory.removeItem(0,1);if(output.isEmpty())inventory.setItem(1,new ItemStack(AllItems.EMPTY_SCHEMATIC));else{output.grow(1);inventory.setChanged();}}printer.sendBlockUpdates(level);printer.resetSchematic();activeBlueprint=ItemStack.EMPTY;hasTarget=false;sourceFinished=false;state=State.STOPPED;statusMsg="finished";missingItem=null;level.playSound(null,worldPosition,AllSoundEvents.SCHEMATICANNON_FINISH,SoundSource.BLOCKS,1,1);notifyUpdate();}
+    private void writeCannonData(ValueOutput out,boolean privateData){if(privateData)inventory.write(out);out.putString("Status",statusMsg);out.putFloat("Progress",schematicProgress);out.putFloat("PaperProgress",bookPrintingProgress);out.putInt("RemainingFuel",remainingFuel);out.putString("State",state.name());out.putInt("AmountPlaced",blocksPlaced);out.putInt("AmountToPlace",blocksToPlace);if(missingItem!=null&&!missingItem.isEmpty())out.store("MissingItem",ItemStack.CODEC,missingItem);out.store("Options",SchematicannonOptions.CODEC,new SchematicannonOptions(replaceMode,skipMissing,replaceBlockEntities));var printerTag=new CompoundTag();printer.write(printerTag);out.store("Printer",CompoundTag.CODEC,printerTag);var launches=out.childrenList("FlyingBlocks");for(var launch:flyingBlocks)launch.write(launches.addChild(),privateData);out.putFloat("DefaultYaw",defaultYaw);out.putInt("PrinterCooldown",printerCooldown);out.putBoolean("HasTarget",hasTarget);out.putBoolean("SourceFinished",sourceFinished);if(privateData&&!activeBlueprint.isEmpty())out.store("ActiveBlueprint",ItemStack.CODEC,activeBlueprint);}
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);writeCannonData(out,!clientPacket);}
+    @Override protected void read(ValueInput in, boolean clientPacket){if(!clientPacket)inventory.read(in);statusMsg=in.getStringOr("Status","idle");schematicProgress=Math.clamp(in.getFloatOr("Progress",0),0,1);bookPrintingProgress=Math.clamp(in.getFloatOr("PaperProgress",0),0,1);remainingFuel=in.getIntOr("RemainingFuel",0);if(remainingFuel<0)throw new IllegalArgumentException("Invalid native cannon fuel");state=State.valueOf(in.getStringOr("State","STOPPED"));blocksPlaced=in.getIntOr("AmountPlaced",0);blocksToPlace=in.getIntOr("AmountToPlace",0);if(blocksPlaced<0||blocksToPlace<0)throw new IllegalArgumentException("Invalid native cannon source progress");missingItem=in.read("MissingItem",ItemStack.CODEC).orElse(null);var options=in.read("Options",SchematicannonOptions.CODEC).orElse(new SchematicannonOptions(2,false,false));replaceMode=options.replaceMode;skipMissing=options.skipMissing;replaceBlockEntities=options.replaceBlockEntities;printer.resetSchematic();in.read("Printer",CompoundTag.CODEC).ifPresent(tag->printer.fromTag(tag,level!=null&&level.isClientSide()));flyingBlocks.clear();for(var tag:in.read("FlyingBlocks",CompoundTag.CODEC.listOf()).orElse(List.of()))flyingBlocks.add(LaunchedItem.fromNBT(tag,in.lookup(),in.lookup().lookupOrThrow(net.minecraft.core.registries.Registries.BLOCK)));defaultYaw=in.getFloatOr("DefaultYaw",0);printerCooldown=Math.max(0,in.getIntOr("PrinterCooldown",0));hasTarget=in.getBooleanOr("HasTarget",missingItem!=null);sourceFinished=in.getBooleanOr("SourceFinished",false);activeBlueprint=in.read("ActiveBlueprint",ItemStack.CODEC).orElse(inventory.getItem(0).copy());
+        super.read(in, clientPacket);
+    }
+    @Override protected void applyImplicitComponents(DataComponentGetter components){super.applyImplicitComponents(components);var options=components.getOrDefault(AllDataComponents.SCHEMATICANNON_OPTIONS,new SchematicannonOptions(2,true,false));replaceMode=options.replaceMode;skipMissing=options.skipMissing;replaceBlockEntities=options.replaceBlockEntities;}
+    @Override protected void collectImplicitComponents(DataComponentMap.Builder components){super.collectImplicitComponents(components);components.set(AllDataComponents.SCHEMATICANNON_OPTIONS,new SchematicannonOptions(replaceMode,skipMissing,replaceBlockEntities));}
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){return super.getUpdateTag(registries);}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
+    @Override public void preRemoveSideEffects(BlockPos pos,BlockState state){if(level!=null&&!level.isClientSide()){for(int slot=0;slot<inventory.getContainerSize();slot++){var original=inventory.removeItemNoUpdate(slot);if(!original.isEmpty())Block.popResource(level,worldPosition,original);}for(var launch:List.copyOf(flyingBlocks))launch.ownerDestroyed(level,worldPosition);flyingBlocks.clear();}super.preRemoveSideEffects(pos,state);}
+    @Override public Component getDisplayName(){return Component.translatable("create.gui.schematicannon.title");}
+    @Override public com.simibubi.create.content.schematics.table.SchematicTableMenu.Opening getScreenOpeningData(ServerPlayer player){return new com.simibubi.create.content.schematics.table.SchematicTableMenu.Opening(worldPosition,getUpdateTag(player.registryAccess()),SchematicConfig.get().maxSchematicPacketSize(),SchematicConfig.get().maxTotalSchematicSize()*1000L);}
+    @Override public AbstractContainerMenu createMenu(int id,Inventory inventory,Player player){return new SchematicannonMenu(id,inventory,getScreenOpeningData((ServerPlayer)player));}
+    @Override public int getContainerSize(){return inventory.getContainerSize();}@Override public boolean isEmpty(){return inventory.isEmpty();}@Override public ItemStack getItem(int slot){return inventory.getItem(slot);}@Override public ItemStack removeItem(int slot,int count){return inventory.removeItem(slot,count);}@Override public ItemStack removeItemNoUpdate(int slot){return inventory.removeItemNoUpdate(slot);}@Override public void setItem(int slot,ItemStack stack){inventory.setItem(slot,stack);}@Override public boolean canPlaceItem(int slot,ItemStack stack){return inventory.canPlaceItem(slot,stack);}@Override public boolean stillValid(Player player){return canPlayerUse(player);}@Override public void clearContent(){inventory.clearContent();}
 }

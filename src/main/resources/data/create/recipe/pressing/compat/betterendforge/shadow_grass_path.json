@@ -1,0 +1,19 @@
+{
+  "type": "create:pressing",
+  "ingredients": [
+    "betterendforge:shadow_grass"
+  ],
+  "results": [
+    {
+      "id": "betterendforge:shadow_grass_path"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "betterendforge"
+      ]
+    }
+  ]
+}

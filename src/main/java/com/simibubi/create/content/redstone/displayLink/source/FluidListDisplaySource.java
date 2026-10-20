@@ -1,110 +1,19 @@
 package com.simibubi.create.content.redstone.displayLink.source;
 
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import com.simibubi.create.content.redstone.displayLink.*;
+import com.simibubi.create.content.trains.display.*;
+import java.util.*;
 import java.util.stream.Stream;
-
-import net.minecraft.network.chat.Component;
-import org.apache.commons.lang3.mutable.MutableInt;
-
-import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
-import com.simibubi.create.content.redstone.smartObserver.SmartObserverBlockEntity;
-import com.simibubi.create.content.trains.display.FlapDisplayBlockEntity;
-import com.simibubi.create.content.trains.display.FlapDisplayLayout;
-import com.simibubi.create.content.trains.display.FlapDisplaySection;
-import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.inventory.TankManipulationBehaviour;
-import com.simibubi.create.foundation.utility.FluidFormatter;
-
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.IntAttached;
-import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.fabricmc.fabric.api.transfer.v1.fluid.*;
+import net.minecraft.network.chat.*;
 import net.minecraft.world.level.material.Fluid;
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 
-public class FluidListDisplaySource extends ValueListDisplaySource {
+public final class FluidListDisplaySource extends ValueListDisplaySource {
+    @Override public boolean isAvailable(DisplayLinkContext context){return super.isAvailable(context)&&ObserverDisplayAccess.available(context);}
 
-
-	@Override
-	protected Stream<IntAttached<MutableComponent>> provideEntries(DisplayLinkContext context, int maxRows) {
-		BlockEntity sourceBE = context.getSourceBlockEntity();
-		if (!(sourceBE instanceof SmartObserverBlockEntity cobe))
-			return Stream.empty();
-
-		TankManipulationBehaviour tankManipulationBehaviour = cobe.getBehaviour(TankManipulationBehaviour.OBSERVE);
-		FilteringBehaviour filteringBehaviour = cobe.getBehaviour(FilteringBehaviour.TYPE);
-		IFluidHandler handler = tankManipulationBehaviour.getInventory();
-
-		if (handler == null)
-			return Stream.empty();
-
-
-		Map<Fluid, Integer> fluids = new HashMap<>();
-		Map<Fluid, FluidStack> fluidNames = new HashMap<>();
-
-		for (int i = 0; i < handler.getTanks(); i++) {
-			FluidStack stack = handler.getFluidInTank(i);
-			if (stack.isEmpty())
-				continue;
-			if (!filteringBehaviour.test(stack))
-				continue;
-
-			fluids.merge(stack.getFluid(), stack.getAmount(), Integer::sum);
-			fluidNames.putIfAbsent(stack.getFluid(), stack);
-		}
-
-		return fluids.entrySet()
-				.stream()
-				.sorted(Comparator.<Map.Entry<Fluid, Integer>>comparingInt(value -> value.getValue()).reversed())
-				.limit(maxRows)
-				.map(entry -> IntAttached.with(
-						entry.getValue(),
-						fluidNames.get(entry.getKey()).getHoverName().copy())
-				);
-	}
-
-	@Override
-	protected List<MutableComponent> createComponentsFromEntry(DisplayLinkContext context, IntAttached<MutableComponent> entry) {
-		int amount = entry.getFirst();
-		MutableComponent name = entry.getSecond().append(WHITESPACE);
-
-		Couple<MutableComponent> formatted = FluidFormatter.asComponents(amount, shortenNumbers(context));
-
-		return List.of(formatted.getFirst(), formatted.getSecond(), name);
-	}
-
-	@Override
-	public void loadFlapDisplayLayout(DisplayLinkContext context, FlapDisplayBlockEntity flapDisplay, FlapDisplayLayout layout) {
-		Integer max = ((MutableInt) context.flapDisplayContext).getValue();
-		boolean shorten = shortenNumbers(context);
-		int length = FluidFormatter.asString(max, shorten).length();
-		String layoutKey = "FluidList_" + length;
-
-		if (layout.isLayout(layoutKey))
-			return;
-
-		int maxCharCount = flapDisplay.getMaxCharCount(1);
-		int numberLength = Math.min(maxCharCount, Math.max(3, length - 2));
-		int nameLength = Math.max(maxCharCount - numberLength - 2, 0);
-
-		FlapDisplaySection value = new FlapDisplaySection(FlapDisplaySection.MONOSPACE * numberLength, "number", false, false).rightAligned();
-		FlapDisplaySection unit = new FlapDisplaySection(FlapDisplaySection.MONOSPACE * 2, "fluid_units", true, true);
-		FlapDisplaySection name = new FlapDisplaySection(FlapDisplaySection.MONOSPACE * nameLength, "alphabet", false, false);
-
-		layout.configure(layoutKey, List.of(value, unit, name));
-	}
-
-	@Override
-	protected String getTranslationKey() {
-		return "list_fluids";
-	}
-
-	@Override
-	protected boolean valueFirst() {
-		return false;
-	}
+    @Override protected Stream<Entry> provideEntries(DisplayLinkContext context,int maxRows){var amounts=new LinkedHashMap<Fluid,Long>();var names=new HashMap<Fluid,FluidVariant>();ObserverDisplayAccess.fluids(context).forEach((variant,amount)->{amounts.merge(variant.getFluid(),amount,ObserverDisplayAccess::sum);names.putIfAbsent(variant.getFluid(),variant);});return amounts.entrySet().stream().sorted(Map.Entry.<Fluid,Long>comparingByValue().reversed()).limit(maxRows).map(entry->new Entry(ObserverDisplayAccess.count(DisplayFormatting.millibuckets(entry.getValue())),FluidVariantAttributes.getName(names.get(entry.getKey())).copy()));}
+    @Override protected List<MutableComponent> createComponentsFromEntry(DisplayLinkContext context,Entry entry){boolean shortened=shortenNumbers(context)&&entry.value()>=1000;var value=Component.literal(shortened?String.format(Locale.ROOT,"%.1f",entry.value()/1000d):Integer.toString(entry.value()));var unit=DisplayFormatting.translate(shortened?"generic.unit.buckets":"generic.unit.millibuckets");return List.of(value,unit,entry.name().copy().append(" "));}
+    @Override public void loadFlapDisplayLayout(DisplayLinkContext context,FlapDisplayBlockEntity board,FlapDisplayLayout layout){int max=context.flapDisplayContext instanceof int[] values?values[0]:0,length=DisplayFormatting.fluid(max,shortenNumbers(context)).length();var key="FluidList_"+length;if(layout.isLayout(key))return;int capacity=board.getMaxCharCount(1),numberLength=Math.min(capacity,Math.max(3,length-2)),nameLength=Math.max(capacity-numberLength-2,0);layout.configure(key,List.of(new FlapDisplaySection(FlapDisplaySection.MONOSPACE*numberLength,"number",false,false).rightAligned(),new FlapDisplaySection(FlapDisplaySection.MONOSPACE*2,"fluid_units",true,true),new FlapDisplaySection(FlapDisplaySection.MONOSPACE*nameLength,"alphabet",false,false)));}
+    @Override protected boolean valueFirst(){return false;}
+    @Override protected String getTranslationKey(){return "list_fluids";}
 }

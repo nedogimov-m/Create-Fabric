@@ -1,0 +1,22 @@
+package com.simibubi.create.content.decoration;
+import com.simibubi.create.foundation.block.connected.OmnidirectionalCT.Context;
+import com.simibubi.create.foundation.block.connected.OmnidirectionalCT;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
+import net.minecraft.core.*;
+import net.minecraft.util.Mth;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.*;
+/** Pinned roof height/adjacent-high and native stair-shape context, without old model APIs. */
+public final class RoofBlockCTBehaviour {
+ public static boolean isUprightStair(BlockState state){return state.hasProperty(StairBlock.SHAPE)&&state.getOptionalValue(StairBlock.HALF).orElse(Half.TOP)==Half.BOTTOM;}
+ public static int textureIndex(BlockAndTintGetter level,BlockPos pos,BlockState state){
+  if(isUprightStair(state)){var shape=state.getValue(StairBlock.SHAPE);var facing=state.getValue(StairBlock.FACING);if(shape==StairsShape.OUTER_LEFT||shape==StairsShape.INNER_LEFT)facing=facing.getCounterClockWise();int type=shape==StairsShape.STRAIGHT?0:shape==StairsShape.INNER_LEFT||shape==StairsShape.INNER_RIGHT?1:2,rot=facing.get2DDataValue();return new int[][]{{1,6,9,4},{14,12,13,15},{2,10,8,0},{5,5,5,5}}[type][rot];}
+  Direction h=Direction.EAST,v=Direction.NORTH;boolean up=connectsTo(level,pos,state,v,null),down=connectsTo(level,pos,state,v.getOpposite(),null),left=connectsTo(level,pos,state,h.getOpposite(),null),right=connectsTo(level,pos,state,h,null);boolean tl=up&&left&&connectsTo(level,pos,state,v,h.getOpposite()),tr=up&&right&&connectsTo(level,pos,state,v,h),bl=down&&left&&connectsTo(level,pos,state,v.getOpposite(),h.getOpposite()),br=down&&right&&connectsTo(level,pos,state,v.getOpposite(),h);return roofIndex(new Context(up,down,left,right,tl,tr,bl,br));
+ }
+ public static int roofIndex(Context c){boolean up=c.down()&&!c.up()&&(c.left()||c.right()),down=!c.down()&&c.up()&&(c.left()||c.right()),left=!c.left()&&c.right()&&(c.up()||c.down()),right=c.left()&&!c.right()&&(c.up()||c.down());if(up){if(left)return c.bottomRight()?0:5;if(right)return c.bottomLeft()?2:5;return 1;}if(down){if(left)return c.topRight()?8:5;if(right)return c.topLeft()?10:5;return 9;}if(left)return 4;if(right)return 6;if(!c.up()||!c.down()||!c.left()||!c.right())return 5;if(c.bottomLeft()&&c.topRight()){if(c.topLeft()&&!c.bottomRight())return 12;if(c.bottomRight()&&!c.topLeft())return 15;if(!c.bottomRight()&&!c.topLeft())return 7;}if(c.bottomRight()&&c.topLeft()){if(c.topRight()&&!c.bottomLeft())return 13;if(c.bottomLeft()&&!c.topRight())return 14;if(!c.bottomLeft()&&!c.topRight())return 11;}return 5;}
+ private static boolean connectsTo(BlockAndTintGetter level,BlockPos pos,BlockState state,Direction primary,Direction secondary){var otherPos=pos.relative(primary);if(secondary!=null)otherPos=otherPos.relative(secondary);var other=OmnidirectionalCT.appearance(level,level.getBlockState(pos),Direction.UP,pos,otherPos);if(connects(level,pos,state,other)||connectsHigh(level,pos,state,other,level.getBlockState(otherPos.above())))return true;if(primary!=null&&secondary!=null)return false;for(var offset:new Direction[]{primary,secondary}){if(offset==null||offset.getAxis().isVertical())continue;for(var side:new Direction[]{offset.getClockWise(),offset.getCounterClockWise()}){var sidePos=pos.relative(side);if(connectsHigh(level,pos,state,level.getBlockState(sidePos),level.getBlockState(sidePos.above())))return true;}}return false;}
+ private static boolean connects(BlockAndTintGetter level,BlockPos pos,BlockState state,BlockState other){double top=state.getCollisionShape(level,pos).max(Direction.Axis.Y),otherTop=other.getSoundType()!=SoundType.COPPER?0:other.getCollisionShape(level,pos).max(Direction.Axis.Y);return Mth.equal(top,otherTop);}
+ private static boolean connectsHigh(BlockAndTintGetter level,BlockPos pos,BlockState state,BlockState other,BlockState above){if(state.getBlock() instanceof SlabBlock&&other.getBlock() instanceof SlabBlock&&state.getValue(SlabBlock.TYPE)==SlabType.BOTTOM&&other.getValue(SlabBlock.TYPE)!=SlabType.BOTTOM)return true;if(state.getBlock() instanceof SlabBlock&&state.getValue(SlabBlock.TYPE)==SlabType.BOTTOM){double top=state.getCollisionShape(level,pos).max(Direction.Axis.Y),otherTop=other.getCollisionShape(level,pos).max(Direction.Axis.Y);return !Mth.equal(top,otherTop)&&otherTop>top;}return above.getCollisionShape(level,pos).max(Direction.Axis.Y)>0;}
+ private RoofBlockCTBehaviour(){}
+}

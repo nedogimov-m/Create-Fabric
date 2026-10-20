@@ -1,0 +1,11 @@
+{
+  "replace": false,
+  "values": [
+    "create:andesite_alloy_block",
+    "create:experience_block",
+    "create:raw_zinc_block",
+    "create:zinc_block",
+    "create:brass_block",
+    "create:cardboard_block"
+  ]
+}

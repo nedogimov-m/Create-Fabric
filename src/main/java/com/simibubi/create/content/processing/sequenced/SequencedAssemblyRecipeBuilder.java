@@ -1,110 +1,66 @@
 package com.simibubi.create.content.processing.sequenced;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Function;
-import java.util.function.UnaryOperator;
-
-import com.simibubi.create.AllRecipeTypes;
-import com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipeParams;
-import com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe;
-import com.simibubi.create.content.processing.recipe.ProcessingOutput;
-import com.simibubi.create.content.processing.recipe.ProcessingRecipe;
-import com.simibubi.create.content.processing.recipe.ProcessingRecipeBuilder;
-import com.simibubi.create.content.processing.recipe.StandardProcessingRecipe;
-import com.simibubi.create.content.processing.recipe.StandardProcessingRecipe.Builder;
-
+import com.google.gson.*;
+import com.simibubi.create.api.data.recipe.*;
+import com.simibubi.create.content.processing.recipe.*;
+import java.util.*;
+import java.util.function.*;
+import net.fabricmc.fabric.api.resource.conditions.v1.*;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.data.recipes.RecipeOutput;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.*;
 import net.minecraft.tags.TagKey;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.crafting.*;
 import net.minecraft.world.level.ItemLike;
 
-import net.neoforged.neoforge.common.conditions.ICondition;
-
+/** Actual assembly steps and weighted outcomes. Fluid amounts in step builders use Fabric droplets. */
 public class SequencedAssemblyRecipeBuilder {
-
-	private ResourceLocation id;
-	private SequencedAssemblyRecipe recipe;
-	protected List<ICondition> recipeConditions;
-
-	public SequencedAssemblyRecipeBuilder(ResourceLocation id) {
-		this.id = id;
-		recipeConditions = new ArrayList<>();
-		this.recipe = new SequencedAssemblyRecipe(AllRecipeTypes.SEQUENCED_ASSEMBLY.getSerializer());
-	}
-
-	public <R extends StandardProcessingRecipe<?>> SequencedAssemblyRecipeBuilder addStep(
-		StandardProcessingRecipe.Factory<R> factory,
-		UnaryOperator<Builder<R>> builder) {
-		return addStep((Function<ResourceLocation, Builder<R>>)
-			id -> new Builder<>(factory, id), builder);
-	}
-
-	public <R extends ItemApplicationRecipe> SequencedAssemblyRecipeBuilder addStep(
-		ItemApplicationRecipe.Factory<R> factory,
-		UnaryOperator<ItemApplicationRecipe.Builder<R>> builder) {
-		return addStep((Function<ResourceLocation, ItemApplicationRecipe.Builder<R>>)
-			id -> new ItemApplicationRecipe.Builder<>(factory, id), builder);
-	}
-
-	public <B extends ProcessingRecipeBuilder<?, ?, B>> SequencedAssemblyRecipeBuilder addStep(
-		Function<ResourceLocation, B> factory,
-		UnaryOperator<B> builder) {
-		B recipeBuilder = factory.apply(ResourceLocation.withDefaultNamespace("dummy"));
-		Item placeHolder = recipe.getTransitionalItem().getItem();
-		recipe.getSequence()
-			.add(new SequencedRecipe<>(builder.apply(recipeBuilder.require(placeHolder)
-					.output(placeHolder))
-				.build()));
-		return this;
-	}
-
-	public SequencedAssemblyRecipeBuilder require(ItemLike ingredient) {
-		return require(Ingredient.of(ingredient));
-	}
-
-	public SequencedAssemblyRecipeBuilder require(TagKey<Item> tag) {
-		return require(Ingredient.of(tag));
-	}
-
-	public SequencedAssemblyRecipeBuilder require(Ingredient ingredient) {
-		recipe.ingredient = ingredient;
-		return this;
-	}
-
-	public SequencedAssemblyRecipeBuilder transitionTo(ItemLike item) {
-		recipe.transitionalItem = new ProcessingOutput(item.asItem(), 1, 1);
-		return this;
-	}
-
-	public SequencedAssemblyRecipeBuilder loops(int loops) {
-		recipe.loops = loops;
-		return this;
-	}
-
-	public SequencedAssemblyRecipeBuilder addOutput(ItemLike item, float weight) {
-		return addOutput(new ItemStack(item), weight);
-	}
-
-	public SequencedAssemblyRecipeBuilder addOutput(ItemStack item, float weight) {
-		recipe.resultPool.add(new ProcessingOutput(item.getItem(), item.getCount(), item.getComponentsPatch(), weight));
-		return this;
-	}
-
-	public RecipeHolder<SequencedAssemblyRecipe> build() {
-		return new RecipeHolder<>(id, recipe);
-	}
-
-	public void build(RecipeOutput consumer) {
-		RecipeHolder<SequencedAssemblyRecipe> holder = build();
-
-		ResourceLocation id = ResourceLocation.fromNamespaceAndPath(holder.id().getNamespace(),
-				AllRecipeTypes.SEQUENCED_ASSEMBLY.getId().getPath() + "/" + holder.id().getPath());
-
-		consumer.accept(id, holder.value(), null, recipeConditions.toArray(new ICondition[0]));
-	}
+    private final Identifier id;
+    private Function<HolderLookup.Provider, JsonElement> ingredient;
+    private final List<ProcessingRecipeBuilder> steps = new ArrayList<>();
+    private final List<ProcessingOutput> results = new ArrayList<>();
+    private final List<ResourceCondition> conditions = new ArrayList<>();
+    private ItemStack transitional;
+    private int loops = 5;
+    public SequencedAssemblyRecipeBuilder(Identifier id) { this.id = Objects.requireNonNull(id); }
+    public SequencedAssemblyRecipeBuilder require(ItemLike item) { return require(Ingredient.of(item)); }
+    public SequencedAssemblyRecipeBuilder require(Ingredient value) { ingredient = lookup -> RecipeData.encode(Ingredient.CODEC, value, lookup); return this; }
+    public SequencedAssemblyRecipeBuilder require(TagKey<Item> tag) { ingredient = lookup -> new JsonPrimitive("#" + tag.location()); return this; }
+    public SequencedAssemblyRecipeBuilder transitionTo(ItemLike item) { return transitionTo(new ItemStack(item)); }
+    public SequencedAssemblyRecipeBuilder transitionTo(ItemStack item) {
+        if (!steps.isEmpty() || item.isEmpty()) throw new IllegalStateException("Choose a nonempty transitional item before adding assembly steps");
+        transitional = item.copyWithCount(1); return this;
+    }
+    public SequencedAssemblyRecipeBuilder loops(int value) { if (value < 0) throw new IllegalArgumentException("Assembly loops must be nonnegative"); loops = value; return this; }
+    public SequencedAssemblyRecipeBuilder addStep(RecipeType<?> type, UnaryOperator<ProcessingRecipeBuilder> transform) { return addStep(stepId -> new ProcessingRecipeBuilder(type, stepId), transform); }
+    public SequencedAssemblyRecipeBuilder addStep(Function<Identifier, ProcessingRecipeBuilder> factory, UnaryOperator<ProcessingRecipeBuilder> transform) {
+        if (transitional == null) throw new IllegalStateException("Choose a transitional item before adding assembly steps");
+        var builder = transform.apply(factory.apply(id.withSuffix("/step_" + steps.size())).require(transitional.getItem()).output(transitional));
+        if (!builder.conditions().isEmpty()) throw new IllegalArgumentException("Put load conditions on the assembly owner, not an individual step");
+        steps.add(builder); return this;
+    }
+    public SequencedAssemblyRecipeBuilder addOutput(ItemLike item, float weight) { return addOutput(new ItemStack(item), weight); }
+    public SequencedAssemblyRecipeBuilder addOutput(ItemStack stack, float weight) {
+        if (stack.isEmpty() || stack.getCount() > 99 || !Float.isFinite(weight) || weight < 0) throw new IllegalArgumentException("Assembly output requires a nonempty item count 1..99 and a finite nonnegative weight");
+        results.add(new ProcessingOutput(stack.getItem(), stack.getCount(), stack.getComponentsPatch(), weight)); return this;
+    }
+    public SequencedAssemblyRecipeBuilder withCondition(ResourceCondition value) { conditions.add(Objects.requireNonNull(value)); return this; }
+    public SequencedAssemblyRecipeBuilder whenModLoaded(String mod) { return withCondition(ResourceConditions.allModsLoaded(mod)); }
+    public SequencedAssemblyRecipeBuilder whenModMissing(String mod) { return withCondition(ResourceConditions.not(ResourceConditions.allModsLoaded(mod))); }
+    public JsonObject buildJson(HolderLookup.Provider lookup) {
+        if (ingredient == null || transitional == null || steps.isEmpty() || results.isEmpty() || (long) loops * steps.size() > Integer.MAX_VALUE || results.stream().mapToDouble(ProcessingOutput::chance).sum() <= 0)
+            throw new IllegalStateException("Assembly requires ingredient, transition, steps, a positive output weight and a bounded total length");
+        var json = RecipeData.object("type", "create:sequenced_assembly"); json.add("ingredient", ingredient.apply(lookup));
+        json.add("transitional_item", RecipeData.encode(ProcessingOutput.CODEC, new ProcessingOutput(transitional.getItem(), 1, transitional.getComponentsPatch(), 1), lookup));
+        var sequence = new JsonArray(); for (var step : steps) sequence.add(step.buildJson(lookup)); json.add("sequence", sequence);
+        var pool = new JsonArray(); for (var result : results) pool.add(RecipeData.encode(ProcessingOutput.WEIGHTED_CODEC, result, lookup));
+        json.add("results", pool); json.addProperty("loops", loops); RecipeData.decode(json, lookup); return json;
+    }
+    public RecipeHolder<SequencedAssemblyRecipe> build(HolderLookup.Provider lookup) { return new RecipeHolder<>(ResourceKey.create(Registries.RECIPE, id), (SequencedAssemblyRecipe) RecipeData.decode(buildJson(lookup), lookup)); }
+    public void build(RecipeOutput output) {
+        if (!(output instanceof RecipeDataOutput data)) throw new IllegalArgumentException("Use a registry-aware Create recipe provider");
+        RecipeData.emit(output, id.withPrefix("sequenced_assembly/"), buildJson(data.registries()), conditions);
+    }
 }

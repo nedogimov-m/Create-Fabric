@@ -1,3 +1,4 @@
+// Create1.21.1 SimpleBuilder associations, MIT; native26.3 direct registration lifecycle.
 package com.simibubi.create.api.registry.registrate;
 
 import java.util.function.BiConsumer;
@@ -9,36 +10,86 @@ import org.jetbrains.annotations.Nullable;
 import com.simibubi.create.api.registry.SimpleRegistry;
 import com.simibubi.create.api.registry.SimpleRegistry.Provider;
 import com.simibubi.create.impl.registry.TagProviderImpl;
-import com.tterrag.registrate.AbstractRegistrate;
-import com.tterrag.registrate.builders.AbstractBuilder;
-import com.tterrag.registrate.builders.BuilderCallback;
 
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
-import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.Identifier;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Consumer;
+import com.simibubi.create.api.registrate.CreateRegistrateRegistrationCallback;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.material.Fluid;
 
-public class SimpleBuilder<R, T extends R, P> extends AbstractBuilder<R, T, P, SimpleBuilder<R, T, P>> {
-	private final Supplier<T> value;
+/** Native registry builder; source associations publish only after the real native entry event. */
+public class SimpleBuilder<R, T extends R, P> implements Supplier<T> {
+    private final Registry<R> registry;
+    private final P parent;
+    private final Identifier id;
+    private final Supplier<T> value;
+    private final List<Consumer<? super T>> callbacks = new ArrayList<>();
+    private enum Stage { NEW, CREATING, PUBLISHING, PUBLISHED, FAILED }
+    private Stage stage = Stage.NEW;
+    private T created, registered;
 
 	private SimpleRegistryAccess<Block, R> byBlock;
 	private SimpleRegistryAccess<BlockEntityType<?>, R> byBlockEntity;
 	private SimpleRegistryAccess<EntityType<?>, R> byEntity;
 	private SimpleRegistryAccess<Fluid, R> byFluid;
 
-	public SimpleBuilder(AbstractRegistrate<?> owner, P parent, String name, BuilderCallback callback, ResourceKey<Registry<R>> registryKey, Supplier<T> value) {
-		super(owner, parent, name, callback, registryKey);
-		this.value = value;
-	}
-
-	@Override
-	protected T createEntry() {
-		return this.value.get();
-	}
+    public SimpleBuilder(Registry<R> registry, P parent, Identifier id, Supplier<T> value) {
+        this.registry = Objects.requireNonNull(registry, "registry"); this.parent = parent;
+        this.id = Objects.requireNonNull(id, "id"); this.value = Objects.requireNonNull(value, "value");
+    }
+    public static <R, T extends R> SimpleBuilder<R, T, Registry<R>> create(Registry<R> registry, Identifier id, Supplier<T> value) {
+        return new SimpleBuilder<>(registry, registry, id, value);
+    }
+    protected T createEntry() { return value.get(); }
+    public synchronized SimpleBuilder<R, T, P> onRegister(Consumer<? super T> callback) {
+        Objects.requireNonNull(callback, "callback");
+        if (stage == Stage.PUBLISHED) CreateRegistrateRegistrationCallback.<R, T>register(registry, id, callback);
+        else {
+            if (stage == Stage.FAILED) throw new IllegalStateException("Native builder registration failed: " + id);
+            callbacks.add(callback);
+        }
+        return this;
+    }
+    public synchronized T register() {
+        if (stage != Stage.NEW) throw new IllegalStateException("Native builder already attempted registration: " + id);
+        if (registry.containsKey(id)) throw new IllegalArgumentException("Native registry entry already exists: " + id);
+        stage = Stage.CREATING;
+        try {
+            created = Objects.requireNonNull(createEntry(), "Native entry factory returned null: " + id);
+            if (registry.containsKey(id)) throw new IllegalArgumentException("Native registry entry appeared during factory: " + id);
+            stage = Stage.PUBLISHING;
+            CreateRegistrateRegistrationCallback.<R, T>register(registry, id, this::publish);
+            Registry.register(registry, id, created);
+            if (stage != Stage.PUBLISHED || registered != created || registry.getValue(id) != registered)
+                throw new IllegalStateException("Native registry did not publish the builder's actual entry: " + id);
+            return registered;
+        } catch (RuntimeException | Error failure) {
+            if (stage != Stage.PUBLISHED) stage = Stage.FAILED;
+            throw failure;
+        }
+    }
+    private synchronized void publish(T entry) {
+        if (stage != Stage.PUBLISHING || entry != created || registry.getValue(id) != entry)
+            throw new IllegalStateException("Unexpected native builder publication: " + id);
+        registered = entry; stage = Stage.PUBLISHED;
+        var publishedCallbacks = List.copyOf(callbacks); callbacks.clear();
+        for (var callback : publishedCallbacks) callback.accept(entry);
+    }
+    @Override public synchronized T get() {
+        if (stage != Stage.PUBLISHED) throw new IllegalStateException("Native builder entry has not been published: " + id);
+        return registered;
+    }
+    public P build() { register(); return parent; }
+    public Registry<R> getRegistry() { return registry; }
+    public Identifier getId() { return id; }
 
 	// for setup
 

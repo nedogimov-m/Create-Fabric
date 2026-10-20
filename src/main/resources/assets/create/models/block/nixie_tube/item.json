@@ -1,3 +1,3 @@
 {
-	"parent": "create:block/nixie_tube/block"
+  "parent": "create:block/nixie_tube/block"
 }

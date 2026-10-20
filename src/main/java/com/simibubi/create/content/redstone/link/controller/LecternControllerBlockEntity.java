@@ -1,193 +1,87 @@
 package com.simibubi.create.content.redstone.link.controller;
 
-import java.util.List;
+import com.simibubi.create.*;
 import java.util.UUID;
-
-import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllItems;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.createmod.catnip.codecs.CatnipCodecUtils;
-import net.createmod.catnip.platform.CatnipServices;
-import net.minecraft.client.Minecraft;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.ItemContainerContents;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+public final class LecternControllerBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity{
+    public static java.util.function.Consumer<LecternControllerBlockEntity> CLIENT_SESSION=entity->{};
+    private ItemContainerContents controllerData=ItemContainerContents.EMPTY;
+    private UUID user,previousClientUser;private boolean deactivatedThisTick,containsController=true;
+    public LecternControllerBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.LECTERN_CONTROLLER,pos,state);}
+    public ItemStack getController(){if(!containsController)return ItemStack.EMPTY;var stack=new ItemStack(AllItems.LINKED_CONTROLLER);stack.set(AllDataComponents.LINKED_CONTROLLER_ITEMS,controllerData);return stack;}
+    public boolean hasUser(){return user!=null;}public UUID getUser(){return user;}
+    public boolean isUsedBy(Player player){return user!=null&&user.equals(player.getUUID());}
+    private BlockEntity publishedEntity(){
+        if(level==null)return null;var chunk=level.getChunkSource().getChunkNow(worldPosition.getX()>>4,worldPosition.getZ()>>4);
+        return chunk==null?null:chunk.getBlockEntities().get(worldPosition);
+    }
+    public boolean isPublished(){return publishedEntity()==this;}
+    public static boolean playerInRange(Player player,Level level,BlockPos pos){double reach=.4*player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);return player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos))<reach*reach;}
+    public boolean tryStartUsing(Player player){
+        if(!(level instanceof ServerLevel server)||deactivatedThisTick||user!=null||!containsController||player.isSpectator()
+            ||player.level()!=level||!isPublished()||!playerInRange(player,level,worldPosition))return false;
+        if(!LinkedControllerServerHandler.claimSession(server,player.getUUID(),worldPosition))return false;
+        user=player.getUUID();changed();return true;
+    }
+    public void tryStopUsing(Player player){if(isUsedBy(player))stopUsing();}
+    public void stopUsing(){if(user==null)return;var previous=user;user=null;deactivatedThisTick=true;
+        if(level instanceof ServerLevel server&&LinkedControllerServerHandler.ownsSession(server,previous,worldPosition)
+            &&(publishedEntity()==null||publishedEntity()==this)){
+            LinkedControllerServerHandler.releasePlayer(server.getServer(),previous);
+        }changed();}
+    public void setController(ItemStack controller){
+        controllerData=controller.getOrDefault(AllDataComponents.LINKED_CONTROLLER_ITEMS,ItemContainerContents.EMPTY);containsController=true;changed();
+        if(level!=null)level.playSound(null,worldPosition,AllSoundEvents.CONTROLLER_PUT,SoundSource.BLOCKS,1,1);
+    }
+    public void swapControllers(ItemStack held,Player player,InteractionHand hand){
+        if(!(level instanceof ServerLevel)||held.isEmpty())return;
+        var previous=getController();var replacement=held.copyWithCount(1);stopUsing();setController(replacement);
+        held.shrink(1);
+        if(held.isEmpty())player.setItemInHand(hand,previous);
+        else QueuedControllerDrops.dropOrQueue((ServerLevel)level,worldPosition,previous);
+    }
+    public void dropController(){
+        if(!(level instanceof ServerLevel server)||!containsController)return;
+        stopUsing();var stack=getController();QueuedControllerDrops.dropOrQueue(server,worldPosition,stack);
+        containsController=false;controllerData=ItemContainerContents.EMPTY;changed();
+    }
+    public static void tick(Level level,BlockPos pos,BlockState state,LecternControllerBlockEntity entity){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, entity)) {
+            if (!createTick.shouldTick()) return;
 
-public class LecternControllerBlockEntity extends SmartBlockEntity {
-	private ItemContainerContents controllerData = ItemContainerContents.EMPTY;
-	private UUID user;
-	private UUID prevUser;    // used only on client
-	private boolean deactivatedThisTick;    // used only on server
-
-	public LecternControllerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-	}
-
-	@Override
-	protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(compound, registries, clientPacket);
-		compound.put("ControllerData", CatnipCodecUtils.encode(ItemContainerContents.CODEC, registries, controllerData).orElseThrow());
-		if (user != null)
-			compound.putUUID("User", user);
-	}
-
-	@Override
-	public void writeSafe(CompoundTag compound, HolderLookup.Provider registries) {
-		super.writeSafe(compound, registries);
-		compound.put("ControllerData", CatnipCodecUtils.encode(ItemContainerContents.CODEC, registries, controllerData).orElseThrow());
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-
-		controllerData = CatnipCodecUtils.decode(ItemContainerContents.CODEC, registries, compound.get("ControllerData"))
-			.orElse(ItemContainerContents.EMPTY);
-		user = compound.hasUUID("User") ? compound.getUUID("User") : null;
-	}
-
-	public ItemStack getController() {
-		return createLinkedController();
-	}
-
-	public boolean hasUser() {
-		return user != null;
-	}
-
-	public boolean isUsedBy(Player player) {
-		return hasUser() && user.equals(player.getUUID());
-	}
-
-	public void tryStartUsing(Player player) {
-		if (!deactivatedThisTick && !hasUser() && !playerIsUsingLectern(player) && playerInRange(player, level, worldPosition))
-			startUsing(player);
-	}
-
-	public void tryStopUsing(Player player) {
-		if (isUsedBy(player))
-			stopUsing(player);
-	}
-
-	private void startUsing(Player player) {
-		user = player.getUUID();
-		player.getPersistentData().putBoolean("IsUsingLecternController", true);
-		sendData();
-	}
-
-	private void stopUsing(Player player) {
-		user = null;
-		if (player != null)
-			player.getPersistentData().remove("IsUsingLecternController");
-		deactivatedThisTick = true;
-		sendData();
-	}
-
-	public static boolean playerIsUsingLectern(Player player) {
-		return player.getPersistentData().contains("IsUsingLecternController");
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		if (level.isClientSide) {
-			CatnipServices.PLATFORM.executeOnClientOnly(() -> this::tryToggleActive);
-			prevUser = user;
-		}
-
-		if (!level.isClientSide) {
-			deactivatedThisTick = false;
-
-			if (!(level instanceof ServerLevel))
-				return;
-			if (user == null)
-				return;
-
-			Entity entity = ((ServerLevel) level).getEntity(user);
-			if (!(entity instanceof Player player)) {
-				stopUsing(null);
-				return;
-			}
-
-			if (!playerInRange(player, level, worldPosition) || !playerIsUsingLectern(player))
-				stopUsing(player);
-		}
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private void tryToggleActive() {
-		if (user == null && Minecraft.getInstance().player.getUUID().equals(prevUser)) {
-			LinkedControllerClientHandler.deactivateInLectern();
-		} else if (prevUser == null && Minecraft.getInstance().player.getUUID().equals(user)) {
-			LinkedControllerClientHandler.activateInLectern(worldPosition);
-		}
-	}
-
-	public void setController(ItemStack newController) {
-		if (newController != null) {
-			controllerData = newController.getOrDefault(AllDataComponents.LINKED_CONTROLLER_ITEMS, ItemContainerContents.EMPTY);
-			AllSoundEvents.CONTROLLER_PUT.playOnServer(level, worldPosition);
-		}
-	}
-
-	public void swapControllers(ItemStack stack, Player player, InteractionHand hand, BlockState state) {
-		ItemStack newController = stack.copy();
-		stack.setCount(0);
-		if (player.getItemInHand(hand).isEmpty()) {
-			player.setItemInHand(hand, createLinkedController());
-		} else {
-			dropController(state);
-		}
-		setController(newController);
-	}
-
-	public void dropController(BlockState state) {
-		Entity entity = ((ServerLevel) level).getEntity(user);
-		if (entity instanceof Player player)
-			stopUsing(player);
-
-		Direction dir = state.getValue(LecternControllerBlock.FACING);
-		double x = worldPosition.getX() + 0.5 + 0.25 * dir.getStepX();
-		double y = worldPosition.getY() + 1;
-		double z = worldPosition.getZ() + 0.5 + 0.25 * dir.getStepZ();
-		ItemEntity itementity = new ItemEntity(level, x, y, z, createLinkedController());
-		itementity.setDefaultPickUpDelay();
-		level.addFreshEntity(itementity);
-		controllerData = ItemContainerContents.EMPTY;
-	}
-
-	public static boolean playerInRange(Player player, Level world, BlockPos pos) {
-		//double modifier = world.isRemote ? 0 : 1.0;
-		double reach = 0.4 * player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);// + modifier;
-		return player.getEyePosition().distanceToSqr(Vec3.atCenterOf(pos)) < reach * reach;
-	}
-
-	private ItemStack createLinkedController() {
-		ItemStack stack = AllItems.LINKED_CONTROLLER.asStack();
-		stack.set(AllDataComponents.LINKED_CONTROLLER_ITEMS, controllerData);
-		return stack;
-	}
+        if(level.isClientSide()){
+            if(!java.util.Objects.equals(entity.user,entity.previousClientUser)){
+                entity.previousClientUser=entity.user;CLIENT_SESSION.accept(entity);
+            }return;
+        }
+        if(!(level instanceof ServerLevel server))return;entity.deactivatedThisTick=false;
+        if(entity.user==null)return;var player=server.getServer().getPlayerList().getPlayer(entity.user);
+        if(player==null||player.isSpectator()||player.level()!=level||!playerInRange(player,level,pos)
+            ||!LinkedControllerServerHandler.ownsSession(server,entity.user,pos))entity.stopUsing();
+    
+        }
+    }
+    @Override public void invalidate(){stopUsing();super.invalidate();}
+    @Override public void preRemoveSideEffects(BlockPos pos,BlockState state){dropController();super.preRemoveSideEffects(pos,state);}
+    private void changed(){setChanged();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS);}
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);out.store("ControllerData",ItemContainerContents.CODEC,controllerData);out.putBoolean("HasController",containsController);if(user!=null)out.store("User",UUIDUtil.CODEC,user);}
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);controllerData=in.read("ControllerData",ItemContainerContents.CODEC).orElse(ItemContainerContents.EMPTY);containsController=in.getBooleanOr("HasController",true);user=in.read("User",UUIDUtil.CODEC).orElse(null);}
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){return super.getUpdateTag(registries);}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
 }

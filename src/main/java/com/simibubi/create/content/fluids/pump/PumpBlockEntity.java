@@ -1,121 +1,59 @@
 package com.simibubi.create.content.fluids.pump;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Set;
-
+import java.util.*;
 import org.jetbrains.annotations.Nullable;
-
-import net.minecraft.core.HolderLookup;
-
-import org.apache.commons.lang3.mutable.MutableBoolean;
-
-import com.simibubi.create.content.fluids.FluidPropagator;
-import com.simibubi.create.content.fluids.FluidTransportBehaviour;
-import com.simibubi.create.content.fluids.PipeConnection;
+import com.simibubi.create.*;
+import com.simibubi.create.content.fluids.*;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.data.Pair;
+import net.createmod.catnip.data.*;
 import net.createmod.catnip.math.BlockFace;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.BlockAndTintGetter;
-import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.core.*;
+import net.minecraft.world.level.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+public final class PumpBlockEntity extends KineticBlockEntity implements FluidTransportBehaviour.Provider, net.fabricmc.fabric.api.blockgetter.v2.RenderDataBlockEntity {
+    public final com.simibubi.create.foundation.advancement.PrerequisiteAdvancements.Owner sourceAdvancements=new com.simibubi.create.foundation.advancement.PrerequisiteAdvancements.Owner(this,"mechanical_pump_0","water_supply","cross_streams","honey_drain");
+    private final Couple<Boolean> sidesToUpdate=Couple.create(true,true);
+    private float previousSpeed=Float.NaN;
+    private Direction previousFacing;
+    private boolean scheduleFlip;
+    private final FluidTransportBehaviour transport=new FluidTransportBehaviour(this){
+        @Override public boolean canHaveFlowToward(BlockState state,Direction side){return state.getBlock() instanceof PumpBlock&&PumpBlock.isOpenAt(state,side);}
+    };
+    public PumpBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.MECHANICAL_PUMP,pos,state);}
+    @Override public FluidTransportBehaviour transport(){return getBehaviour(FluidTransportBehaviour.TYPE);}
+    @Override public Object getRenderData(){return transport.getRenderData();}
+    public static void tick(Level level,BlockPos pos,BlockState state,PumpBlockEntity pump){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, pump)) {
+            if (!createTick.shouldTick()) return;
 
-public class PumpBlockEntity extends KineticBlockEntity {
-
-	Couple<MutableBoolean> sidesToUpdate;
-	boolean pressureUpdate;
-
-	// Backcompat- flips any pump blockstate that loads with reversed=true
-	boolean scheduleFlip;
-
-	public PumpBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
-		super(typeIn, pos, state);
-		sidesToUpdate = Couple.create(MutableBoolean::new);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		behaviours.add(new PumpFluidTransferBehaviour(this));
-		registerAwardables(behaviours, FluidPropagator.getSharedTriggers());
-		registerAwardables(behaviours, AllAdvancements.PUMP);
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		if (level.isClientSide && !isVirtual())
-			return;
-
-		if (scheduleFlip) {
-			level.setBlockAndUpdate(worldPosition,
-				getBlockState().setValue(PumpBlock.FACING, getBlockState().getValue(PumpBlock.FACING)
-					.getOpposite()));
-			scheduleFlip = false;
-		}
-
-		sidesToUpdate.forEachWithContext((update, isFront) -> {
-			if (update.isFalse())
-				return;
-			update.setFalse();
-			distributePressureTo(isFront ? getFront() : getFront().getOpposite());
-		});
-	}
-
-	@Override
-	public void onSpeedChanged(float previousSpeed) {
-		super.onSpeedChanged(previousSpeed);
-
-		if (Math.abs(previousSpeed) == Math.abs(getSpeed()))
-			return;
-		if (speed != 0)
-			award(AllAdvancements.PUMP);
-		if (level.isClientSide && !isVirtual())
-			return;
-
-		updatePressureChange();
-	}
-
-	public void updatePressureChange() {
-		pressureUpdate = false;
-		BlockPos frontPos = worldPosition.relative(getFront());
-		BlockPos backPos = worldPosition.relative(getFront().getOpposite());
-		FluidPropagator.propagateChangedPipe(level, frontPos, level.getBlockState(frontPos));
-		FluidPropagator.propagateChangedPipe(level, backPos, level.getBlockState(backPos));
-
-		FluidTransportBehaviour behaviour = getBehaviour(FluidTransportBehaviour.TYPE);
-		if (behaviour != null)
-			behaviour.wipePressure();
-		sidesToUpdate.forEach(MutableBoolean::setTrue);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-		if (compound.getBoolean("Reversed"))
-			scheduleFlip = true;
-	}
-
+        KineticBlockEntity.tick(level,pos,state,pump);
+        if(!level.isClientSide() || pump.isVirtual()){
+            if(pump.scheduleFlip){pump.scheduleFlip=false;level.setBlockAndUpdate(pos,state.setValue(PumpBlock.FACING,state.getValue(PumpBlock.FACING).getOpposite()));return;}
+            if(Math.abs(pump.getSpeed())!=pump.previousSpeed||pump.previousFacing!=state.getValue(PumpBlock.FACING)){
+                pump.previousSpeed=Math.abs(pump.getSpeed());pump.previousFacing=state.getValue(PumpBlock.FACING);pump.updatePressureChange();
+            }
+            for(boolean front:new boolean[]{true,false})if(pump.sidesToUpdate.get(front)){pump.sidesToUpdate.set(front,false);pump.distributePressureTo(front?pump.getFront():pump.getFront().getOpposite());}
+        }
+        
+        for(var entry:pump.transport.interfaces.entrySet()){
+            boolean pull=pump.isPullingOnSide(pump.isFront(entry.getKey()));var pressure=entry.getValue().getPressure();pressure.set(pull,Math.abs(pump.getSpeed()));pressure.set(!pull,0f);
+        }
+    
+        }
+    }
+    @Override public void onSpeedChanged(float previousSpeed){
+        super.onSpeedChanged(previousSpeed);
+        if (Math.abs(previousSpeed) == Math.abs(getSpeed())) return;
+        if (getSpeed() != 0) sourceAdvancements.award("mechanical_pump_0");
+        if (level != null && (!level.isClientSide() || isVirtual())) updatePressureChange();
+    }
+    public void updatePressureChange(){
+        for(var side:new Direction[]{getFront(),getFront().getOpposite()}){var next=worldPosition.relative(side);if(level.isLoaded(next))FluidPropagator.propagateChangedPipe(level,next,FluidPropagator.stateAt(level,next));}
+        transport.wipePressure();sidesToUpdate.replace(value->true);
+    }
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);scheduleFlip=in.getBooleanOr("Reversed",false);previousSpeed=Float.NaN;}
 	protected void distributePressureTo(Direction side) {
 		if (getSpeed() == 0)
 			return;
@@ -152,7 +90,7 @@ public class PumpBlockEntity extends KineticBlockEntity {
 				if (visited.contains(currentPos))
 					continue;
 				visited.add(currentPos);
-				BlockState currentState = level.getBlockState(currentPos);
+				BlockState currentState = FluidPropagator.stateAt(level,currentPos);
 				FluidTransportBehaviour pipe = FluidPropagator.getPipe(level, currentPos);
 				if (pipe == null)
 					continue;
@@ -176,7 +114,7 @@ public class PumpBlockEntity extends KineticBlockEntity {
 					FluidTransportBehaviour pipeBehaviour = FluidPropagator.getPipe(level, connectedPos);
 					if (pipeBehaviour == null)
 						continue;
-					if (pipeBehaviour instanceof PumpFluidTransferBehaviour)
+					if (pipeBehaviour.blockEntity instanceof PumpBlockEntity)
 						continue;
 					if (visited.contains(connectedPos))
 						continue;
@@ -236,7 +174,7 @@ public class PumpBlockEntity extends KineticBlockEntity {
 		int distance = pair.getFirst();
 
 		boolean atLeastOneBranchSuccessful = false;
-		for (Direction nextFacing : Iterate.directions) {
+		for (Direction nextFacing : Direction.values()) {
 			if (nextFacing == currentFace.getFace())
 				continue;
 			Map<Direction, Boolean> map = pair.getSecond();
@@ -271,8 +209,9 @@ public class PumpBlockEntity extends KineticBlockEntity {
 
 	private boolean hasReachedValidEndpoint(LevelAccessor world, BlockFace blockFace, boolean pull) {
 		BlockPos connectedPos = blockFace.getConnectedPos();
-		BlockState connectedState = world.getBlockState(connectedPos);
-		BlockEntity blockEntity = world.getBlockEntity(connectedPos);
+        if(world instanceof Level check&&!check.isLoaded(connectedPos))return false;
+		BlockState connectedState = FluidPropagator.stateAt(world,connectedPos);
+		BlockEntity blockEntity = FluidPropagator.blockEntityAt(world,connectedPos);
 		Direction face = blockFace.getFace();
 
 		// facing a pump
@@ -288,8 +227,7 @@ public class PumpBlockEntity extends KineticBlockEntity {
 
 		// fluid handler endpoint
 		if (blockEntity != null) {
-			IFluidHandler capability = blockEntity.getLevel().getCapability(Capabilities.FluidHandler.BLOCK, blockEntity.getBlockPos(), face.getOpposite());
-			if (capability != null)
+			if (FluidPropagator.fluidStorageAt(blockEntity.getLevel(), blockEntity.getBlockPos(),face.getOpposite()) != null)
 				return true;
 		}
 
@@ -301,7 +239,7 @@ public class PumpBlockEntity extends KineticBlockEntity {
 		if (!isSideAccessible(side))
 			return;
 		updatePipeNetwork(isFront(side));
-		getBehaviour(FluidTransportBehaviour.TYPE).wipePressure();
+		transport.wipePressure();
 	}
 
 	protected boolean isFront(Direction side) {
@@ -322,8 +260,7 @@ public class PumpBlockEntity extends KineticBlockEntity {
 	}
 
 	protected void updatePipeNetwork(boolean front) {
-		sidesToUpdate.get(front)
-			.setTrue();
+		sidesToUpdate.set(front, true);
 	}
 
 	public boolean isSideAccessible(Direction side) {
@@ -337,37 +274,13 @@ public class PumpBlockEntity extends KineticBlockEntity {
 	public boolean isPullingOnSide(boolean front) {
 		return !front;
 	}
-
-	class PumpFluidTransferBehaviour extends FluidTransportBehaviour {
-
-		public PumpFluidTransferBehaviour(SmartBlockEntity be) {
-			super(be);
-		}
-
-		@Override
-		public void tick() {
-			super.tick();
-			for (Entry<Direction, PipeConnection> entry : interfaces.entrySet()) {
-				boolean pull = isPullingOnSide(isFront(entry.getKey()));
-				Couple<Float> pressure = entry.getValue().getPressure();
-				pressure.set(pull, Math.abs(getSpeed()));
-				pressure.set(!pull, 0f);
-			}
-		}
-
-		@Override
-		public boolean canHaveFlowToward(BlockState state, Direction direction) {
-			return isSideAccessible(direction);
-		}
-
-		@Override
-		public AttachmentTypes getRenderedRimAttachment(BlockAndTintGetter world, BlockPos pos, BlockState state,
-														Direction direction) {
-			AttachmentTypes attachment = super.getRenderedRimAttachment(world, pos, state, direction);
-			if (attachment == AttachmentTypes.RIM)
-				return AttachmentTypes.NONE;
-			return attachment;
-		}
-
-	}
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (transport != null) behaviours.add(transport);
+    }
+    @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
+        super.addNativeAdvancementIds(ids);
+        ids.add("mechanical_pump_0");
+    }
+    @Override protected com.simibubi.create.foundation.advancement.AdvancementBehaviour.OwnerStorage nativeAdvancementOwnerStorage() {return sourceAdvancements;}
 }

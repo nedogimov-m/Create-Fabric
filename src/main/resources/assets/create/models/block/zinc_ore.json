@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "create:block/zinc_ore",
+    "particle": "create:block/zinc_ore"
+  }
+}

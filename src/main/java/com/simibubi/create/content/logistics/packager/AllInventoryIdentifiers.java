@@ -6,12 +6,10 @@ import java.util.EnumSet;
 import java.util.Set;
 
 import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllTags.AllBlockTags;
 import com.simibubi.create.api.packager.InventoryIdentifier;
 import com.simibubi.create.api.registry.SimpleRegistry;
 import com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity;
 
-import net.createmod.catnip.data.Iterate;
 import net.createmod.catnip.math.BlockFace;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -28,7 +26,7 @@ public class AllInventoryIdentifiers {
 	public static void registerDefaults() {
 		// identify known single blocks
 		InventoryIdentifier.REGISTRY.registerProvider(SimpleRegistry.Provider.forBlockTag(
-			AllBlockTags.SINGLE_BLOCK_INVENTORIES.tag, AllInventoryIdentifiers::single
+			net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.BLOCK, com.simibubi.create.Create.asResource("single_block_inventories")), AllInventoryIdentifiers::single
 		));
 
 		// connect double chests
@@ -49,8 +47,8 @@ public class AllInventoryIdentifiers {
 		});
 
 		// connect vaults
-		InventoryIdentifier.REGISTRY.register(AllBlocks.ITEM_VAULT.get(), (level, state, face) -> {
-			BlockEntity be = level.getBlockEntity(face.getPos());
+		InventoryIdentifier.REGISTRY.register(AllBlocks.ITEM_VAULT, (level, state, face) -> {
+			BlockEntity be = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,face.getPos());
 			return be instanceof ItemVaultBlockEntity vault ? vault.getInvId() : null;
 		});
 	}
@@ -65,7 +63,7 @@ public class AllInventoryIdentifiers {
 		if (type != ChestType.SINGLE) {
 			Direction toOther = ChestBlock.getConnectedDirection(state);
 			BlockPos otherPos = face.getPos().relative(toOther);
-			BlockState otherState = level.getBlockState(otherPos);
+			BlockState otherState = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockState(level,otherPos);
 			if (otherState.is(state.getBlock()) && ChestBlock.getConnectedDirection(otherState) == toOther.getOpposite()) {
 				return new InventoryIdentifier.Pair(face.getPos(), otherPos);
 			}
@@ -85,7 +83,7 @@ public class AllInventoryIdentifiers {
 		int[] slots = container.getSlotsForFace(side);
 		// get all faces that have the same slots as the given one
 		Set<Direction> directions = EnumSet.of(side);
-		for (Direction direction : Iterate.directions) {
+		for (Direction direction : Direction.values()) {
 			if (direction != side) {
 				int[] faceSlots = container.getSlotsForFace(direction);
 				if (Arrays.equals(slots, faceSlots)) {
@@ -100,7 +98,7 @@ public class AllInventoryIdentifiers {
 	// currently just checks for WorldlyContainer BlockEntities, which would
 	// fill the registry with Finders pointlessly if done through a provider.
 	public static InventoryIdentifier fallback(Level level, BlockState state, BlockFace face) {
-		BlockEntity be = level.getBlockEntity(face.getPos());
+		BlockEntity be = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,face.getPos());
 		if (be instanceof WorldlyContainer container) {
 			return ofWorldlyContainer(container, face);
 		}

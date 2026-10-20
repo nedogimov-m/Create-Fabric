@@ -13,11 +13,7 @@ import org.apache.commons.lang3.mutable.MutableInt;
 import com.google.common.collect.Lists;
 import com.mojang.serialization.Codec;
 import com.simibubi.create.content.logistics.BigItemStack;
-import com.simibubi.create.content.logistics.stockTicker.LogisticalStockResponsePacket;
 
-import net.createmod.catnip.platform.CatnipServices;
-import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
@@ -36,6 +32,12 @@ public class InventorySummary {
 
 	public static final InventorySummary EMPTY = new InventorySummary();
 
+	private final boolean retainPhysicalVariants;
+	public InventorySummary(){this(false);}
+	private InventorySummary(boolean retainPhysicalVariants){this.retainPhysicalVariants=retainPhysicalVariants;}
+	/** Actual material reconstruction must never discard distinct native item metadata. */
+	public static InventorySummary physical(){return new InventorySummary(true);}
+	private boolean same(ItemStack left,ItemStack right){return retainPhysicalVariants?ItemStack.isSameItemSameComponents(left,right):com.simibubi.create.foundation.item.ItemSampleEquality.same(left,right);}
 	private Map<Item, List<BigItemStack>> items = new IdentityHashMap<>();
 	private List<BigItemStack> stacksByCount;
 	private int totalCount;
@@ -70,12 +72,13 @@ public class InventorySummary {
 	}
 
 	public InventorySummary copy() {
-		InventorySummary inventorySummary = new InventorySummary();
+		InventorySummary inventorySummary = new InventorySummary(retainPhysicalVariants);
 		items.forEach((i, list) -> list.forEach(entry -> inventorySummary.add(entry.stack, entry.count)));
 		return inventorySummary;
 	}
 
 	public void add(ItemStack stack, int count) {
+        stacksByCount = null;
 		if (count == 0 || stack.isEmpty())
 			return;
 
@@ -85,7 +88,7 @@ public class InventorySummary {
 		List<BigItemStack> stacks = items.computeIfAbsent(stack.getItem(), $ -> Lists.newArrayList());
 		for (BigItemStack existing : stacks) {
 			ItemStack existingStack = existing.stack;
-			if (ItemStack.isSameItemSameComponents(existingStack, stack)) {
+			if (same(existingStack, stack)) {
 				if (existing.count < BigItemStack.INF)
 					existing.count += count;
 				return;
@@ -100,13 +103,14 @@ public class InventorySummary {
 	}
 
 	public boolean erase(ItemStack stack) {
+        stacksByCount = null;
 		List<BigItemStack> stacks = items.get(stack.getItem());
 		if (stacks == null)
 			return false;
 		for (Iterator<BigItemStack> iterator = stacks.iterator(); iterator.hasNext();) {
 			BigItemStack existing = iterator.next();
 			ItemStack existingStack = existing.stack;
-			if (!ItemStack.isSameItemSameComponents(existingStack, stack))
+			if (!same(existingStack, stack))
 				continue;
 			totalCount -= existing.count;
 			iterator.remove();
@@ -119,11 +123,20 @@ public class InventorySummary {
 		List<BigItemStack> list = items.get(stack.getItem());
 		if (list == null)
 			return 0;
-		for (BigItemStack entry : list)
-			if (ItemStack.isSameItemSameComponents(entry.stack, stack))
-				return entry.count;
-		return 0;
+        long count=0;
+        for(BigItemStack entry:list)if(com.simibubi.create.foundation.item.ItemSampleEquality.same(entry.stack,stack))count+=entry.count;
+        return (int)Math.clamp(count,Integer.MIN_VALUE,BigItemStack.INF);
 	}
+
+
+    public ItemStack takeMatchingOne(ItemStack sample){
+        if(!retainPhysicalVariants)throw new IllegalStateException("Real material consumption requires a physical-variant summary");
+        var list=items.get(sample.getItem());if(list==null)return ItemStack.EMPTY;
+        for(var entry:list)if(entry.count>0&&com.simibubi.create.foundation.item.ItemSampleEquality.same(entry.stack,sample)){
+            stacksByCount=null;entry.count--;totalCount--;return entry.stack.copyWithCount(1);
+        }
+        return ItemStack.EMPTY;
+    }
 
 	public int getTotalOfMatching(Predicate<ItemStack> filter) {
 		MutableInt sum = new MutableInt();
@@ -157,34 +170,6 @@ public class InventorySummary {
 		return totalCount;
 	}
 
-	public void divideAndSendTo(ServerPlayer player, BlockPos pos) {
-		List<BigItemStack> stacks = getStacksByCount();
-		int remaining = stacks.size();
-
-		List<BigItemStack> currentList = null;
-
-		if (stacks.isEmpty())
-			CatnipServices.NETWORK.sendToClient(player, new LogisticalStockResponsePacket(true, pos, Collections.emptyList()));
-
-		for (BigItemStack entry : stacks) {
-			if (currentList == null)
-				currentList = new ArrayList<>(Math.min(100, remaining));
-
-			currentList.add(entry);
-			remaining--;
-
-			if (remaining == 0)
-				break;
-			if (currentList.size() < 100)
-				continue;
-
-			CatnipServices.NETWORK.sendToClient(player, new LogisticalStockResponsePacket(false, pos, currentList));
-			currentList = null;
-		}
-
-		if (currentList != null)
-			CatnipServices.NETWORK.sendToClient(player, new LogisticalStockResponsePacket(true, pos, currentList));
-	}
 
 	public boolean isEmpty() {
 		return items.isEmpty();

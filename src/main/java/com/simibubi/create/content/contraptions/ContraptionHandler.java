@@ -1,79 +1,21 @@
 package com.simibubi.create.content.contraptions;
 
 import java.lang.ref.WeakReference;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
-import it.unimi.dsi.fastutil.objects.ObjectLists;
-import net.createmod.catnip.data.WorldAttached;
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
+import java.util.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.Vec3;
 
-public class ContraptionHandler {
-
-	/* Global map of loaded contraptions */
-
-	public static WorldAttached<Map<Integer, WeakReference<AbstractContraptionEntity>>> loadedContraptions;
-	static WorldAttached<List<AbstractContraptionEntity>> queuedAdditions;
-
-	static {
-		loadedContraptions = new WorldAttached<>($ -> new HashMap<>());
-		queuedAdditions = new WorldAttached<>($ -> ObjectLists.synchronize(new ObjectArrayList<>()));
-	}
-
-	public static void tick(Level world) {
-		Map<Integer, WeakReference<AbstractContraptionEntity>> map = loadedContraptions.get(world);
-		List<AbstractContraptionEntity> queued = queuedAdditions.get(world);
-
-		for (AbstractContraptionEntity contraptionEntity : queued)
-			map.put(contraptionEntity.getId(), new WeakReference<>(contraptionEntity));
-		queued.clear();
-
-		Collection<WeakReference<AbstractContraptionEntity>> values = map.values();
-		for (Iterator<WeakReference<AbstractContraptionEntity>> iterator = values.iterator(); iterator.hasNext();) {
-			WeakReference<AbstractContraptionEntity> weakReference = iterator.next();
-			AbstractContraptionEntity contraptionEntity = weakReference.get();
-			if (contraptionEntity == null || !contraptionEntity.isAliveOrStale()) {
-				iterator.remove();
-				continue;
-			}
-			if (!contraptionEntity.isAlive()) {
-				contraptionEntity.staleTicks--;
-				continue;
-			}
-
-			ContraptionCollider.collideEntities(contraptionEntity);
-		}
-	}
-
-	public static void addSpawnedContraptionsToCollisionList(Entity entity, Level world) {
-		if (entity instanceof AbstractContraptionEntity)
-			queuedAdditions.get(world)
-				.add((AbstractContraptionEntity) entity);
-	}
-
-	public static void entitiesWhoJustDismountedGetSentToTheRightLocation(LivingEntity entityLiving, Level world) {
-		if (!world.isClientSide)
-			return;
-
-		CompoundTag data = entityLiving.getPersistentData();
-		if (!data.contains("ContraptionDismountLocation"))
-			return;
-
-		Vec3 position = VecHelper.readNBT(data.getList("ContraptionDismountLocation", Tag.TAG_DOUBLE));
-		if (entityLiving.getVehicle() == null)
-			entityLiving.absMoveTo(position.x, position.y, position.z, entityLiving.getYRot(), entityLiving.getXRot());
-		data.remove("ContraptionDismountLocation");
-		entityLiving.setOnGround(false);
-	}
-
+/** Per-world loaded owners, populated by native entity ticks without chunk or entity-loading lookups. */
+public final class ContraptionHandler {
+    private static final Map<Level,Map<Integer,WeakReference<AbstractContraptionEntity>>> LOADED=new WeakHashMap<>();
+    private static synchronized Map<Integer,WeakReference<AbstractContraptionEntity>> loaded(Level level){return LOADED.computeIfAbsent(level,key->new LinkedHashMap<>());}
+    public static void addSpawnedContraptionsToCollisionList(AbstractContraptionEntity entity){if(entity.level().getEntity(entity.getId())!=entity)return;var entries=loaded(entity.level());var previous=entries.get(entity.getId());if(previous==null||previous.get()!=entity)entries.put(entity.getId(),new WeakReference<>(entity));}
+    public static void tick(Level level){
+        for(var iterator=loaded(level).values().iterator();iterator.hasNext();){var entity=iterator.next().get();if(entity==null||!entity.isAlive()||entity.getContraption()==null){iterator.remove();continue;}entity.beginCollisionTick();ContraptionCollider.collideEntities(entity);entity.finishCollisionTick();}
+    }
+    public static List<AbstractContraptionEntity> collidingWith(net.minecraft.world.entity.Entity entity){
+        return loaded(entity.level()).values().stream().map(WeakReference::get)
+            .filter(owner->owner!=null&&owner.isAlive()&&owner.getContraption()!=null
+                &&owner.collidingEntities.containsKey(entity)).toList();
+    }
+    private ContraptionHandler(){}
 }

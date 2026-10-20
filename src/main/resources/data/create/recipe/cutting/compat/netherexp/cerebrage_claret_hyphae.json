@@ -1,0 +1,20 @@
+{
+  "type": "create:cutting",
+  "ingredients": [
+    "netherexp:cerebrage_claret_hyphae"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "id": "netherexp:stripped_claret_hyphae"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "netherexp"
+      ]
+    }
+  ]
+}

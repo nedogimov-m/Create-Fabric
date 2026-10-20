@@ -7,22 +7,20 @@ import com.simibubi.create.Create;
 import com.simibubi.create.content.logistics.filter.FilterItemStack;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.foundation.gui.ModularGuiLineBuilder;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.trains.schedule.ScheduleText;
 
-import net.createmod.catnip.lang.Lang;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.items.IItemHandlerModifiable;
+import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import com.simibubi.create.content.trains.schedule.ScheduleSerialization;
 
 public class ItemThresholdCondition extends CargoThresholdCondition {
 
@@ -44,36 +42,33 @@ public class ItemThresholdCondition extends CargoThresholdCondition {
 		int target = getThreshold();
 		boolean stacks = inStacks();
 
-		int foundItems = 0;
-		for (Carriage carriage : train.carriages) {
-			IItemHandlerModifiable items = carriage.storage.getAllItems();
-			for (int i = 0; i < items.getSlots(); i++) {
-				ItemStack stackInSlot = items.getStackInSlot(i);
-				if (!stack.test(level, stackInSlot))
-					continue;
+        long foundItems = 0;
+        for (Carriage carriage : train.carriages) {
+            Storage<ItemVariant> items = carriage.storage.getAllItems();
+            for (var view : items) {
+                if (view.isResourceBlank() || view.getAmount() == 0) continue;
+                ItemStack stackInSlot = view.getResource().toStack();
+                if (!stack.test(level, stackInSlot)) continue;
+                if (stacks) foundItems += view.getAmount() == stackInSlot.getMaxStackSize() ? 1 : 0;
+                else foundItems = Math.addExact(foundItems, view.getAmount());
+            }
+        }
 
-				if (stacks)
-					foundItems += stackInSlot.getCount() == stackInSlot.getMaxStackSize() ? 1 : 0;
-				else
-					foundItems += stackInSlot.getCount();
-			}
-		}
-
-		requestStatusToUpdate(foundItems, context);
+		requestStatusToUpdate((int) Math.min(Integer.MAX_VALUE, foundItems), context);
 		return operator.test(foundItems, target);
 	}
 
 	@Override
 	protected void writeAdditional(HolderLookup.Provider registries, CompoundTag tag) {
 		super.writeAdditional(registries, tag);
-		tag.put("Item", stack.serializeNBT(registries));
+		tag.put("Item", ScheduleSerialization.writeItem(registries, stack.item()));
 	}
 
 	@Override
 	protected void readAdditional(HolderLookup.Provider registries, CompoundTag tag) {
 		super.readAdditional(registries, tag);
 		if (tag.contains("Item"))
-			stack = FilterItemStack.of(registries, tag.getCompound("Item"));
+			stack = FilterItemStack.of(ScheduleSerialization.readItem(registries, tag.getCompoundOrEmpty("Item")));
 	}
 
 	@Override
@@ -94,13 +89,13 @@ public class ItemThresholdCondition extends CargoThresholdCondition {
 	@Override
 	public List<Component> getTitleAs(String type) {
 		return ImmutableList.of(
-			CreateLang.translateDirect("schedule.condition.threshold.train_holds",
-				CreateLang.translateDirect("schedule.condition.threshold." + Lang.asId(getOperator().name()))),
-			CreateLang.translateDirect("schedule.condition.threshold.x_units_of_item", getThreshold(),
-				CreateLang.translateDirect("schedule.condition.threshold." + (inStacks() ? "stacks" : "items")),
-				stack.isEmpty() ? CreateLang.translateDirect("schedule.condition.threshold.anything")
+			ScheduleText.translate("schedule.condition.threshold.train_holds",
+				ScheduleText.translate("schedule.condition.threshold." + getOperator().name().toLowerCase(java.util.Locale.ROOT))),
+			ScheduleText.translate("schedule.condition.threshold.x_units_of_item", getThreshold(),
+				ScheduleText.translate("schedule.condition.threshold." + (inStacks() ? "stacks" : "items")),
+				stack.isEmpty() ? ScheduleText.translate("schedule.condition.threshold.anything")
 					: stack.isFilterItem()
-						? CreateLang.translateDirect("schedule.condition.threshold.matching_content")
+						? ScheduleText.translate("schedule.condition.threshold.matching_content")
 						: stack.item().getHoverName())
 				.withStyle(ChatFormatting.DARK_AQUA));
 	}
@@ -110,20 +105,11 @@ public class ItemThresholdCondition extends CargoThresholdCondition {
 	}
 
 	@Override
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return Create.asResource("item_threshold");
 	}
 
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void initConfigurationWidgets(ModularGuiLineBuilder builder) {
-		super.initConfigurationWidgets(builder);
-		builder.addSelectionScrollInput(71, 50, (i, l) -> {
-			i.forOptions(ImmutableList.of(CreateLang.translateDirect("schedule.condition.threshold.items"),
-				CreateLang.translateDirect("schedule.condition.threshold.stacks")))
-				.titled(CreateLang.translateDirect("schedule.condition.threshold.item_measure"));
-		}, "Measure");
-	}
+	
 
 	@Override
 	public MutableComponent getWaitingStatus(Level level, Train train, CompoundTag tag) {
@@ -131,8 +117,8 @@ public class ItemThresholdCondition extends CargoThresholdCondition {
 		if (lastDisplaySnapshot == -1)
             return Component.empty();
 		int offset = getOperator() == Ops.LESS ? -1 : getOperator() == Ops.GREATER ? 1 : 0;
-		return CreateLang.translateDirect("schedule.condition.threshold.status", lastDisplaySnapshot,
+		return ScheduleText.translate("schedule.condition.threshold.status", lastDisplaySnapshot,
 			Math.max(0, getThreshold() + offset),
-			CreateLang.translateDirect("schedule.condition.threshold." + (inStacks() ? "stacks" : "items")));
+			ScheduleText.translate("schedule.condition.threshold." + (inStacks() ? "stacks" : "items")));
 	}
 }

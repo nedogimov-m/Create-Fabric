@@ -1,8 +1,12 @@
 package com.simibubi.create.infrastructure.config;
 
-import net.createmod.catnip.config.ConfigBase;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import java.nio.file.Path;
+import java.util.*;
+import net.fabricmc.loader.api.FabricLoader;
 
-public class CRecipes extends ConfigBase {
+public class CRecipes extends NativeConfigBase {
 
 	public final ConfigBool bulkPressing = b(false, "bulkPressing", Comments.bulkPressing);
 	public final ConfigBool bulkCutting = b(false, "bulkCutting", Comments.bulkCutting);
@@ -26,6 +30,20 @@ public class CRecipes extends ConfigBase {
 	public String getName() {
 		return "recipes";
 	}
+
+    /** Accepted native packet/file shape; the rest of the source recipe section is independently wired. */
+    public record Settings(int lightSourceCountForRefinedRadiance,boolean enableRefinedRadianceRecipe,boolean enableShadowSteelRecipe){
+        public static final Settings DEFAULT=new Settings(10,true,true);
+        public static final Codec<Settings> CODEC=RecordCodecBuilder.create(i->i.group(Codec.intRange(1,Integer.MAX_VALUE).optionalFieldOf("lightSourceCountForRefinedRadiance",10).forGetter(Settings::lightSourceCountForRefinedRadiance),Codec.BOOL.optionalFieldOf("enableRefinedRadianceRecipe",true).forGetter(Settings::enableRefinedRadianceRecipe),Codec.BOOL.optionalFieldOf("enableShadowSteelRecipe",true).forGetter(Settings::enableShadowSteelRecipe)).apply(i,Settings::new));
+        public Settings{if(lightSourceCountForRefinedRadiance<1)throw new IllegalArgumentException("Source light threshold must be positive");}
+    }
+    public Settings serverSettings(){return new Settings(lightSourceCountForRefinedRadiance.getServer(),enableRefinedRadianceRecipe.getServer(),enableShadowSteelRecipe.getServer());}
+    public Settings effective(){var actual=store();return new Settings(actual.readClient(lightSourceCountForRefinedRadiance),actual.readClient(enableRefinedRadianceRecipe),actual.readClient(enableShadowSteelRecipe));}
+    private Map<String,Object> legacyValues(Settings value){return Map.of(lightSourceCountForRefinedRadiance.key(),value.lightSourceCountForRefinedRadiance(),enableRefinedRadianceRecipe.key(),value.enableRefinedRadianceRecipe(),enableShadowSteelRecipe.key(),value.enableShadowSteelRecipe());}
+    public void installClient(Settings actual){store().installRemoteValues(legacyValues(Objects.requireNonNull(actual)));}
+    public void clearClient(){store().clearRemoteValues(legacyValues(Settings.DEFAULT).keySet());}
+    public void reload(){reload(FabricLoader.getInstance().getConfigDir().resolve("create-legacy-materials.json"));}
+    public void reload(Path path){if(store().root()==this)store().reload(path);else NativeConfigFiles.reloadSection(this,path,Set.of("lightSourceCountForRefinedRadiance","enableRefinedRadianceRecipe","enableShadowSteelRecipe"));}
 
 	private static class Comments {
 		static String bulkPressing = "Allow the Mechanical Press to process entire stacks at a time.";

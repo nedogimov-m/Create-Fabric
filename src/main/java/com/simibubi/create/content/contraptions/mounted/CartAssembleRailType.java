@@ -1,55 +1,20 @@
 package com.simibubi.create.content.contraptions.mounted;
 
-import java.util.function.Supplier;
-
 import com.simibubi.create.AllBlocks;
-import com.tterrag.registrate.util.entry.BlockEntry;
-
-import net.createmod.catnip.lang.Lang;
+import java.util.Locale;
+import java.util.function.Supplier;
 import net.minecraft.util.StringRepresentable;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
 
+/** Source rail choices, resolved lazily so actual native registration does not expose an uninitialized block. */
 public enum CartAssembleRailType implements StringRepresentable {
-
-	REGULAR(Blocks.RAIL),
-	POWERED_RAIL(Blocks.POWERED_RAIL),
-	DETECTOR_RAIL(Blocks.DETECTOR_RAIL),
-	ACTIVATOR_RAIL(Blocks.ACTIVATOR_RAIL),
-	CONTROLLER_RAIL(AllBlocks.CONTROLLER_RAIL)
-
-	;
-
-	private final Supplier<Block> railBlockSupplier;
-	private final Supplier<Item> railItemSupplier;
-
-	CartAssembleRailType(Block block) {
-		this.railBlockSupplier = () -> block;
-		this.railItemSupplier = block::asItem;
-	}
-
-	CartAssembleRailType(BlockEntry<?> block) {
-		this.railBlockSupplier = block::get;
-		this.railItemSupplier = () -> block.get().asItem();
-	}
-
-	public Block getBlock() {
-		return railBlockSupplier.get();
-	}
-
-	public Item getItem() {
-		return railItemSupplier.get();
-	}
-
-	public boolean matches(BlockState rail) {
-		return rail.getBlock() == railBlockSupplier.get();
-	}
-
-	@Override
-	public String getSerializedName() {
-		return Lang.asId(name());
-	}
-
+    REGULAR(()->Blocks.RAIL),POWERED_RAIL(()->Blocks.POWERED_RAIL),DETECTOR_RAIL(()->Blocks.DETECTOR_RAIL),ACTIVATOR_RAIL(()->Blocks.ACTIVATOR_RAIL),CONTROLLER_RAIL(()->AllBlocks.CONTROLLER_RAIL);
+    private final Supplier<Block> rail;
+    CartAssembleRailType(Supplier<Block> rail){this.rail=rail;}
+    public Block getBlock(){return rail.get();}
+    public Item getItem(){return getBlock().asItem();}
+    public boolean matches(BlockState state){return state.is(getBlock());}
+    @Override public String getSerializedName(){return name().toLowerCase(Locale.ROOT);}
 }

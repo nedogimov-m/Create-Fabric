@@ -1,0 +1,33 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "bonus_rolls": 0.0,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "create:cut_scoria_brick_slab",
+          "modifier": [
+            {
+              "add": false,
+              "count": 2.0,
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "create:cut_scoria_brick_slab",
+                "state": {
+                  "type": "double"
+                }
+              },
+              "type": "minecraft:set_count"
+            },
+            {
+              "type": "minecraft:explosion_decay"
+            }
+          ]
+        }
+      ],
+      "rolls": 1.0
+    }
+  ],
+  "random_sequence": "create:blocks/cut_scoria_brick_slab"
+}

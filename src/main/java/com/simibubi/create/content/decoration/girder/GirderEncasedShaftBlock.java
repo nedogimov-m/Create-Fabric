@@ -1,139 +1,44 @@
 package com.simibubi.create.content.decoration.girder;
 
-import static net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED;
-
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.api.schematic.requirement.SpecialBlockItemRequirement;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
+import com.simibubi.create.*;
 import com.simibubi.create.content.kinetics.base.HorizontalAxisKineticBlock;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.content.schematics.requirement.ItemRequirement;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.InteractionResult;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.*;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.SimpleWaterloggedBlock;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.state.*;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.block.state.properties.Property;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.Shapes;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.material.*;
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
 
-public class GirderEncasedShaftBlock extends HorizontalAxisKineticBlock
-	implements IBE<KineticBlockEntity>, SimpleWaterloggedBlock, IWrenchable, SpecialBlockItemRequirement {
-
-	public static final BooleanProperty TOP = GirderBlock.TOP;
-	public static final BooleanProperty BOTTOM = GirderBlock.BOTTOM;
-
-	public GirderEncasedShaftBlock(Properties properties) {
-		super(properties);
-		registerDefaultState(super.defaultBlockState()
-				.setValue(WATERLOGGED, false)
-				.setValue(TOP, false)
-				.setValue(BOTTOM, false));
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(TOP, BOTTOM, WATERLOGGED));
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState pState, BlockGetter pLevel, BlockPos pPos, CollisionContext pContext) {
-		return AllShapes.GIRDER_BEAM_SHAFT.get(pState.getValue(HORIZONTAL_AXIS));
-	}
-
-	@Override
-	@SuppressWarnings("deprecation")
-	public VoxelShape getBlockSupportShape(BlockState pState, BlockGetter pReader, BlockPos pPos) {
-		return Shapes.or(super.getBlockSupportShape(pState, pReader, pPos), AllShapes.EIGHT_VOXEL_POLE.get(Axis.Y));
-	}
-
-	@Override
-	public BlockState getRotatedBlockState(BlockState originalState, Direction targetedFace) {
-		return AllBlocks.METAL_GIRDER.getDefaultState()
-			.setValue(WATERLOGGED, originalState.getValue(WATERLOGGED))
-			.setValue(GirderBlock.X, originalState.getValue(HORIZONTAL_AXIS) == Axis.Z)
-			.setValue(GirderBlock.Z, originalState.getValue(HORIZONTAL_AXIS) == Axis.X)
-			.setValue(GirderBlock.AXIS, originalState.getValue(HORIZONTAL_AXIS) == Axis.X ? Axis.Z : Axis.X)
-			.setValue(GirderBlock.BOTTOM, originalState.getValue(BOTTOM))
-			.setValue(GirderBlock.TOP, originalState.getValue(TOP));
-	}
-
-	@Override
-	public InteractionResult onWrenched(BlockState state, UseOnContext context) {
-		InteractionResult onWrenched = super.onWrenched(state, context);
-		Player player = context.getPlayer();
-		if (onWrenched == InteractionResult.SUCCESS && player != null && !player.isCreative())
-			player.getInventory()
-				.placeItemBackInInventory(AllBlocks.SHAFT.asStack());
-		return onWrenched;
-	}
-
-	@Override
-	public Class<KineticBlockEntity> getBlockEntityClass() {
-		return KineticBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends KineticBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.ENCASED_SHAFT.get();
-	}
-
-	@Override
-	public FluidState getFluidState(BlockState state) {
-		return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : Fluids.EMPTY.defaultFluidState();
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction direction, BlockState neighbourState, LevelAccessor world,
-		BlockPos pos, BlockPos neighbourPos) {
-		if (state.getValue(WATERLOGGED))
-			world.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(world));
-
-		Property<Boolean> updateProperty = direction == Direction.UP ? TOP : BOTTOM;
-		if (direction.getAxis()
-			.isVertical()) {
-			if (world.getBlockState(pos.relative(direction))
-				.getBlockSupportShape(world, pos.relative(direction))
-				.isEmpty())
-				state = state.setValue(updateProperty, false);
-			return GirderBlock.updateVerticalProperty(world, pos, state, updateProperty, neighbourState, direction);
-		}
-
-		return state;
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		Level level = context.getLevel();
-		BlockPos pos = context.getClickedPos();
-		FluidState ifluidstate = level.getFluidState(pos);
-		BlockState state = super.getStateForPlacement(context);
-		return state.setValue(WATERLOGGED, Boolean.valueOf(ifluidstate.getType() == Fluids.WATER));
-	}
-
-	@Override
-	public ItemRequirement getRequiredItems(BlockState state, BlockEntity be) {
-		return ItemRequirement.of(AllBlocks.SHAFT.getDefaultState(), be)
-			.union(ItemRequirement.of(AllBlocks.METAL_GIRDER.getDefaultState(), be));
-	}
-
+/** Actual native kinetic shaft across the beam, using the existing real ENCASED_SHAFT BE type. */
+public final class GirderEncasedShaftBlock extends HorizontalAxisKineticBlock implements SimpleWaterloggedBlock {
+    public static final BooleanProperty TOP=GirderBlock.TOP,BOTTOM=GirderBlock.BOTTOM,WATERLOGGED=GirderBlock.WATERLOGGED;
+    public GirderEncasedShaftBlock(Properties properties){super(properties);registerDefaultState(defaultBlockState().setValue(TOP,false).setValue(BOTTOM,false).setValue(WATERLOGGED,false));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){super.createBlockStateDefinition(builder);builder.add(TOP,BOTTOM,WATERLOGGED);}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return GirderShapes.shaft(state.getValue(HORIZONTAL_AXIS));}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override protected VoxelShape getBlockSupportShape(BlockState state,BlockGetter level,BlockPos pos){return Shapes.or(getShape(state,level,pos,CollisionContext.empty()),GirderShapes.POLE);}
+    @Override protected FluidState getFluidState(BlockState state){return state.getValue(WATERLOGGED)?Fluids.WATER.getSource(false):super.getFluidState(state);}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){return super.getStateForPlacement(context).setValue(WATERLOGGED,LoadedLevelAccess.blockState(context.getLevel(),context.getClickedPos()).getFluidState().getType()==Fluids.WATER);}
+    @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction side,BlockPos next,BlockState neighbor,RandomSource random){
+        if(state.getValue(WATERLOGGED))ticks.scheduleTick(pos,Fluids.WATER,Fluids.WATER.getTickDelay(level));if(side.getAxis()!=Direction.Axis.Y||!GirderBlock.available(level,next))return state;
+        var property=side==Direction.UP?TOP:BOTTOM;if(neighbor.getBlockSupportShape(level,next).isEmpty())state=state.setValue(property,false);return GirderBlock.updateVerticalProperty(level,pos,state,property,neighbor,side);
+    }
+    public BlockState getRotatedBlockState(BlockState state,Direction face){var shaft=state.getValue(HORIZONTAL_AXIS);return AllBlocks.METAL_GIRDER.defaultBlockState().setValue(WATERLOGGED,state.getValue(WATERLOGGED)).setValue(GirderBlock.X,shaft==Direction.Axis.Z).setValue(GirderBlock.Z,shaft==Direction.Axis.X).setValue(GirderBlock.AXIS,shaft==Direction.Axis.X?Direction.Axis.Z:Direction.Axis.X).setValue(TOP,state.getValue(TOP)).setValue(BOTTOM,state.getValue(BOTTOM));}
+    public InteractionResult onWrenched(BlockState state,UseOnContext context){
+        var level=context.getLevel();var pos=context.getClickedPos();if(level.isClientSide())return InteractionResult.SUCCESS;
+        var next=Block.updateFromNeighbourShapes(getRotatedBlockState(state,context.getClickedFace()),level,pos);
+        if(LoadedLevelAccess.blockState(level,pos)!=state||!next.canSurvive(level,pos)||!level.setBlock(pos,next,Block.UPDATE_ALL))return InteractionResult.FAIL;
+        var player=context.getPlayer();if(player!=null&&!player.isCreative())player.getInventory().placeItemBackInInventory(new ItemStack(AllBlocks.SHAFT),Prediction.SERVER_ONLY);
+        level.playSound(null,pos,AllSoundEvents.WRENCH_ROTATE,SoundSource.BLOCKS,1,1);return InteractionResult.SUCCESS;
+    }
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){return stack.is(AllBlocks.METAL_GIRDER.asItem())?GirderPlacementHelper.place(player,hand,level,state,pos,hit):InteractionResult.PASS;}
 }

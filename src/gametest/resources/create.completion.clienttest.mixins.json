@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "com.simibubi.create.test.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "ClientGameTestCompletionMixin",
+    "ClientGameTestCompletionShutdownMixin",
+    "CreateMenuArtworkProbeMixin",
+    "CreateMenuCubeMapProbeMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

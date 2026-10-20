@@ -1,0 +1,23 @@
+{
+  "type": "create:pressing",
+  "ingredients": [
+    [
+      "minecraft:dirt",
+      "minecraft:coarse_dirt",
+      "minecraft:rooted_dirt"
+    ]
+  ],
+  "results": [
+    {
+      "id": "environmental:dirt_path"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "environmental"
+      ]
+    }
+  ]
+}

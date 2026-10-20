@@ -1,72 +1,69 @@
 package com.simibubi.create.content.logistics.depot;
 
 import com.simibubi.create.content.kinetics.belt.transport.TransportedItemStack;
-
+import com.simibubi.create.foundation.item.ProcessingInventory;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
+import net.fabricmc.fabric.api.transfer.v1.storage.StoragePreconditions;
+import net.fabricmc.fabric.api.transfer.v1.storage.StorageView;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
+import net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.items.IItemHandler;
 
-public class DepotItemHandler implements IItemHandler {
-
-	private static final int MAIN_SLOT = 0;
-	private DepotBehaviour behaviour;
-
-	public DepotItemHandler(DepotBehaviour behaviour) {
-		this.behaviour = behaviour;
-	}
-
-	@Override
-	public int getSlots() {
-		return 9;
-	}
-
-	@Override
-	public ItemStack getStackInSlot(int slot) {
-		return slot == MAIN_SLOT ? behaviour.getHeldItemStack() : behaviour.processingOutputBuffer.getStackInSlot(slot - 1);
-	}
-
-	@Override
-	public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
-		if (slot != MAIN_SLOT)
-			return stack;
-		if (!behaviour.getHeldItemStack()
-			.isEmpty() && !behaviour.canMergeItems())
-			return stack;
-		if (!behaviour.isOutputEmpty() && !behaviour.canMergeItems())
-			return stack;
-
-		ItemStack remainder = behaviour.insert(new TransportedItemStack(stack), simulate);
-		if (!simulate && remainder != stack)
-			behaviour.blockEntity.notifyUpdate();
-		return remainder;
-	}
-
-	@Override
-	public ItemStack extractItem(int slot, int amount, boolean simulate) {
-		if (slot != MAIN_SLOT)
-			return behaviour.processingOutputBuffer.extractItem(slot - 1, amount, simulate);
-
-		TransportedItemStack held = behaviour.heldItem;
-		if (held == null)
-			return ItemStack.EMPTY;
-		ItemStack stack = held.stack.copy();
-		ItemStack extracted = stack.split(amount);
-		if (!simulate) {
-			behaviour.heldItem.stack = stack;
-			if (stack.isEmpty())
-				behaviour.heldItem = null;
-			behaviour.blockEntity.notifyUpdate();
-		}
-		return extracted;
-	}
-
-	@Override
-	public int getSlotLimit(int slot) {
-		return slot == MAIN_SLOT ? behaviour.maxStackSize.get() : 64;
-	}
-
-	@Override
-	public boolean isItemValid(int slot, ItemStack stack) {
-		return slot == MAIN_SLOT && behaviour.isItemValid(stack);
-	}
-
+/** Native counterpart of source's nine-slot handler; slot zero is the sole insertion slot. */
+public final class DepotItemHandler implements Storage<ItemVariant> {
+    private final DepotBehaviour behaviour;
+    private final ProcessingInventory inventory;
+    DepotItemHandler(DepotBehaviour behaviour, ProcessingInventory inventory) {
+        this.behaviour = behaviour; this.inventory = inventory;
+    }
+    public int getSlots() { return 9; }
+    private ProcessingInventory.Slot slot(int slot) {
+        if (slot < 0 || slot >= getSlots()) throw new IndexOutOfBoundsException(slot);
+        return slot == 0 ? inventory.inputs.getFirst() : inventory.outputs.get(slot - 1);
+    }
+    public ItemStack getStackInSlot(int slot) { var actual=slot(slot);return behaviour.isActiveWorldOwner()?actual.stack():ItemStack.EMPTY; }
+    public int getSlotLimit(int slot) { slot(slot); return slot == 0 ? behaviour.getConfiguredMaxStackSize() : 64; }
+    public boolean isItemValid(int slot, ItemStack stack) { slot(slot); return slot == 0 && behaviour.isItemValid(stack); }
+    public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
+        slot(slot); if (!behaviour.isActiveWorldOwner() || slot != 0 || stack.isEmpty()) return stack;
+        return behaviour.insert(new TransportedItemStack(stack.copy(), 0), simulate);
+    }
+    public ItemStack extractItem(int index, int amount, boolean simulate) {
+        if (amount < 0) throw new IllegalArgumentException("Negative extraction");
+        var slot = slot(index); if (!behaviour.isActiveWorldOwner() || slot.isResourceBlank() || amount == 0) return ItemStack.EMPTY;
+        var resource = slot.getResource();
+        try (var tx = Transaction.openOuter()) {
+            long extracted = slot.extract(resource, amount, tx); if (!simulate) tx.commit();
+            return resource.toStack((int) extracted);
+        }
+    }
+    @Override public long insert(ItemVariant resource, long amount, TransactionContext tx) {
+        StoragePreconditions.notBlankNotNegative(resource, amount);
+        return !behaviour.isActiveWorldOwner() || amount == 0 ? 0 : behaviour.insert(new TransportedItemStack(resource.toStack(), 0), amount, tx);
+    }
+    @Override public long extract(ItemVariant resource, long amount, TransactionContext tx) {
+        StoragePreconditions.notBlankNotNegative(resource, amount);
+        if(!behaviour.isActiveWorldOwner())return 0;
+        long total = 0;
+        for (var slot : inventory.outputs) total += slot.extract(resource, amount - total, tx);
+        return total + inventory.inputs.getFirst().extract(resource, amount - total, tx);
+    }
+    @Override public boolean supportsInsertion(){return behaviour.isActiveWorldOwner();}
+    @Override public boolean supportsExtraction(){return behaviour.isActiveWorldOwner();}
+    @Override public Iterator<StorageView<ItemVariant>> iterator() {
+        List<StorageView<ItemVariant>> views = new ArrayList<>();
+        var slots=new ArrayList<>(inventory.inputs);slots.addAll(inventory.outputs);
+        for(var slot:slots)views.add(new StorageView<>(){
+            @Override public boolean isResourceBlank(){return !behaviour.isActiveWorldOwner()||slot.isResourceBlank();}
+            @Override public ItemVariant getResource(){return behaviour.isActiveWorldOwner()?slot.getResource():ItemVariant.blank();}
+            @Override public long getAmount(){return behaviour.isActiveWorldOwner()?slot.getAmount():0;}
+            @Override public long getCapacity(){if(!behaviour.isActiveWorldOwner())return 0;int configured=behaviour.getConfiguredMaxStackSize();return slot==inventory.inputs.getFirst()?Math.min(slot.getCapacity(),configured==0?64:configured):slot.getCapacity();}
+            @Override public long extract(ItemVariant resource,long amount,TransactionContext tx){StoragePreconditions.notBlankNotNegative(resource,amount);return behaviour.isActiveWorldOwner()?slot.extract(resource,amount,tx):0;}
+            @Override public StorageView<ItemVariant> getUnderlyingView(){return slot.getUnderlyingView();}
+        });return views.iterator();
+    }
 }

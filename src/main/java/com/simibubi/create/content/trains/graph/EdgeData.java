@@ -1,222 +1,227 @@
 package com.simibubi.create.content.trains.graph;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.google.common.base.Objects;
-import com.simibubi.create.Create;
-import com.simibubi.create.content.trains.signal.SignalBoundary;
-import com.simibubi.create.content.trains.signal.SignalEdgeGroup;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.content.trains.signal.TrackEdgePoint;
-
+import java.util.*;
 import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.Mth;
+import net.minecraft.core.UUIDUtil;
+import net.minecraft.nbt.*;
+import net.minecraft.resources.Identifier;
 
-public class EdgeData {
+/**
+ * Ordered real edge points, source fallback group identity and reciprocal geometric intersections.
+ */
+public final class EdgeData {
+  public static final UUID passiveGroup = new UUID(0, 0);
 
-	public static final UUID passiveGroup = UUID.fromString("00000000-0000-0000-0000-000000000000");
+  public record PointRef(Identifier type, UUID id) {
+    public static final Codec<PointRef> CODEC =
+        RecordCodecBuilder.create(
+            i ->
+                i.group(
+                        Identifier.CODEC.fieldOf("Type").forGetter(PointRef::type),
+                        UUIDUtil.CODEC.fieldOf("Id").forGetter(PointRef::id))
+                    .apply(i, PointRef::new));
+  }
 
-	private UUID singleSignalGroup;
-	private List<TrackEdgePoint> points;
-	private List<TrackEdgeIntersection> intersections;
-	private TrackEdge edge;
+  public record Snapshot(
+      Optional<UUID> group, List<PointRef> points, List<TrackEdgeIntersection> intersections) {
+    public Snapshot {
+      points = List.copyOf(points);
+      intersections = List.copyOf(intersections);
+    }
 
-	public EdgeData(TrackEdge edge) {
-		this.edge = edge;
-		points = new ArrayList<>();
-		intersections = new ArrayList<>();
-		singleSignalGroup = passiveGroup;
-	}
+    public static final Codec<Snapshot> CODEC =
+        RecordCodecBuilder.create(
+            i ->
+                i.group(
+                        UUIDUtil.CODEC.optionalFieldOf("SignalGroup").forGetter(Snapshot::group),
+                        PointRef.CODEC
+                            .listOf()
+                            .optionalFieldOf("Points", List.of())
+                            .forGetter(Snapshot::points),
+                        TrackEdgeIntersection.CODEC
+                            .listOf()
+                            .optionalFieldOf("Intersections", List.of())
+                            .forGetter(Snapshot::intersections))
+                    .apply(i, Snapshot::new));
+  }
 
-	public boolean hasSignalBoundaries() {
-		return singleSignalGroup == null;
-	}
+  private UUID singleSignalGroup = passiveGroup;
+  private final List<TrackEdgePoint> points = new ArrayList<>();
+  private final List<TrackEdgeIntersection> intersections = new ArrayList<>();
+  private final TrackEdge edge;
 
-	public UUID getSingleSignalGroup() {
-		return singleSignalGroup;
-	}
+  public EdgeData(TrackEdge edge) {
+    this.edge = Objects.requireNonNull(edge);
+  }
 
-	public void setSingleSignalGroup(@Nullable TrackGraph graph, UUID singleSignalGroup) {
-		if (graph != null && !Objects.equal(singleSignalGroup, this.singleSignalGroup))
-			refreshIntersectingSignalGroups(graph);
-		this.singleSignalGroup = singleSignalGroup;
-	}
+  public boolean hasSignalBoundaries() {
+    return singleSignalGroup == null;
+  }
 
-	public void refreshIntersectingSignalGroups(TrackGraph graph) {
-		Map<UUID, SignalEdgeGroup> groups = Create.RAILWAYS.signalEdgeGroups;
-		for (TrackEdgeIntersection intersection : intersections) {
-			if (intersection.groupId == null)
-				continue;
-			SignalEdgeGroup group = groups.get(intersection.groupId);
-			if (group != null)
-				group.removeIntersection(intersection.id);
-		}
-		if (hasIntersections())
-			graph.deferIntersectionUpdate(edge);
-	}
+  public UUID getSingleSignalGroup() {
+    return singleSignalGroup;
+  }
 
-	public boolean hasPoints() {
-		return !points.isEmpty();
-	}
+  public void setSingleSignalGroup(TrackGraph graph, UUID group) {
+    if (Objects.equals(singleSignalGroup, group)) return;
+    singleSignalGroup = group;
+    if (graph != null) {
+      refreshIntersectingSignalGroups(graph);
+      graph.markDirty();
+    }
+  }
 
-	public boolean hasIntersections() {
-		return !intersections.isEmpty();
-	}
+  public void refreshIntersectingSignalGroups(TrackGraph graph) {
+    for (var intersection : intersections) intersection.groupId = null;
+    graph.deferIntersectionUpdate(edge);
+  }
 
-	public List<TrackEdgeIntersection> getIntersections() {
-		return intersections;
-	}
+  public boolean hasPoints() {
+    return !points.isEmpty();
+  }
 
-	public void addIntersection(TrackGraph graph, UUID id, double position, TrackNode target1, TrackNode target2,
-		double targetPosition) {
-		TrackNodeLocation loc1 = target1.getLocation();
-		TrackNodeLocation loc2 = target2.getLocation();
+  public boolean hasIntersections() {
+    return !intersections.isEmpty();
+  }
 
-		for (TrackEdgeIntersection existing : intersections)
-			if (existing.isNear(position) && existing.targets(loc1, loc2))
-				return;
+  public List<TrackEdgeIntersection> getIntersections() {
+    return Collections.unmodifiableList(intersections);
+  }
 
-		TrackEdgeIntersection intersection = new TrackEdgeIntersection();
-		intersection.id = id;
-		intersection.location = position;
-		intersection.target = Couple.create(loc1, loc2);
-		intersection.targetLocation = targetPosition;
-		intersections.add(intersection);
-		graph.deferIntersectionUpdate(edge);
-	}
+  public List<TrackEdgePoint> getPoints() {
+    return Collections.unmodifiableList(points);
+  }
 
-	public void removeIntersection(TrackGraph graph, UUID id) {
-		refreshIntersectingSignalGroups(graph);
-		for (Iterator<TrackEdgeIntersection> iterator = intersections.iterator(); iterator.hasNext();) {
-			TrackEdgeIntersection existing = iterator.next();
-			if (existing.id.equals(id))
-				iterator.remove();
-		}
-	}
+  public void addIntersection(
+      TrackGraph graph,
+      UUID id,
+      double position,
+      TrackNode target1,
+      TrackNode target2,
+      double targetPosition) {
+    if (!Double.isFinite(position) || !Double.isFinite(targetPosition))
+      throw new IllegalArgumentException("Nonfinite railway intersection");
+    for (var value : intersections)
+      if (value.isNear(position) && value.targets(target1.getLocation(), target2.getLocation()))
+        return;
+    var value = new TrackEdgeIntersection();
+    value.id = id;
+    value.location = position;
+    value.target = Couple.create(target1.getLocation(), target2.getLocation());
+    value.targetLocation = targetPosition;
+    intersections.add(value);
+    graph.deferIntersectionUpdate(edge);
+    graph.markDirty();
+  }
 
-	public UUID getGroupAtPosition(TrackGraph graph, double position) {
-		if (!hasSignalBoundaries())
-			return getEffectiveEdgeGroupId(graph);
-		SignalBoundary firstSignal = next(EdgePointType.SIGNAL, 0);
-		if (firstSignal == null)
-			return null;
-		UUID currentGroup = firstSignal.getGroup(edge.node1);
+  public void removeIntersection(TrackGraph graph, UUID id) {
+    if (intersections.removeIf(value -> value.id.equals(id))) {
+      refreshIntersectingSignalGroups(graph);
+      graph.markDirty();
+    }
+  }
 
-		for (TrackEdgePoint trackEdgePoint : getPoints()) {
-			if (!(trackEdgePoint instanceof SignalBoundary sb))
-				continue;
-			if (sb.getLocationOn(edge) >= position)
-				return currentGroup;
-			currentGroup = sb.getGroup(edge.node2);
-		}
+  public UUID getEffectiveEdgeGroupId(TrackGraph graph) {
+    return singleSignalGroup == null
+        ? null
+        : passiveGroup.equals(singleSignalGroup) ? graph.id : singleSignalGroup;
+  }
 
-		return currentGroup;
-	}
+  public UUID getGroupAtPosition(TrackGraph graph, double position) {
+    if (!hasSignalBoundaries()) return getEffectiveEdgeGroupId(graph);
+    UUID group = null;
+    for (var point : points)
+      if (point instanceof TrackEdgePoint.SignalBoundaryPoint boundary) {
+        if (group == null) group = boundary.groupFor(edge.node1);
+        if (point.getLocationOn(edge) >= position) return group;
+        group = boundary.groupFor(edge.node2);
+      }
+    return group;
+  }
 
-	public List<TrackEdgePoint> getPoints() {
-		return points;
-	}
+  public void removePoint(TrackGraph graph, TrackEdgePoint point) {
+    if (!points.remove(point)) return;
+    if (point instanceof TrackEdgePoint.SignalBoundaryPoint)
+      setSingleSignalGroup(
+          graph,
+          points.stream().noneMatch(value -> value instanceof TrackEdgePoint.SignalBoundaryPoint)
+              ? passiveGroup
+              : null);
+  }
 
-	public UUID getEffectiveEdgeGroupId(TrackGraph graph) {
-		return singleSignalGroup == null ? null : singleSignalGroup.equals(passiveGroup) ? graph.id : singleSignalGroup;
-	}
+  public void addPoint(TrackGraph graph, TrackEdgePoint point) {
+    if (points.contains(point)) return;
+    if (point instanceof TrackEdgePoint.SignalBoundaryPoint) setSingleSignalGroup(graph, null);
+    points.add(point);
+    points.sort(Comparator.comparingDouble(value -> value.getLocationOn(edge)));
+  }
 
-	public void removePoint(TrackGraph graph, TrackEdgePoint point) {
-		points.remove(point);
-		if (point.getType() == EdgePointType.SIGNAL) {
-			boolean noSignalsRemaining = next(point.getType(), 0) == null;
-			setSingleSignalGroup(graph, noSignalsRemaining ? passiveGroup : null);
-		}
-	}
+  @SuppressWarnings("unchecked")
+  public <T extends TrackEdgePoint> T next(EdgePointType<T> type, double min) {
+    for (var point : points)
+      if (point.getType() == type && point.getLocationOn(edge) > min) return (T) point;
+    return null;
+  }
 
-	public <T extends TrackEdgePoint> void addPoint(TrackGraph graph, TrackEdgePoint point) {
-		if (point.getType() == EdgePointType.SIGNAL)
-			setSingleSignalGroup(graph, null);
-		double locationOn = point.getLocationOn(edge);
-		int i = 0;
-		for (; i < points.size(); i++)
-			if (points.get(i)
-				.getLocationOn(edge) > locationOn)
-				break;
-		points.add(i, point);
-	}
+  public TrackEdgePoint next(double min) {
+    for (var point : points) if (point.getLocationOn(edge) > min) return point;
+    return null;
+  }
 
-	@Nullable
-	@SuppressWarnings("unchecked")
-	public <T extends TrackEdgePoint> T next(EdgePointType<T> type, double minPosition) {
-		for (TrackEdgePoint point : points)
-			if (point.getType() == type && point.getLocationOn(edge) > minPosition)
-				return (T) point;
-		return null;
-	}
+  public <T extends TrackEdgePoint> T get(EdgePointType<T> type, double at) {
+    var point = next(type, at - .5);
+    return point != null && Math.abs(point.getLocationOn(edge) - at) < 1e-8 ? point : null;
+  }
 
-	@Nullable
-	public TrackEdgePoint next(double minPosition) {
-		for (TrackEdgePoint point : points)
-			if (point.getLocationOn(edge) > minPosition)
-				return point;
-		return null;
-	}
+  public Snapshot snapshot() {
+    return new Snapshot(
+        Optional.ofNullable(singleSignalGroup),
+        points.stream().map(point -> new PointRef(point.getType().getId(), point.id)).toList(),
+        intersections);
+  }
 
-	@Nullable
-	public <T extends TrackEdgePoint> T get(EdgePointType<T> type, double exactPosition) {
-		T next = next(type, exactPosition - .5f);
-		if (next != null && Mth.equal(next.getLocationOn(edge), exactPosition))
-			return next;
-		return null;
-	}
+  public void restore(Snapshot snapshot, TrackGraph graph) {
+    var decoded = new ArrayList<TrackEdgePoint>();
+    for (var ref : snapshot.points) {
+      var type = EdgePointType.TYPES.get(ref.type);
+      if (type == null)
+        throw new IllegalArgumentException("Unknown railway point type " + ref.type);
+      var point = graph.getPoint(type, ref.id);
+      if (point == null || decoded.contains(point))
+        throw new IllegalArgumentException("Missing/duplicate railway point reference " + ref.id);
+      decoded.add(point);
+    }
+    boolean boundaries =
+        decoded.stream().anyMatch(point -> point instanceof TrackEdgePoint.SignalBoundaryPoint);
+    if (snapshot.group.isEmpty() != boundaries)
+      throw new IllegalArgumentException(
+          "Railway group state disagrees with actual signal boundaries");
+    var ids = new HashSet<UUID>();
+    for (var crossing : snapshot.intersections)
+      if (!ids.add(crossing.id)
+          || crossing.location < 0
+          || crossing.targetLocation < 0
+          || crossing.target.getFirst().equals(crossing.target.getSecond()))
+        throw new IllegalArgumentException("Invalid or duplicate railway intersection");
+    singleSignalGroup = snapshot.group.orElse(null);
+    points.clear();
+    points.addAll(decoded);
+    points.sort(Comparator.comparingDouble(point -> point.getLocationOn(edge)));
+    intersections.clear();
+    intersections.addAll(snapshot.intersections);
+  }
 
-	public CompoundTag write(DimensionPalette dimensions) {
-		CompoundTag nbt = new CompoundTag();
-		if (singleSignalGroup == passiveGroup)
-			NBTHelper.putMarker(nbt, "PassiveGroup");
-		else if (singleSignalGroup != null)
-			nbt.putUUID("SignalGroup", singleSignalGroup);
+  public CompoundTag write(DimensionPalette dimensions) {
+    return (CompoundTag) Snapshot.CODEC.encodeStart(NbtOps.INSTANCE, snapshot()).getOrThrow();
+  }
 
-		if (hasPoints())
-			nbt.put("Points", NBTHelper.writeCompoundList(points, point -> {
-				CompoundTag tag = new CompoundTag();
-				tag.putUUID("Id", point.id);
-				tag.putString("Type", point.getType()
-					.getId()
-					.toString());
-				return tag;
-			}));
-		if (hasIntersections())
-			nbt.put("Intersections", NBTHelper.writeCompoundList(intersections, tei -> tei.write(dimensions)));
-		return nbt;
-	}
-
-	public static EdgeData read(CompoundTag nbt, TrackEdge edge, TrackGraph graph, DimensionPalette dimensions) {
-		EdgeData data = new EdgeData(edge);
-		if (nbt.contains("SignalGroup"))
-			data.singleSignalGroup = nbt.getUUID("SignalGroup");
-		else if (!nbt.contains("PassiveGroup"))
-			data.singleSignalGroup = null;
-
-		if (nbt.contains("Points"))
-			NBTHelper.iterateCompoundList(nbt.getList("Points", Tag.TAG_COMPOUND), tag -> {
-				ResourceLocation location = ResourceLocation.parse(tag.getString("Type"));
-				EdgePointType<?> type = EdgePointType.TYPES.get(location);
-				if (type == null || !tag.contains("Id"))
-					return;
-				TrackEdgePoint point = graph.getPoint(type, tag.getUUID("Id"));
-				if (point != null)
-					data.points.add(point);
-			});
-		if (nbt.contains("Intersections"))
-			data.intersections = NBTHelper.readCompoundList(nbt.getList("Intersections", Tag.TAG_COMPOUND),
-				c -> TrackEdgeIntersection.read(c, dimensions));
-		return data;
-	}
-
+  public static EdgeData read(
+      CompoundTag tag, TrackEdge edge, TrackGraph graph, DimensionPalette dimensions) {
+    var result = new EdgeData(edge);
+    result.restore(Snapshot.CODEC.parse(NbtOps.INSTANCE, tag).getOrThrow(), graph);
+    return result;
+  }
 }

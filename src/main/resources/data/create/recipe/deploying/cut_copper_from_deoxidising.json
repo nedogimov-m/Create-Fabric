@@ -1,0 +1,13 @@
+{
+  "type": "create:deploying",
+  "ingredients": [
+    "minecraft:exposed_cut_copper",
+    "#minecraft:axes"
+  ],
+  "keep_held_item": true,
+  "results": [
+    {
+      "id": "minecraft:cut_copper"
+    }
+  ]
+}

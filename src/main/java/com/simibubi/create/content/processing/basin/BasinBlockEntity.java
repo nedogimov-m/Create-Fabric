@@ -1,819 +1,362 @@
 package com.simibubi.create.content.processing.basin;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Optional;
-
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
-import com.google.common.collect.ImmutableList;
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllParticleTypes;
-import com.simibubi.create.AllTags;
-import com.simibubi.create.api.equipment.goggles.IHaveGoggleInformation;
-import com.simibubi.create.content.fluids.FluidFX;
-import com.simibubi.create.content.fluids.particle.FluidParticleData;
-import com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour;
-import com.simibubi.create.content.kinetics.mixer.MechanicalMixerBlockEntity;
-import com.simibubi.create.content.processing.burner.BlazeBurnerBlock;
-import com.simibubi.create.content.processing.burner.BlazeBurnerBlock.HeatLevel;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.fluid.SmartFluidTankBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.fluid.SmartFluidTankBehaviour.TankSegment;
-import com.simibubi.create.foundation.blockEntity.behaviour.inventory.InvManipulationBehaviour;
-import com.simibubi.create.foundation.fluid.CombinedTankWrapper;
-import com.simibubi.create.foundation.item.ItemHelper;
-import com.simibubi.create.foundation.item.SmartInventory;
-import com.simibubi.create.foundation.utility.BlockHelper;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import net.createmod.catnip.animation.AnimationTickHolder;
-import net.createmod.catnip.animation.LerpedFloat;
-import net.createmod.catnip.animation.LerpedFloat.Chaser;
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.IntAttached;
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.lang.LangBuilder;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.ChatFormatting;
+import com.simibubi.create.content.processing.recipe.HeatCondition;
+import com.simibubi.create.foundation.fluid.ProcessingFluidStorage;
+import com.simibubi.create.foundation.item.ProcessingInventory;
+import net.fabricmc.fabric.api.transfer.v1.fluid.FluidConstants;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
 import net.minecraft.core.HolderLookup;
-import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.StringTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.network.chat.Component;
-import net.minecraft.util.Mth;
-import net.minecraft.util.RandomSource;
-import net.minecraft.world.Clearable;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.*;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
-
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler.FluidAction;
-import net.neoforged.neoforge.fluids.capability.templates.FluidTank;
-import net.neoforged.neoforge.items.IItemHandler;
-import net.neoforged.neoforge.items.IItemHandlerModifiable;
-import net.neoforged.neoforge.items.ItemHandlerHelper;
-import net.neoforged.neoforge.items.ItemStackHandler;
-import net.neoforged.neoforge.items.wrapper.CombinedInvWrapper;
-
-public class BasinBlockEntity extends SmartBlockEntity implements IHaveGoggleInformation, Clearable {
-
-	private boolean areFluidsMoving;
-	LerpedFloat ingredientRotationSpeed;
-	LerpedFloat ingredientRotation;
-
-	public BasinInventory inputInventory;
-	public SmartFluidTankBehaviour inputTank;
-	protected SmartInventory outputInventory;
-	protected SmartFluidTankBehaviour outputTank;
-	private FilteringBehaviour filtering;
-	private boolean contentsChanged;
-
-	private Couple<SmartInventory> invs;
-	private Couple<SmartFluidTankBehaviour> tanks;
-
-	protected IItemHandlerModifiable itemCapability;
-	protected IFluidHandler fluidCapability;
-
-	List<Direction> disabledSpoutputs;
-	Direction preferredSpoutput;
-	protected List<ItemStack> spoutputBuffer;
-	protected List<FluidStack> spoutputFluidBuffer;
-	int recipeBackupCheck;
-
-	public static final int OUTPUT_ANIMATION_TIME = 10;
-	List<IntAttached<ItemStack>> visualizedOutputItems;
-	List<IntAttached<FluidStack>> visualizedOutputFluids;
-
-	private @Nullable HeatLevel cachedHeatLevel;
-
-	public BasinBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		inputInventory = new BasinInventory(9, this);
-		inputInventory.whenContentsChanged($ -> contentsChanged = true);
-		outputInventory = new BasinInventory(9, this).forbidInsertion()
-			.withMaxStackSize(64);
-		areFluidsMoving = false;
-		itemCapability = new CombinedInvWrapper(inputInventory, outputInventory);
-		contentsChanged = true;
-		ingredientRotation = LerpedFloat.angular()
-			.startWithValue(0);
-		ingredientRotationSpeed = LerpedFloat.linear()
-			.startWithValue(0);
-
-		invs = Couple.create(inputInventory, outputInventory);
-		tanks = Couple.create(inputTank, outputTank);
-		visualizedOutputItems = Collections.synchronizedList(new ArrayList<>());
-		visualizedOutputFluids = Collections.synchronizedList(new ArrayList<>());
-		disabledSpoutputs = new ArrayList<>();
-		preferredSpoutput = null;
-		spoutputBuffer = new ArrayList<>();
-		spoutputFluidBuffer = new ArrayList<>();
-		recipeBackupCheck = 20;
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		event.registerBlockEntity(
-				Capabilities.ItemHandler.BLOCK,
-				AllBlockEntityTypes.BASIN.get(),
-				(be, context) -> be.itemCapability
-		);
-		event.registerBlockEntity(
-				Capabilities.FluidHandler.BLOCK,
-				AllBlockEntityTypes.BASIN.get(),
-				(be, context) -> be.fluidCapability
-		);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(new DirectBeltInputBehaviour(this));
-		filtering = new FilteringBehaviour(this, new BasinValueBox()).withCallback(newFilter -> contentsChanged = true)
-			.forRecipes();
-		behaviours.add(filtering);
-
-		inputTank = new SmartFluidTankBehaviour(SmartFluidTankBehaviour.INPUT, this, 2, 1000, true)
-			.whenFluidUpdates(() -> contentsChanged = true);
-		outputTank = new SmartFluidTankBehaviour(SmartFluidTankBehaviour.OUTPUT, this, 2, 1000, true)
-			.whenFluidUpdates(() -> contentsChanged = true)
-			.forbidInsertion();
-		behaviours.add(inputTank);
-		behaviours.add(outputTank);
-
-		fluidCapability = new CombinedTankWrapper(outputTank.getCapability(), inputTank.getCapability());
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-		inputInventory.deserializeNBT(registries, compound.getCompound("InputItems"));
-		outputInventory.deserializeNBT(registries, compound.getCompound("OutputItems"));
-
-		preferredSpoutput = null;
-		if (compound.contains("PreferredSpoutput"))
-			preferredSpoutput = NBTHelper.readEnum(compound, "PreferredSpoutput", Direction.class);
-		disabledSpoutputs.clear();
-		ListTag disabledList = compound.getList("DisabledSpoutput", Tag.TAG_STRING);
-		disabledList.forEach(d -> disabledSpoutputs.add(Direction.valueOf(((StringTag) d).getAsString())));
-		spoutputBuffer = NBTHelper.readItemList(compound.getList("Overflow", Tag.TAG_COMPOUND), registries);
-		spoutputFluidBuffer = NBTHelper.readCompoundList(compound.getList("FluidOverflow", Tag.TAG_COMPOUND), tag -> FluidStack.parseOptional(registries, tag));
-
-		if (!clientPacket)
-			return;
-
-		NBTHelper.iterateCompoundList(compound.getList("VisualizedItems", Tag.TAG_COMPOUND),
-			c -> visualizedOutputItems.add(IntAttached.with(OUTPUT_ANIMATION_TIME, ItemStack.parseOptional(registries, c))));
-		NBTHelper.iterateCompoundList(compound.getList("VisualizedFluids", Tag.TAG_COMPOUND),
-			c -> visualizedOutputFluids
-				.add(IntAttached.with(OUTPUT_ANIMATION_TIME, FluidStack.parseOptional(registries, c))));
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(compound, registries, clientPacket);
-		compound.put("InputItems", inputInventory.serializeNBT(registries));
-		compound.put("OutputItems", outputInventory.serializeNBT(registries));
-
-		if (preferredSpoutput != null)
-			NBTHelper.writeEnum(compound, "PreferredSpoutput", preferredSpoutput);
-		ListTag disabledList = new ListTag();
-		disabledSpoutputs.forEach(d -> disabledList.add(StringTag.valueOf(d.name())));
-		compound.put("DisabledSpoutput", disabledList);
-		compound.put("Overflow", NBTHelper.writeItemList(spoutputBuffer, registries));
-		compound.put("FluidOverflow",
-			NBTHelper.writeCompoundList(spoutputFluidBuffer, fs -> (CompoundTag) fs.saveOptional(registries)));
-
-		if (!clientPacket)
-			return;
-
-		compound.put("VisualizedItems", NBTHelper.writeCompoundList(visualizedOutputItems, ia -> (CompoundTag) ia.getValue().saveOptional(registries)));
-		compound.put("VisualizedFluids", NBTHelper.writeCompoundList(visualizedOutputFluids, ia -> (CompoundTag) ia.getValue().saveOptional(registries)));
-		visualizedOutputItems.clear();
-		visualizedOutputFluids.clear();
-	}
-
-	@Override
-	public void clearContent() {
-		spoutputBuffer.clear();
-		inputInventory.clearContent();
-		outputInventory.clearContent();
-		filtering.setFilter(ItemStack.EMPTY);
-	}
-
-
-	@Override
-	public void destroy() {
-		super.destroy();
-		ItemHelper.dropContents(level, worldPosition, inputInventory);
-		ItemHelper.dropContents(level, worldPosition, outputInventory);
-		spoutputBuffer.forEach(is -> Block.popResource(level, worldPosition, is));
-	}
-
-	@Override
-	public void remove() {
-		super.remove();
-		onEmptied();
-	}
-
-	public void onEmptied() {
-		getOperator().ifPresent(be -> be.basinRemoved = true);
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		invalidateCapabilities();
-	}
-
-	@Override
-	public void notifyUpdate() {
-		super.notifyUpdate();
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-
-		if (!level.isClientSide) {
-			updateSpoutput();
-			if (recipeBackupCheck-- > 0)
-				return;
-			recipeBackupCheck = 20;
-			if (isEmpty())
-				return;
-			notifyChangeOfContents();
-			return;
-		}
-
-		BlockEntity blockEntity = level.getBlockEntity(worldPosition.above(2));
-		if (!(blockEntity instanceof MechanicalMixerBlockEntity mixer)) {
-			setAreFluidsMoving(false);
-			return;
-		}
-
-		setAreFluidsMoving(mixer.running && mixer.runningTicks <= 20);
-	}
-
-	public boolean isEmpty() {
-		return inputInventory.isEmpty() && outputInventory.isEmpty() && inputTank.isEmpty() && outputTank.isEmpty();
-	}
-
-	public void onWrenched(Direction face) {
-		BlockState blockState = getBlockState();
-		Direction currentFacing = blockState.getValue(BasinBlock.FACING);
-
-		disabledSpoutputs.remove(face);
-		if (currentFacing == face) {
-			if (preferredSpoutput == face)
-				preferredSpoutput = null;
-			disabledSpoutputs.add(face);
-		} else
-			preferredSpoutput = face;
-
-		updateSpoutput();
-	}
-
-	private void updateSpoutput() {
-		BlockState blockState = getBlockState();
-		Direction currentFacing = blockState.getValue(BasinBlock.FACING);
-		Direction newFacing = Direction.DOWN;
-		for (Direction test : Iterate.horizontalDirections) {
-			boolean canOutputTo = BasinBlock.canOutputTo(level, worldPosition, test);
-			if (canOutputTo && !disabledSpoutputs.contains(test))
-				newFacing = test;
-		}
-
-		if (preferredSpoutput != null && BasinBlock.canOutputTo(level, worldPosition, preferredSpoutput)
-			&& preferredSpoutput != Direction.UP)
-			newFacing = preferredSpoutput;
-
-		if (newFacing == currentFacing)
-			return;
-
-		level.setBlockAndUpdate(worldPosition, blockState.setValue(BasinBlock.FACING, newFacing));
-
-		if (newFacing.getAxis()
-			.isVertical())
-			return;
-
-		for (int slot = 0; slot < outputInventory.getSlots(); slot++) {
-			ItemStack extractItem = outputInventory.extractItem(slot, 64, true);
-			if (extractItem.isEmpty())
-				continue;
-			if (acceptOutputs(ImmutableList.of(extractItem), Collections.emptyList(), true))
-				acceptOutputs(ImmutableList.of(outputInventory.extractItem(slot, 64, false)), Collections.emptyList(),
-					false);
-		}
-
-		IFluidHandler handler = outputTank.getCapability();
-		for (int slot = 0; slot < handler.getTanks(); slot++) {
-			FluidStack fs = handler.getFluidInTank(slot)
-				.copy();
-			if (fs.isEmpty())
-				continue;
-			if (acceptOutputs(Collections.emptyList(), ImmutableList.of(fs), true)) {
-				handler.drain(fs, FluidAction.EXECUTE);
-				acceptOutputs(Collections.emptyList(), ImmutableList.of(fs), false);
-			}
-		}
-
-		notifyChangeOfContents();
-		notifyUpdate();
-	}
-
-	@Override
-	public void tick() {
-		cachedHeatLevel = null;
-
-		super.tick();
-		if (level.isClientSide) {
-			createFluidParticles();
-			tickVisualizedOutputs();
-			ingredientRotationSpeed.tickChaser();
-			ingredientRotation.setValue(ingredientRotation.getValue() + ingredientRotationSpeed.getValue());
-		}
-
-		if ((!spoutputBuffer.isEmpty() || !spoutputFluidBuffer.isEmpty()) && !level.isClientSide)
-			tryClearingSpoutputOverflow();
-		if (!contentsChanged)
-			return;
-
-		contentsChanged = false;
-		getOperator().ifPresent(be -> be.basinChecker.scheduleUpdate());
-
-		for (Direction offset : Iterate.horizontalDirections) {
-			BlockPos toUpdate = worldPosition.above()
-				.relative(offset);
-			BlockState stateToUpdate = level.getBlockState(toUpdate);
-			if (stateToUpdate.getBlock() instanceof BasinBlock
-				&& stateToUpdate.getValue(BasinBlock.FACING) == offset.getOpposite()) {
-				BlockEntity be = level.getBlockEntity(toUpdate);
-				if (be instanceof BasinBlockEntity)
-					((BasinBlockEntity) be).contentsChanged = true;
-			}
-		}
-	}
-
-	private void tryClearingSpoutputOverflow() {
-		BlockState blockState = getBlockState();
-		if (!(blockState.getBlock() instanceof BasinBlock))
-			return;
-		Direction direction = blockState.getValue(BasinBlock.FACING);
-		BlockEntity be = level.getBlockEntity(worldPosition.below()
-			.relative(direction));
-
-		FilteringBehaviour filter = null;
-		InvManipulationBehaviour inserter = null;
-		if (be != null) {
-			filter = BlockEntityBehaviour.get(level, be.getBlockPos(), FilteringBehaviour.TYPE);
-			inserter = BlockEntityBehaviour.get(level, be.getBlockPos(), InvManipulationBehaviour.TYPE);
-		}
-
-		if (filter != null && filter.isRecipeFilter())
-			filter = null; // Do not test spout outputs against the recipe filter
-
-		IItemHandler targetInv = be == null ? null
-			: Optional.ofNullable(level.getCapability(Capabilities.ItemHandler.BLOCK, be.getBlockPos(), direction.getOpposite()))
-			.orElse(inserter == null ? null : inserter.getInventory());
-
-		IFluidHandler targetTank = be == null ? null
-			: level.getCapability(Capabilities.FluidHandler.BLOCK, be.getBlockPos(), direction.getOpposite());
-
-		boolean update = false;
-
-		for (Iterator<ItemStack> iterator = spoutputBuffer.iterator(); iterator.hasNext(); ) {
-			ItemStack itemStack = iterator.next();
-
-			if (direction == Direction.DOWN) {
-				Block.popResource(level, worldPosition, itemStack);
-				iterator.remove();
-				update = true;
-				continue;
-			}
-
-			if (targetInv == null)
-				break;
-
-			ItemStack remainder = ItemHandlerHelper.insertItemStacked(targetInv, itemStack, true);
-			if (remainder.getCount() == itemStack.getCount())
-				continue;
-			if (filter != null && !filter.test(itemStack))
-				continue;
-
-			if (visualizedOutputItems.size() < 3)
-				visualizedOutputItems.add(IntAttached.withZero(itemStack));
-			update = true;
-
-			remainder = ItemHandlerHelper.insertItemStacked(targetInv, itemStack.copy(), false);
-			if (remainder.isEmpty())
-				iterator.remove();
-			else
-				itemStack.setCount(remainder.getCount());
-		}
-
-		for (Iterator<FluidStack> iterator = spoutputFluidBuffer.iterator(); iterator.hasNext(); ) {
-			FluidStack fluidStack = iterator.next();
-
-			if (direction == Direction.DOWN) {
-				iterator.remove();
-				update = true;
-				continue;
-			}
-
-			if (targetTank == null)
-				break;
-
-			for (boolean simulate : Iterate.trueAndFalse) {
-				FluidAction action = simulate ? FluidAction.SIMULATE : FluidAction.EXECUTE;
-				int fill = targetTank instanceof SmartFluidTankBehaviour.InternalFluidHandler
-					? ((SmartFluidTankBehaviour.InternalFluidHandler) targetTank).forceFill(fluidStack.copy(), action)
-					: targetTank.fill(fluidStack.copy(), action);
-				if (fill != fluidStack.getAmount())
-					break;
-				if (simulate)
-					continue;
-
-				update = true;
-				iterator.remove();
-				if (visualizedOutputFluids.size() < 3)
-					visualizedOutputFluids.add(IntAttached.withZero(fluidStack));
-			}
-		}
-
-		if (update) {
-			notifyChangeOfContents();
-			sendData();
-		}
-	}
-
-	public float getTotalFluidUnits(float partialTicks) {
-		int renderedFluids = 0;
-		float totalUnits = 0;
-
-		for (SmartFluidTankBehaviour behaviour : getTanks()) {
-			if (behaviour == null)
-				continue;
-			for (TankSegment tankSegment : behaviour.getTanks()) {
-				if (tankSegment.getRenderedFluid()
-					.isEmpty())
-					continue;
-				float units = tankSegment.getTotalUnits(partialTicks);
-				if (units < 1)
-					continue;
-				totalUnits += units;
-				renderedFluids++;
-			}
-		}
-
-		if (renderedFluids == 0)
-			return 0;
-		if (totalUnits < 1)
-			return 0;
-		return totalUnits;
-	}
-
-	private Optional<BasinOperatingBlockEntity> getOperator() {
-		if (level == null)
-			return Optional.empty();
-		BlockEntity be = level.getBlockEntity(worldPosition.above(2));
-		if (be instanceof BasinOperatingBlockEntity)
-			return Optional.of((BasinOperatingBlockEntity) be);
-		return Optional.empty();
-	}
-
-	public FilteringBehaviour getFilter() {
-		return filtering;
-	}
-
-	public void notifyChangeOfContents() {
-		contentsChanged = true;
-	}
-
-	public SmartInventory getInputInventory() {
-		return inputInventory;
-	}
-
-	public SmartInventory getOutputInventory() {
-		return outputInventory;
-	}
-
-	public boolean canContinueProcessing() {
-		return spoutputBuffer.isEmpty() && spoutputFluidBuffer.isEmpty();
-	}
-
-	public boolean acceptOutputs(List<ItemStack> outputItems, List<FluidStack> outputFluids, boolean simulate) {
-		outputInventory.allowInsertion();
-		outputTank.allowInsertion();
-		boolean acceptOutputsInner = acceptOutputsInner(outputItems, outputFluids, simulate);
-		outputInventory.forbidInsertion();
-		outputTank.forbidInsertion();
-		return acceptOutputsInner;
-	}
-
-	private boolean acceptOutputsInner(List<ItemStack> outputItems, List<FluidStack> outputFluids, boolean simulate) {
-		BlockState blockState = getBlockState();
-		if (!(blockState.getBlock() instanceof BasinBlock))
-			return false;
-
-		Direction direction = blockState.getValue(BasinBlock.FACING);
-		if (direction != Direction.DOWN) {
-
-			BlockEntity be = level.getBlockEntity(worldPosition.below()
-				.relative(direction));
-
-			InvManipulationBehaviour inserter =
-				be == null ? null : BlockEntityBehaviour.get(level, be.getBlockPos(), InvManipulationBehaviour.TYPE);
-			IItemHandler targetInv = be == null ? null
-				: Optional.ofNullable(level.getCapability(Capabilities.ItemHandler.BLOCK, be.getBlockPos(), direction.getOpposite()))
-				.orElse(inserter == null ? null : inserter.getInventory());
-			IFluidHandler targetTank = be == null ? null
-				: level.getCapability(Capabilities.FluidHandler.BLOCK, be.getBlockPos(), direction.getOpposite());
-			boolean externalTankNotPresent = targetTank == null;
-
-			if (!outputItems.isEmpty() && targetInv == null)
-				return false;
-			if (!outputFluids.isEmpty() && externalTankNotPresent) {
-				// Special case - fluid outputs but output only accepts items
-				targetTank = outputTank.getCapability();
-				if (targetTank == null)
-					return false;
-				if (!acceptFluidOutputsIntoBasin(outputFluids, simulate, targetTank))
-					return false;
-			}
-
-			if (simulate)
-				return true;
-			for (ItemStack itemStack : outputItems)
-				if (!itemStack.isEmpty())
-					spoutputBuffer.add(itemStack.copy());
-			if (!externalTankNotPresent)
-				for (FluidStack fluidStack : outputFluids)
-					spoutputFluidBuffer.add(fluidStack.copy());
-			return true;
-		}
-
-		IItemHandler targetInv = outputInventory;
-		IFluidHandler targetTank = outputTank.getCapability();
-
-		if (targetInv == null && !outputItems.isEmpty())
-			return false;
-		if (!acceptItemOutputsIntoBasin(outputItems, simulate, targetInv))
-			return false;
-		if (outputFluids.isEmpty())
-			return true;
-		if (targetTank == null)
-			return false;
-		if (!acceptFluidOutputsIntoBasin(outputFluids, simulate, targetTank))
-			return false;
-
-		return true;
-	}
-
-	private boolean acceptFluidOutputsIntoBasin(List<FluidStack> outputFluids, boolean simulate,
-												IFluidHandler targetTank) {
-		for (FluidStack fluidStack : outputFluids) {
-			FluidAction action = simulate ? FluidAction.SIMULATE : FluidAction.EXECUTE;
-			int fill = targetTank instanceof SmartFluidTankBehaviour.InternalFluidHandler
-				? ((SmartFluidTankBehaviour.InternalFluidHandler) targetTank).forceFill(fluidStack.copy(), action)
-				: targetTank.fill(fluidStack.copy(), action);
-			if (fill != fluidStack.getAmount())
-				return false;
-		}
-		return true;
-	}
-
-	private boolean acceptItemOutputsIntoBasin(List<ItemStack> outputItems, boolean simulate, IItemHandler targetInv) {
-		for (ItemStack itemStack : outputItems) {
-			if (!ItemHandlerHelper.insertItemStacked(targetInv, itemStack.copy(), simulate)
-				.isEmpty())
-				return false;
-		}
-		return true;
-	}
-
-	public void readOnlyItems(CompoundTag compound, HolderLookup.Provider registries) {
-		inputInventory.deserializeNBT(registries, compound.getCompound("InputItems"));
-		outputInventory.deserializeNBT(registries, compound.getCompound("OutputItems"));
-	}
-
-	public static HeatLevel getHeatLevelOf(BlockState state) {
-		if (state.hasProperty(BlazeBurnerBlock.HEAT_LEVEL))
-			return state.getValue(BlazeBurnerBlock.HEAT_LEVEL);
-		return AllTags.AllBlockTags.PASSIVE_BOILER_HEATERS.matches(state) && BlockHelper.isNotUnheated(state)
-			? HeatLevel.SMOULDERING
-			: HeatLevel.NONE;
-	}
-
-	public Couple<SmartFluidTankBehaviour> getTanks() {
-		return tanks;
-	}
-
-	public Couple<SmartInventory> getInvs() {
-		return invs;
-	}
-
-	// client things
-
-	private void tickVisualizedOutputs() {
-		visualizedOutputFluids.forEach(IntAttached::decrement);
-		visualizedOutputItems.forEach(IntAttached::decrement);
-		visualizedOutputFluids.removeIf(IntAttached::isOrBelowZero);
-		visualizedOutputItems.removeIf(IntAttached::isOrBelowZero);
-	}
-
-	private void createFluidParticles() {
-		RandomSource r = level.random;
-
-		if (!visualizedOutputFluids.isEmpty())
-			createOutputFluidParticles(r);
-
-		if (!areFluidsMoving && r.nextFloat() > 1 / 8f)
-			return;
-
-		int segments = 0;
-		for (SmartFluidTankBehaviour behaviour : getTanks()) {
-			if (behaviour == null)
-				continue;
-			for (TankSegment tankSegment : behaviour.getTanks())
-				if (!tankSegment.isEmpty(0))
-					segments++;
-		}
-		if (segments < 2)
-			return;
-
-		float totalUnits = getTotalFluidUnits(0);
-		if (totalUnits == 0)
-			return;
-		float fluidLevel = Mth.clamp(totalUnits / 2000, 0, 1);
-		float rim = 2 / 16f;
-		float space = 12 / 16f;
-		float surface = worldPosition.getY() + rim + space * fluidLevel + 1 / 32f;
-
-		if (areFluidsMoving) {
-			createMovingFluidParticles(surface, segments);
-			return;
-		}
-
-		for (SmartFluidTankBehaviour behaviour : getTanks()) {
-			if (behaviour == null)
-				continue;
-			for (TankSegment tankSegment : behaviour.getTanks()) {
-				if (tankSegment.isEmpty(0))
-					continue;
-				float x = worldPosition.getX() + rim + space * r.nextFloat();
-				float z = worldPosition.getZ() + rim + space * r.nextFloat();
-				level.addAlwaysVisibleParticle(
-					new FluidParticleData(AllParticleTypes.BASIN_FLUID.get(), tankSegment.getRenderedFluid()), x,
-					surface, z, 0, 0, 0);
-			}
-		}
-	}
-
-	private void createOutputFluidParticles(RandomSource r) {
-		BlockState blockState = getBlockState();
-		if (!(blockState.getBlock() instanceof BasinBlock))
-			return;
-		Direction direction = blockState.getValue(BasinBlock.FACING);
-		if (direction == Direction.DOWN)
-			return;
-		Vec3 directionVec = Vec3.atLowerCornerOf(direction.getNormal());
-		Vec3 outVec = VecHelper.getCenterOf(worldPosition)
-			.add(directionVec.scale(.65)
-				.subtract(0, 1 / 4f, 0));
-		Vec3 outMotion = directionVec.scale(1 / 16f)
-			.add(0, -1 / 16f, 0);
-
-		for (int i = 0; i < 2; i++) {
-			visualizedOutputFluids.forEach(ia -> {
-				FluidStack fluidStack = ia.getValue();
-				ParticleOptions fluidParticle = FluidFX.getFluidParticle(fluidStack);
-				Vec3 m = VecHelper.offsetRandomly(outMotion, r, 1 / 16f);
-				level.addAlwaysVisibleParticle(fluidParticle, outVec.x, outVec.y, outVec.z, m.x, m.y, m.z);
-			});
-		}
-	}
-
-	private void createMovingFluidParticles(float surface, int segments) {
-		Vec3 pointer = new Vec3(1, 0, 0).scale(1 / 16f);
-		float interval = 360f / segments;
-		Vec3 centerOf = VecHelper.getCenterOf(worldPosition);
-		float intervalOffset = (AnimationTickHolder.getTicks() * 18) % 360;
-
-		int currentSegment = 0;
-		for (SmartFluidTankBehaviour behaviour : getTanks()) {
-			if (behaviour == null)
-				continue;
-			for (TankSegment tankSegment : behaviour.getTanks()) {
-				if (tankSegment.isEmpty(0))
-					continue;
-				float angle = interval * (1 + currentSegment) + intervalOffset;
-				Vec3 vec = centerOf.add(VecHelper.rotate(pointer, angle, Axis.Y));
-				level.addAlwaysVisibleParticle(
-					new FluidParticleData(AllParticleTypes.BASIN_FLUID.get(), tankSegment.getRenderedFluid()), vec.x(),
-					surface, vec.z(), 1, 0, 0);
-				currentSegment++;
-			}
-		}
-	}
-
-	public boolean areFluidsMoving() {
-		return areFluidsMoving;
-	}
-
-	public boolean setAreFluidsMoving(boolean areFluidsMoving) {
-		this.areFluidsMoving = areFluidsMoving;
-		ingredientRotationSpeed.chase(areFluidsMoving ? 20 : 0, .1f, Chaser.EXP);
-		return areFluidsMoving;
-	}
-
-	@Override
-	public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
-		CreateLang.translate("gui.goggles.basin_contents")
-			.forGoggles(tooltip);
-
-		if (itemCapability == null)
-			itemCapability = new ItemStackHandler();
-		if (fluidCapability == null)
-			fluidCapability = new FluidTank(0);
-
-		boolean isEmpty = true;
-
-		for (int i = 0; i < itemCapability.getSlots(); i++) {
-			ItemStack stackInSlot = itemCapability.getStackInSlot(i);
-			if (stackInSlot.isEmpty())
-				continue;
-			CreateLang.text("")
-				.add(Component.translatable(stackInSlot.getDescriptionId())
-					.withStyle(ChatFormatting.GRAY))
-				.add(CreateLang.text(" x" + stackInSlot.getCount())
-					.style(ChatFormatting.GREEN))
-				.forGoggles(tooltip, 1);
-			isEmpty = false;
-		}
-
-		LangBuilder mb = CreateLang.translate("generic.unit.millibuckets");
-		for (int i = 0; i < fluidCapability.getTanks(); i++) {
-			FluidStack fluidStack = fluidCapability.getFluidInTank(i);
-			if (fluidStack.isEmpty())
-				continue;
-			CreateLang.text("")
-				.add(CreateLang.fluidName(fluidStack)
-					.add(CreateLang.text(" "))
-					.style(ChatFormatting.GRAY)
-					.add(CreateLang.number(fluidStack.getAmount())
-						.add(mb)
-						.style(ChatFormatting.BLUE)))
-				.forGoggles(tooltip, 1);
-			isEmpty = false;
-		}
-
-		if (isEmpty)
-			tooltip.remove(0);
-
-		return true;
-	}
-
-	@NotNull HeatLevel getHeatLevel() {
-		if (cachedHeatLevel == null) {
-			if (level == null)
-				return HeatLevel.NONE;
-
-			cachedHeatLevel = getHeatLevelOf(level.getBlockState(getBlockPos().below(1)));
-		}
-		return cachedHeatLevel;
-	}
-
-	static class BasinValueBox extends ValueBoxTransform.Sided {
-
-		@Override
-		protected Vec3 getSouthLocation() {
-			return VecHelper.voxelSpace(8, 12, 16.05);
-		}
-
-		@Override
-		protected boolean isSideActive(BlockState state, Direction direction) {
-			return direction.getAxis()
-				.isHorizontal();
-		}
-
-	}
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
+import net.minecraft.world.phys.AABB;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.EnumSet;
+import net.minecraft.core.Direction;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemStorage;
+import net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage;
+import com.mojang.datafixers.util.Either;
+import com.simibubi.create.content.processing.recipe.FluidIngredient;
+import com.simibubi.create.content.processing.recipe.ProcessingOutput;
+
+public final class BasinBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements com.simibubi.create.api.equipment.goggles.IHaveGoggleInformation {
+    @Override public boolean addToGoggleTooltip(List<net.minecraft.network.chat.Component> tooltip,boolean sneaking){
+        int start=tooltip.size();tooltip.add(com.simibubi.create.content.equipment.goggles.GoggleTooltip.translate("gui.goggles.basin_contents"));boolean empty=true;
+        for(var slot:allItems()){if(slot.isResourceBlank())continue;empty=false;com.simibubi.create.content.equipment.goggles.GoggleTooltip.line(tooltip,slot.stack().getHoverName().copy().withStyle(net.minecraft.ChatFormatting.GRAY).append(net.minecraft.network.chat.Component.literal(" x"+slot.getAmount()).withStyle(net.minecraft.ChatFormatting.GREEN)),1);}
+        for(var tank:fluids.allTanks()){if(tank.isResourceBlank())continue;empty=false;com.simibubi.create.content.equipment.goggles.GoggleTooltip.line(tooltip,net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariantAttributes.getName(tank.getResource()).copy().withStyle(net.minecraft.ChatFormatting.GRAY).append(" ").append(com.simibubi.create.content.equipment.goggles.GoggleTooltip.units(tank.getAmount()/81d,"millibuckets").withStyle(net.minecraft.ChatFormatting.BLUE)),1);}
+        if(empty)tooltip.remove(start);return true;
+    }
+    public final ProcessingInventory inventory = new ProcessingInventory(9, 9, variant -> true, this::changed, true, true);
+    public final ProcessingFluidStorage fluids = new ProcessingFluidStorage(2, 2, FluidConstants.BUCKET, this::changed);
+    public final BasinSpoutBuffer spoutBuffer = new BasinSpoutBuffer(this);
+    private final com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour filtering =
+        new com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour(this).forRecipes().withCallback(stack -> changed());
+    public com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour getFilter() { return filtering; }
+    public boolean canContinueProcessing() { return spoutBuffer.isEmpty(); }
+    public static final int OUTPUT_ANIMATION_TIME = 10;
+    final List<net.createmod.catnip.data.IntAttached<ItemStack>> visualizedOutputItems =
+        java.util.Collections.synchronizedList(new ArrayList<>());
+
+    final List<net.createmod.catnip.data.IntAttached<com.simibubi.create.foundation.fluid.FluidStack>> visualizedOutputFluids =
+        java.util.Collections.synchronizedList(new ArrayList<>());
+
+    private void tickVisualizedOutputs() {
+        visualizedOutputItems.forEach(net.createmod.catnip.data.IntAttached::decrement);
+        visualizedOutputItems.removeIf(net.createmod.catnip.data.IntAttached::isOrBelowZero);
+        visualizedOutputFluids.forEach(net.createmod.catnip.data.IntAttached::decrement);
+        visualizedOutputFluids.removeIf(net.createmod.catnip.data.IntAttached::isOrBelowZero);
+        var facing=getBlockState().getValue(BasinBlock.FACING);
+        if(level==null||!level.isClientSide()||facing==Direction.DOWN||visualizedOutputFluids.isEmpty())return;
+        var direction=net.minecraft.world.phys.Vec3.atLowerCornerOf(facing.getUnitVec3i());
+        var origin=net.minecraft.world.phys.Vec3.atCenterOf(worldPosition).add(direction.scale(.65).subtract(0,.25,0));
+        var motion=direction.scale(1/16f).add(0,-1/16f,0);
+        for(int pass=0;pass<2;pass++)for(var event:List.copyOf(visualizedOutputFluids)){
+            var particle=new com.simibubi.create.content.fluids.particle.FluidParticleData(com.simibubi.create.AllParticleTypes.FLUID_PARTICLE,event.getValue());
+            var velocity=net.createmod.catnip.math.VecHelper.offsetRandomly(motion,level.getRandom(),1/16f);
+            level.addAlwaysVisibleParticle(particle,origin.x,origin.y,origin.z,velocity.x,velocity.y,velocity.z);
+        }
+    }
+
+    private long revision;
+    private record CachedRecipe(RecipeManager manager, Object recipes, long revision, HeatCondition heat, int configFlags, RecipeHolder<BasinRecipe> recipe) {}
+    private final Map<RecipeType<BasinRecipe>, CachedRecipe> cachedRecipes = new IdentityHashMap<>();
+    private final EnumSet<Direction> disabledOutputs = EnumSet.noneOf(Direction.class);
+    private Direction preferredOutput;
+
+    public BasinBlockEntity(BlockPos pos, BlockState state) { super(AllBlockEntityTypes.BASIN, pos, state); }
+    private void changed() {
+        revision++;
+        setChanged();
+        getOperator().ifPresent(operator -> operator.basinChecker.scheduleUpdate());
+        if (level instanceof ServerLevel) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), Block.UPDATE_CLIENTS);
+            level.updateNeighbourForOutputSignal(worldPosition, getBlockState().getBlock());
+        }
+    }
+    public List<ProcessingInventory.Slot> allItems() {
+        var slots = new ArrayList<>(inventory.inputs); slots.addAll(inventory.outputs); return slots;
+    }
+
+    public boolean isEmpty() {
+        return spoutBuffer.isEmpty() && allItems().stream().allMatch(slot -> slot.isResourceBlank())
+                && fluids.allTanks().stream().allMatch(tank -> tank.isResourceBlank());
+    }
+
+    private java.util.Optional<BasinOperatingBlockEntity> getOperator() {
+        if (level == null) return java.util.Optional.empty();
+        var owner = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level, worldPosition.above(2));
+        return owner instanceof BasinOperatingBlockEntity operator ? java.util.Optional.of(operator) : java.util.Optional.empty();
+    }
+
+    public void notifyChangeOfContents() {
+        changed();
+    }
+
+    public void onEmptied() {
+        getOperator().ifPresent(operator -> operator.basinRemoved = true);
+    }
+
+    @Override public void remove() {
+        super.remove();
+        onEmptied();
+    }
+
+    public void onWrenched(Direction side) {
+        if (side.getAxis().isVertical()) return;
+        disabledOutputs.remove(side);
+        if (getBlockState().getValue(BasinBlock.FACING) == side) {
+            disabledOutputs.add(side);
+            if (preferredOutput == side) preferredOutput = null;
+        } else preferredOutput = side;
+        updateOutput(); changed();
+    }
+
+    private boolean canOutput(Direction side) {
+        if (level == null || side.getAxis().isVertical()) return false;
+        var beside = worldPosition.relative(side);
+        var target = beside.below();
+        if (!level.isLoaded(beside) || !level.isLoaded(target) || !level.getBlockState(beside).getCollisionShape(level, beside).isEmpty()) return false;
+        var block = level.getBlockState(target).getBlock();
+        return block instanceof BasinBlock || block instanceof com.simibubi.create.content.logistics.depot.DepotBlock
+                || block instanceof com.simibubi.create.content.kinetics.belt.BeltBlock
+                && com.simibubi.create.content.kinetics.belt.BeltBlock.canTransportObjects(level.getBlockState(target));
+    }
+
+    private void updateOutput() {
+        if (level == null || level.isClientSide()) return;
+        Direction selected = Direction.DOWN;
+        for (Direction side : Direction.Plane.HORIZONTAL) if (!disabledOutputs.contains(side) && canOutput(side)) selected = side;
+        if (preferredOutput != null && !disabledOutputs.contains(preferredOutput) && canOutput(preferredOutput)) selected = preferredOutput;
+        if (selected != getBlockState().getValue(BasinBlock.FACING)) {
+            level.setBlockAndUpdate(worldPosition, getBlockState().setValue(BasinBlock.FACING, selected));
+        }
+    }
+
+    private void exportOutputs() {
+        var side = getBlockState().getValue(BasinBlock.FACING);
+        if (!canOutput(side)) return;
+        var target = worldPosition.relative(side).below();
+        var items = com.simibubi.create.foundation.item.LoadedItemStorage.find(level, target, side.getOpposite());
+        var fluidStorage = FluidStorage.SIDED.find(level, target, com.simibubi.create.foundation.utility.LoadedLevelAccess.blockState(level,target), com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,target), side.getOpposite());
+        if (!canContinueProcessing()) return;
+        try (Transaction transaction = Transaction.openOuter()) {
+            var paidItems = new ArrayList<ItemStack>(); var paidFluids = new ArrayList<BasinSpoutBuffer.Fluid>();
+            if (items != null) for (var slot : inventory.outputs) {
+                if (slot.isResourceBlank()) continue;
+                var stack = slot.stack();
+                if (slot.extract(slot.getResource(), slot.getAmount(), transaction) != stack.getCount()) return;
+                paidItems.add(stack);
+            }
+            if (fluidStorage != null) for (var tank : fluids.outputs) {
+                if (tank.isResourceBlank()) continue;
+                var fluid = new BasinSpoutBuffer.Fluid(tank.getResource(), tank.getAmount());
+                if (tank.extract(fluid.variant(), fluid.amount(), transaction) != fluid.amount()) return;
+                paidFluids.add(fluid);
+            }
+            spoutBuffer.append(paidItems, paidFluids, transaction);
+            transaction.commit();
+        }
+    }
+
+    public HeatCondition heat() {
+        if (level == null) return HeatCondition.NONE;
+        var below = level.getBlockState(worldPosition.below());
+        if (!below.hasProperty(com.simibubi.create.content.processing.burner.BlazeBurnerBlock.HEAT_LEVEL)) return HeatCondition.NONE;
+        return switch (below.getValue(com.simibubi.create.content.processing.burner.BlazeBurnerBlock.HEAT_LEVEL)) {
+            case SEETHING -> HeatCondition.SUPERHEATED;
+            case KINDLED, FADING -> HeatCondition.HEATED;
+            default -> HeatCondition.NONE;
+        };
+    }
+    public BasinRecipeInput recipeInput() {
+        return new BasinRecipeInput(allItems().stream().map(ProcessingInventory.Slot::stack).toList(),
+                fluids.allTanks().stream().map(t -> new BasinRecipeInput.FluidAmount(t.getResource(), t.getAmount())).toList(), heat());
+    }
+    public RecipeHolder<BasinRecipe> findRecipe(RecipeType<BasinRecipe> type) {
+        if (!(level instanceof ServerLevel server) || !canContinueProcessing()) return null;
+        var manager = server.getServer().getRecipeManager();
+        var cached = cachedRecipes.get(type);
+        var heat = heat();
+        var config=com.simibubi.create.infrastructure.config.AllConfigs.server().recipes;int configFlags=(config.allowBrewingInMixer.get()?1:0)|(config.allowShapelessInMixer.get()?2:0)|(config.allowShapedSquareInPress.get()?4:0);
+        var recipes = manager.getRecipes();
+        if (cached != null && cached.manager() == manager && cached.recipes() == recipes && cached.revision() == revision && cached.heat() == heat && cached.configFlags()==configFlags) return cached.recipe();
+        var input = recipeInput();
+        RecipeHolder<BasinRecipe> recipe = null;
+        for (var holder : manager.getRecipes()) if (holder.value() instanceof BasinRecipe candidate
+                && candidate.getType() == type && candidate.matches(input, level) && matchesFilter(candidate)) {
+            recipe = new RecipeHolder<>(holder.id(), candidate); break;
+        }
+        if(recipe==null&&config.allowBrewingInMixer.get()&&type==com.simibubi.create.AllRecipeTypes.MIXING)recipe=com.simibubi.create.content.fluids.potion.PotionMixingRecipes.findRecipe(server,input);
+        if (recipe != null && !matchesFilter(recipe.value())) recipe = null;
+        if (recipe == null) recipe = findCraftingRecipe(manager, type, input);
+        cachedRecipes.put(type, new CachedRecipe(manager, recipes, revision, heat, configFlags, recipe));
+        return recipe;
+    }
+
+    private RecipeHolder<BasinRecipe> findCraftingRecipe(RecipeManager manager, RecipeType<BasinRecipe> type, BasinRecipeInput input) {
+        boolean mixing = type == com.simibubi.create.AllRecipeTypes.MIXING;
+        var config=com.simibubi.create.infrastructure.config.AllConfigs.server().recipes;
+        if(mixing?!config.allowShapelessInMixer.get():!config.allowShapedSquareInPress.get())return null;
+        for (var holder : manager.getRecipes()) {
+            if (!(holder.value() instanceof CraftingRecipe crafting)) continue;
+            // Vanilla shaped/shapeless recipes have a static result. Special crafting needs its own adapter.
+            if (crafting.getClass() != ShapedRecipe.class && crafting.getClass() != ShapelessRecipe.class) continue;
+            var ingredients = crafting.placementInfo().ingredients();
+            if (ingredients.size() < 2 || ingredients.size() > 9) continue;
+            boolean compressed = (ingredients.size() == 4 || ingredients.size() == 9)
+                    && ingredients.stream().allMatch(ingredients.getFirst()::equals);
+            if (mixing ? !(crafting instanceof ShapelessRecipe) || compressed&&config.allowShapedSquareInPress.get() : !compressed) continue;
+            var result = crafting.assemble(CraftingInput.EMPTY);
+            if (result.isEmpty()) continue;
+            var converted = new BasinRecipe(mixing,
+                    ingredients.stream().map(i -> Either.<Ingredient, FluidIngredient>left(i)).toList(),
+                    List.of(Either.left(new ProcessingOutput(result.getItem(), result.getCount(), result.getComponentsPatch(), 1))),
+                    HeatCondition.NONE, 100);
+            if (converted.matches(input, level) && matchesFilter(converted)) return new RecipeHolder<>(holder.id(), converted);
+        }
+        return null;
+    }
+
+    /** Consumption, remainders and both output kinds commit together or roll back together. */
+    public boolean process(BasinRecipe recipe, boolean simulate) {
+        if (level == null || level.isClientSide() || !canContinueProcessing() || !matchesFilter(recipe)) return false;
+        var input = recipeInput();
+        var plan = recipe.consumption(input);
+        if (plan == null) return false;
+        var slots = allItems();
+        var tanks = fluids.allTanks();
+        var remainders = new ArrayList<ItemStack>();
+        try (Transaction transaction = Transaction.openOuter()) {
+            for (int slot = 0; slot < slots.size(); slot++) {
+                long amount = plan.items()[slot];
+                if (amount == 0) continue;
+                var stored = slots.get(slot);
+                var remainder = stored.getResource().getItem().getCraftingRemainder();
+                if (remainder != null) for (int i = 0; i < amount; i++) remainders.add(remainder.create());
+                if (stored.extract(stored.getResource(), amount, transaction) != amount) return false;
+            }
+            for (int tank = 0; tank < tanks.size(); tank++) {
+                long amount = plan.fluids()[tank];
+                if (amount != 0 && tanks.get(tank).extract(tanks.get(tank).getResource(), amount, transaction) != amount) return false;
+            }
+            // Check maximum possible outputs without using RNG. Full outputs must not reroll recipes.
+            try (Transaction capacityCheck = transaction.openNested()) {
+                var maximumItems = new ArrayList<ItemStack>(remainders);
+                var maximumFluids = new ArrayList<BasinSpoutBuffer.Fluid>();
+                for (var result : recipe.results()) result.ifLeft(item -> maximumItems.add(item.stack()))
+                    .ifRight(fluid -> maximumFluids.add(new BasinSpoutBuffer.Fluid(fluid.variant(), fluid.amount())));
+                if (!routeOutputs(maximumItems, maximumFluids, capacityCheck)) return false;
+            }
+            if (simulate) return true;
+            var paidItems = new ArrayList<ItemStack>(remainders); var paidFluids = new ArrayList<BasinSpoutBuffer.Fluid>();
+            for (var result : recipe.results()) result.ifLeft(item -> paidItems.add(item.rollOutput(level.getRandom())))
+                .ifRight(fluid -> paidFluids.add(new BasinSpoutBuffer.Fluid(fluid.variant(), fluid.amount())));
+            if (!routeOutputs(paidItems, paidFluids, transaction)) return false;
+            transaction.commit();
+            return true;
+        }
+    }
+
+    private boolean matchesFilter(BasinRecipe recipe) {
+        var firstItem = recipe.results().stream().flatMap(result -> result.left().stream()).findFirst();
+        if (firstItem.isPresent()) return filtering.test(firstItem.get().stack());
+        var firstFluid = recipe.results().stream().flatMap(result -> result.right().stream()).findFirst();
+        return firstFluid.isEmpty() || filtering.test(new com.simibubi.create.foundation.fluid.FluidStack(firstFluid.get().variant(), firstFluid.get().amount()));
+    }
+    private boolean routeOutputs(List<ItemStack> outputItems, List<BasinSpoutBuffer.Fluid> outputFluids,
+                                 net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext transaction) {
+        var side = getBlockState().getValue(BasinBlock.FACING);
+        if (side == Direction.DOWN) {
+            for (var stack : outputItems) if (!inventory.insertOutput(stack, transaction)) return false;
+            for (var fluid : outputFluids) if (!fluids.insertOutput(fluid.variant(), fluid.amount(), transaction)) return false;
+            return true;
+        }
+        var target = worldPosition.relative(side).below();
+        if (!com.simibubi.create.foundation.utility.LoadedLevelAccess.isLoaded(level, target)) return false;
+        var be = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level, target);
+        var targetItems = com.simibubi.create.foundation.item.LoadedItemStorage.find(level, target, side.getOpposite());
+        if (outputItems.stream().anyMatch(stack -> !stack.isEmpty()) && targetItems == null) return false;
+        var targetFluids = FluidStorage.SIDED.find(level, target, com.simibubi.create.foundation.utility.LoadedLevelAccess.blockState(level, target), be, side.getOpposite());
+        if (targetFluids == null) for (var fluid : outputFluids)
+            if (!fluids.insertOutput(fluid.variant(), fluid.amount(), transaction)) return false;
+        spoutBuffer.append(outputItems, targetFluids == null ? List.of() : outputFluids, transaction);
+        return true;
+    }
+
+    public static void tick(Level level, BlockPos pos, BlockState state, BasinBlockEntity basin) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, basin)) {
+            if (!createTick.shouldTick()) return;
+
+        if (level.isClientSide()) { basin.tickVisualizedOutputs(); return; }
+        basin.spoutBuffer.flush();
+        if (level.getGameTime() % 5 == 0) { basin.updateOutput(); basin.exportOutputs(); }
+        for (ItemEntity item : level.getEntitiesOfClass(ItemEntity.class, new AABB(pos).inflate(0, 0.25, 0))) {
+            if (item.isRemoved() || item.getY() < pos.getY() + 0.1) continue;
+            var stack = item.getItem();
+            try (Transaction transaction = Transaction.openOuter()) {
+                long inserted = basin.inventory.automation.insert(ItemVariant.of(stack), stack.getCount(), transaction);
+                if (inserted == 0) continue;
+                transaction.commit();
+                stack.shrink((int) inserted);
+                if (stack.isEmpty()) item.discard(); else item.setItem(stack);
+            }
+        }
+    
+        }
+    }
+    @Override public void preRemoveSideEffects(BlockPos pos, BlockState state) {
+        spoutBuffer.captureRemoved();
+        if (level != null && !level.isClientSide()) allItems().forEach(slot -> Block.popResource(level, worldPosition, slot.stack()));
+        super.preRemoveSideEffects(pos, state);
+    }
+    @Override protected void write(ValueOutput output, boolean clientPacket) {
+        super.write(output, clientPacket); inventory.save(output.child("Inventory")); fluids.save(output.child("Fluids")); spoutBuffer.save(output);
+        if (preferredOutput != null) output.store("PreferredSpoutput", Direction.CODEC, preferredOutput);
+        output.store("DisabledSpoutput", Direction.CODEC.listOf(), List.copyOf(disabledOutputs));
+        if(clientPacket){
+            output.store("VisualizedItems",ItemStack.OPTIONAL_CODEC.listOf(),visualizedOutputItems.stream().map(net.createmod.catnip.data.IntAttached::getValue).toList());
+            var events=output.childrenList("VisualizedFluids");for(var event:List.copyOf(visualizedOutputFluids)){
+                var row=events.addChild();row.store("variant",net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant.CODEC,event.getValue().variant());row.putLong("amount",event.getValue().getAmount());
+            }
+            visualizedOutputItems.clear();visualizedOutputFluids.clear();
+        }
+    }
+    @Override protected void read(ValueInput input, boolean clientPacket) {
+        super.read(input, clientPacket); inventory.load(input.childOrEmpty("Inventory")); fluids.load(input.childOrEmpty("Fluids")); spoutBuffer.load(input);
+        // Original source client event snapshots; virtual Ponder loads use ordinary native ValueInput.
+        if (clientPacket || isVirtual()) input.read("VisualizedItems", ItemStack.OPTIONAL_CODEC.listOf())
+            .ifPresent(stacks -> stacks.forEach(stack -> visualizedOutputItems.add(
+                net.createmod.catnip.data.IntAttached.with(OUTPUT_ANIMATION_TIME, stack.copy()))));
+        if(clientPacket||isVirtual())for(var event:input.childrenListOrEmpty("VisualizedFluids")){
+            var variant=event.read("variant",net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant.CODEC).orElse(net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant.blank());long amount=event.getLongOr("amount",0);
+            if(!variant.isBlank()&&amount>0)visualizedOutputFluids.add(net.createmod.catnip.data.IntAttached.with(OUTPUT_ANIMATION_TIME,new com.simibubi.create.foundation.fluid.FluidStack(variant,amount)));
+        }
+        revision++; cachedRecipes.clear();
+        preferredOutput = input.read("PreferredSpoutput", Direction.CODEC).filter(side -> side.getAxis().isHorizontal()).orElse(null);
+        disabledOutputs.clear();
+        input.read("DisabledSpoutput", Direction.CODEC.listOf()).orElse(List.of()).stream().filter(side -> side.getAxis().isHorizontal()).forEach(disabledOutputs::add);
+    }
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket() { return ClientboundBlockEntityDataPacket.create(this); }
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries) { return super.getUpdateTag(registries); }
+    private final com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour directBeltInput = com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour.createNative(this);
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (filtering != null) behaviours.add(filtering);
+        if (directBeltInput != null) behaviours.add(directBeltInput);
+    }
 }

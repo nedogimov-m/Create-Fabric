@@ -1,599 +1,799 @@
 package com.simibubi.create.content.trains.graph;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Objects;
-import java.util.Random;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.Create;
-import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.content.trains.graph.TrackNodeLocation.DiscoveredLocation;
-import com.simibubi.create.content.trains.signal.SignalEdgeGroup;
+import com.mojang.serialization.*;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.simibubi.create.content.trains.RailwayGraphManager;
 import com.simibubi.create.content.trains.signal.TrackEdgePoint;
-import com.simibubi.create.content.trains.track.BezierConnection;
-import com.simibubi.create.content.trains.track.TrackMaterial;
-
+import com.simibubi.create.content.trains.track.*;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import net.createmod.catnip.data.Couple;
 import net.createmod.catnip.data.Pair;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.createmod.catnip.theme.Color;
 import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.nbt.*;
+import net.minecraft.world.level.*;
 import net.minecraft.world.phys.Vec3;
 
-public class TrackGraph {
-
-	public static final AtomicInteger graphNetIdGenerator = new AtomicInteger();
-	public static final AtomicInteger nodeNetIdGenerator = new AtomicInteger();
-
-	public UUID id;
-	public Color color;
-
-	Map<TrackNodeLocation, TrackNode> nodes;
-	Map<Integer, TrackNode> nodesById;
-	Map<TrackNode, Map<TrackNode, TrackEdge>> connectionsByNode;
-	EdgePointStorage edgePoints;
-	Map<ResourceKey<Level>, TrackGraphBounds> bounds;
-
-	List<TrackEdge> deferredIntersectionUpdates;
-
-	int netId;
-	int checksum = 0;
-
-	public TrackGraph() {
-		this(UUID.randomUUID());
-	}
-
-	public TrackGraph(UUID graphID) {
-		setId(graphID);
-		nodes = new HashMap<>();
-		nodesById = new HashMap<>();
-		bounds = new HashMap<>();
-		connectionsByNode = new IdentityHashMap<>();
-		edgePoints = new EdgePointStorage();
-		deferredIntersectionUpdates = new ArrayList<>();
-		netId = nextGraphId();
-	}
-
-	//
-
-	public <T extends TrackEdgePoint> void addPoint(EdgePointType<T> type, T point) {
-		edgePoints.put(type, point);
-		EdgePointManager.onEdgePointAdded(this, point, type);
-		Create.RAILWAYS.sync.pointAdded(this, point);
-		markDirty();
-	}
-
-	public <T extends TrackEdgePoint> T getPoint(EdgePointType<T> type, UUID id) {
-		return edgePoints.get(type, id);
-	}
-
-	public <T extends TrackEdgePoint> Collection<T> getPoints(EdgePointType<T> type) {
-		return edgePoints.values(type);
-	}
-
-	public <T extends TrackEdgePoint> T removePoint(EdgePointType<T> type, UUID id) {
-		T removed = edgePoints.remove(type, id);
-		if (removed == null)
-			return null;
-		EdgePointManager.onEdgePointRemoved(this, removed, type);
-		Create.RAILWAYS.sync.pointRemoved(this, removed);
-		markDirty();
-		return removed;
-	}
-
-	public void tickPoints(boolean preTrains) {
-		edgePoints.tick(this, preTrains);
-	}
-
-	//
-
-	public TrackGraphBounds getBounds(Level level) {
-		return bounds.computeIfAbsent(level.dimension(), dim -> new TrackGraphBounds(this, dim));
-	}
-
-	public void invalidateBounds() {
-		checksum = 0;
-		bounds.clear();
-	}
-
-	//
-
-	public Set<TrackNodeLocation> getNodes() {
-		return nodes.keySet();
-	}
-
-	public TrackNode locateNode(Level level, Vec3 position) {
-		return locateNode(new TrackNodeLocation(position).in(level));
-	}
-
-	public TrackNode locateNode(TrackNodeLocation position) {
-		return nodes.get(position);
-	}
-
-	public TrackNode getNode(int netId) {
-		return nodesById.get(netId);
-	}
-
-	public boolean createNodeIfAbsent(DiscoveredLocation location) {
-		if (!addNodeIfAbsent(new TrackNode(location, nextNodeId(), location.normal)))
-			return false;
-		TrackNode newNode = nodes.get(location);
-		Create.RAILWAYS.sync.nodeAdded(this, newNode);
-		invalidateBounds();
-		markDirty();
-		return true;
-	}
-
-	public void loadNode(TrackNodeLocation location, int netId, Vec3 normal) {
-		addNode(new TrackNode(location, netId, normal));
-	}
-
-	public void addNode(TrackNode node) {
-		TrackNodeLocation location = node.getLocation();
-		if (nodes.containsKey(location))
-			removeNode(null, location);
-		nodes.put(location, node);
-		nodesById.put(node.getNetId(), node);
-	}
-
-	public boolean addNodeIfAbsent(TrackNode node) {
-		if (nodes.putIfAbsent(node.getLocation(), node) != null)
-			return false;
-		nodesById.put(node.getNetId(), node);
-		return true;
-	}
-
-	public boolean removeNode(@Nullable LevelAccessor level, TrackNodeLocation location) {
-		TrackNode removed = nodes.remove(location);
-		if (removed == null)
-			return false;
-
-		Map<UUID, Train> trains = Create.RAILWAYS.trains;
-		for (UUID uuid : trains.keySet()) {
-			Train train = trains.get(uuid);
-			if (train.graph != this)
-				continue;
-			if (train.isTravellingOn(removed))
-				train.detachFromTracks();
-		}
-
-		nodesById.remove(removed.netId);
-		invalidateBounds();
-
-		if (!connectionsByNode.containsKey(removed))
-			return true;
-
-		Map<TrackNode, TrackEdge> connections = connectionsByNode.remove(removed);
-		for (Entry<TrackNode, TrackEdge> entry : connections.entrySet()) {
-			TrackEdge trackEdge = entry.getValue();
-			EdgeData edgeData = trackEdge.getEdgeData();
-			for (TrackEdgePoint point : edgeData.getPoints()) {
-				if (level != null)
-					point.invalidate(level);
-				edgePoints.remove(point.getType(), point.getId());
-			}
-			if (level != null) {
-				TrackNode otherNode = entry.getKey();
-				for (TrackEdgeIntersection intersection : edgeData.getIntersections()) {
-					Couple<TrackNodeLocation> target = intersection.target;
-					TrackGraph graph = Create.RAILWAYS.getGraph(level, target.getFirst());
-					if (graph != null)
-						graph.removeIntersection(intersection, removed, otherNode);
-				}
-			}
-		}
-
-		for (TrackNode railNode : connections.keySet())
-			if (connectionsByNode.containsKey(railNode))
-				connectionsByNode.get(railNode)
-					.remove(removed);
-
-		return true;
-	}
-
-	private void removeIntersection(TrackEdgeIntersection intersection, TrackNode targetNode1, TrackNode targetNode2) {
-		TrackNode node1 = locateNode(intersection.target.getFirst());
-		TrackNode node2 = locateNode(intersection.target.getSecond());
-		if (node1 == null || node2 == null)
-			return;
-
-		Map<TrackNode, TrackEdge> from1 = getConnectionsFrom(node1);
-		if (from1 != null) {
-			TrackEdge edge = from1.get(node2);
-			if (edge != null)
-				edge.getEdgeData()
-					.removeIntersection(this, intersection.id);
-		}
-
-		Map<TrackNode, TrackEdge> from2 = getConnectionsFrom(node2);
-		if (from2 != null) {
-			TrackEdge edge = from2.get(node1);
-			if (edge != null)
-				edge.getEdgeData()
-					.removeIntersection(this, intersection.id);
-		}
-	}
-
-	public static int nextNodeId() {
-		return nodeNetIdGenerator.incrementAndGet();
-	}
-
-	public static int nextGraphId() {
-		return graphNetIdGenerator.incrementAndGet();
-	}
-
-	public void transferAll(TrackGraph toOther) {
-		nodes.forEach((loc, node) -> {
-			if (toOther.addNodeIfAbsent(node))
-				Create.RAILWAYS.sync.nodeAdded(toOther, node);
-		});
-
-		connectionsByNode.forEach((node1, map) -> map.forEach((node2, edge) -> {
-			TrackNode n1 = toOther.locateNode(node1.location);
-			TrackNode n2 = toOther.locateNode(node2.location);
-			if (n1 == null || n2 == null)
-				return;
-			if (toOther.putConnection(n1, n2, edge)) {
-				Create.RAILWAYS.sync.edgeAdded(toOther, n1, n2, edge);
-				Create.RAILWAYS.sync.edgeDataChanged(toOther, n1, n2, edge);
-			}
-		}));
-
-		edgePoints.transferAll(toOther, toOther.edgePoints);
-		nodes.clear();
-		connectionsByNode.clear();
-		toOther.invalidateBounds();
-
-		Map<UUID, Train> trains = Create.RAILWAYS.trains;
-		for (UUID uuid : trains.keySet()) {
-			Train train = trains.get(uuid);
-			if (train.graph != this)
-				continue;
-			train.graph = toOther;
-		}
-	}
-
-	public Set<TrackGraph> findDisconnectedGraphs(@Nullable LevelAccessor level,
-												  @Nullable Map<Integer, Pair<Integer, UUID>> splitSubGraphs) {
-		Set<TrackGraph> dicovered = new HashSet<>();
-		Set<TrackNodeLocation> vertices = new HashSet<>(nodes.keySet());
-		List<TrackNodeLocation> frontier = new ArrayList<>();
-		TrackGraph target = null;
-
-		while (!vertices.isEmpty()) {
-			if (target != null)
-				dicovered.add(target);
-
-			TrackNodeLocation start = vertices.stream()
-				.findFirst()
-				.get();
-			frontier.add(start);
-			vertices.remove(start);
-
-			while (!frontier.isEmpty()) {
-				TrackNodeLocation current = frontier.remove(0);
-				TrackNode currentNode = locateNode(current);
-
-				Map<TrackNode, TrackEdge> connections = getConnectionsFrom(currentNode);
-				for (TrackNode connected : connections.keySet())
-					if (vertices.remove(connected.getLocation()))
-						frontier.add(connected.getLocation());
-
-				if (target != null) {
-					if (splitSubGraphs != null && splitSubGraphs.containsKey(currentNode.getNetId())) {
-						Pair<Integer, UUID> ids = splitSubGraphs.get(currentNode.getNetId());
-						target.setId(ids.getSecond());
-						target.netId = ids.getFirst();
-					}
-					transfer(level, currentNode, target);
-				}
-			}
-
-			frontier.clear();
-			target = new TrackGraph();
-		}
-
-		return dicovered;
-	}
-
-	public void setId(UUID id) {
-		this.id = id;
-		color = Color.rainbowColor(new Random(id.getLeastSignificantBits()).nextInt());
-	}
-
-	public void setNetId(int id) {
-		this.netId = id;
-	}
-
-	public int getChecksum() {
-		if (checksum == 0)
-			checksum = nodes.values()
-				.stream()
-				.collect(Collectors.summingInt(TrackNode::getNetId));
-		return checksum;
-	}
-
-	public void transfer(LevelAccessor level, TrackNode node, TrackGraph target) {
-		target.addNode(node);
-		target.invalidateBounds();
-
-		TrackNodeLocation nodeLoc = node.getLocation();
-		Map<TrackNode, TrackEdge> connections = getConnectionsFrom(node);
-		Map<UUID, Train> trains = Create.RAILWAYS.sided(level).trains;
-
-		if (!connections.isEmpty()) {
-			target.connectionsByNode.put(node, connections);
-			for (TrackEdge entry : connections.values()) {
-				EdgeData edgeData = entry.getEdgeData();
-				for (TrackEdgePoint trackEdgePoint : edgeData.getPoints()) {
-					target.edgePoints.put(trackEdgePoint.getType(), trackEdgePoint);
-					edgePoints.remove(trackEdgePoint.getType(), trackEdgePoint.getId());
-				}
-			}
-		}
-
-		if (level != null)
-			for (UUID uuid : trains.keySet()) {
-				Train train = trains.get(uuid);
-				if (train.graph != this)
-					continue;
-				if (!train.isTravellingOn(node))
-					continue;
-				train.graph = target;
-			}
-
-		nodes.remove(nodeLoc);
-		nodesById.remove(node.getNetId());
-		connectionsByNode.remove(node);
-		invalidateBounds();
-	}
-
-	public boolean isEmpty() {
-		return nodes.isEmpty();
-	}
-
-	public Map<TrackNode, TrackEdge> getConnectionsFrom(TrackNode node) {
-		if (node == null)
-			return null;
-		return connectionsByNode.getOrDefault(node, new HashMap<>());
-	}
-
-	public TrackEdge getConnection(Couple<TrackNode> nodes) {
-		Map<TrackNode, TrackEdge> connectionsFrom = getConnectionsFrom(nodes.getFirst());
-		if (connectionsFrom == null)
-			return null;
-		return connectionsFrom.get(nodes.getSecond());
-	}
-
-	public void connectNodes(LevelAccessor reader, DiscoveredLocation location, DiscoveredLocation location2,
-							 @Nullable BezierConnection turn) {
-		TrackNode node1 = nodes.get(location);
-		TrackNode node2 = nodes.get(location2);
-
-		boolean bezier = turn != null;
-		TrackMaterial material = bezier ? turn.getMaterial() : location2.materialA;
-		TrackEdge edge = new TrackEdge(node1, node2, turn, material);
-		TrackEdge edge2 = new TrackEdge(node2, node1, bezier ? turn.secondary() : null, material);
-
-		for (TrackGraph graph : Create.RAILWAYS.trackNetworks.values()) {
-			for (TrackNode otherNode1 : graph.nodes.values()) {
-				Map<TrackNode, TrackEdge> connections = graph.connectionsByNode.get(otherNode1);
-				if (connections == null)
-					continue;
-				for (Entry<TrackNode, TrackEdge> entry : connections.entrySet()) {
-					TrackNode otherNode2 = entry.getKey();
-					TrackEdge otherEdge = entry.getValue();
-
-					if (graph == this)
-						if (otherNode1 == node1 || otherNode2 == node1 || otherNode1 == node2 || otherNode2 == node2)
-							continue;
-
-					if (edge == otherEdge)
-						continue;
-					if (otherEdge.isInterDimensional() || edge.isInterDimensional())
-						continue;
-					if (node1.location.dimension != otherNode1.location.dimension)
-						continue;
-					if (!bezier && !otherEdge.isTurn())
-						continue;
-					if (otherEdge.isTurn() && otherEdge.turn.isPrimary())
-						continue;
-
-					Collection<double[]> intersections =
-						edge.getIntersection(node1, node2, otherEdge, otherNode1, otherNode2);
-
-					UUID id = UUID.randomUUID();
-					for (double[] intersection : intersections) {
-						double s = intersection[0];
-						double t = intersection[1];
-						edge.edgeData.addIntersection(this, id, s, otherNode1, otherNode2, t);
-						edge2.edgeData.addIntersection(this, id, edge.getLength() - s, otherNode1, otherNode2, t);
-						otherEdge.edgeData.addIntersection(graph, id, t, node1, node2, s);
-						TrackEdge otherEdge2 = graph.getConnection(Couple.create(otherNode2, otherNode1));
-						if (otherEdge2 != null)
-							otherEdge2.edgeData.addIntersection(graph, id, otherEdge.getLength() - t, node1, node2, s);
-					}
-				}
-			}
-		}
-
-		putConnection(node1, node2, edge);
-		putConnection(node2, node1, edge2);
-		Create.RAILWAYS.sync.edgeAdded(this, node1, node2, edge);
-		Create.RAILWAYS.sync.edgeAdded(this, node2, node1, edge2);
-
-		markDirty();
-	}
-
-	public void disconnectNodes(TrackNode node1, TrackNode node2) {
-		Map<TrackNode, TrackEdge> map1 = connectionsByNode.get(node1);
-		Map<TrackNode, TrackEdge> map2 = connectionsByNode.get(node2);
-		if (map1 != null)
-			map1.remove(node2);
-		if (map2 != null)
-			map2.remove(node1);
-	}
-
-	public boolean putConnection(TrackNode node1, TrackNode node2, TrackEdge edge) {
-		Map<TrackNode, TrackEdge> connections = connectionsByNode.computeIfAbsent(node1, n -> new IdentityHashMap<>());
-		if (connections.containsKey(node2) && connections.get(node2)
-			.getEdgeData()
-			.hasPoints())
-			return false;
-		return connections.put(node2, edge) == null;
-	}
-
-	public float distanceToLocationSqr(Level level, Vec3 location) {
-		float nearest = Float.MAX_VALUE;
-		for (TrackNodeLocation tnl : nodes.keySet()) {
-			if (!Objects.equals(tnl.dimension, level.dimension()))
-				continue;
-			nearest = Math.min(nearest, (float) tnl.getLocation()
-				.distanceToSqr(location));
-		}
-		return nearest;
-	}
-
-	public void deferIntersectionUpdate(TrackEdge edge) {
-		deferredIntersectionUpdates.add(edge);
-	}
-
-	public void resolveIntersectingEdgeGroups(Level level) {
-		for (TrackEdge edge : deferredIntersectionUpdates) {
-			if (!connectionsByNode.containsKey(edge.node1) || edge != connectionsByNode.get(edge.node1)
-				.get(edge.node2))
-				continue;
-			EdgeData edgeData = edge.getEdgeData();
-			for (TrackEdgeIntersection intersection : edgeData.getIntersections()) {
-				UUID groupId = edgeData.getGroupAtPosition(this, intersection.location);
-				Couple<TrackNodeLocation> target = intersection.target;
-				TrackGraph graph = Create.RAILWAYS.getGraph(level, target.getFirst());
-				if (graph == null)
-					continue;
-
-				TrackNode node1 = graph.locateNode(target.getFirst());
-				TrackNode node2 = graph.locateNode(target.getSecond());
-				Map<TrackNode, TrackEdge> connectionsFrom = graph.getConnectionsFrom(node1);
-				if (connectionsFrom == null)
-					continue;
-				TrackEdge otherEdge = connectionsFrom.get(node2);
-				if (otherEdge == null)
-					continue;
-				UUID otherGroupId = otherEdge.getEdgeData()
-					.getGroupAtPosition(graph, intersection.targetLocation);
-
-				SignalEdgeGroup group = Create.RAILWAYS.signalEdgeGroups.get(groupId);
-				SignalEdgeGroup otherGroup = Create.RAILWAYS.signalEdgeGroups.get(otherGroupId);
-				if (group == null || otherGroup == null || groupId == null || otherGroupId == null)
-					continue;
-
-				intersection.groupId = groupId;
-				group.putIntersection(intersection.id, otherGroupId);
-				otherGroup.putIntersection(intersection.id, groupId);
-			}
-		}
-		deferredIntersectionUpdates.clear();
-	}
-
-	public void markDirty() {
-		Create.RAILWAYS.markTracksDirty();
-	}
-
-	public CompoundTag write(HolderLookup.Provider registries, DimensionPalette dimensions) {
-		CompoundTag tag = new CompoundTag();
-		tag.putUUID("Id", id);
-		tag.putInt("Color", color.getRGB());
-
-		Map<TrackNode, Integer> indexTracker = new HashMap<>();
-		ListTag nodesList = new ListTag();
-
-		int i = 0;
-		for (TrackNode railNode : nodes.values()) {
-			indexTracker.put(railNode, i);
-			CompoundTag nodeTag = new CompoundTag();
-			nodeTag.put("Location", railNode.getLocation()
-				.write(dimensions));
-			nodeTag.put("Normal", VecHelper.writeNBT(railNode.getNormal()));
-			nodesList.add(nodeTag);
-			i++;
-		}
-
-		connectionsByNode.forEach((node1, map) -> {
-			Integer index1 = indexTracker.get(node1);
-			if (index1 == null)
-				return;
-			CompoundTag nodeTag = (CompoundTag) nodesList.get(index1);
-			ListTag connectionsList = new ListTag();
-			map.forEach((node2, edge) -> {
-				CompoundTag connectionTag = new CompoundTag();
-				Integer index2 = indexTracker.get(node2);
-				if (index2 == null)
-					return;
-				connectionTag.putInt("To", index2);
-				connectionTag.put("EdgeData", edge.write(dimensions));
-				connectionsList.add(connectionTag);
-			});
-			nodeTag.put("Connections", connectionsList);
-		});
-
-		tag.put("Nodes", nodesList);
-		tag.put("Points", edgePoints.write(registries, dimensions));
-		return tag;
-	}
-
-	public static TrackGraph read(CompoundTag tag, HolderLookup.Provider registries, DimensionPalette dimensions) {
-		TrackGraph graph = new TrackGraph(tag.getUUID("Id"));
-		graph.color = new Color(tag.getInt("Color"));
-		graph.edgePoints.read(tag.getCompound("Points"), registries, dimensions);
-
-		Map<Integer, TrackNode> indexTracker = new HashMap<>();
-		ListTag nodesList = tag.getList("Nodes", Tag.TAG_COMPOUND);
-
-		int i = 0;
-		for (Tag t : nodesList) {
-			CompoundTag nodeTag = (CompoundTag) t;
-			TrackNodeLocation location = TrackNodeLocation.read(nodeTag.getCompound("Location"), dimensions);
-			Vec3 normal = VecHelper.readNBT(nodeTag.getList("Normal", Tag.TAG_DOUBLE));
-			graph.loadNode(location, nextNodeId(), normal);
-			indexTracker.put(i, graph.locateNode(location));
-			i++;
-		}
-
-		i = 0;
-		for (Tag t : nodesList) {
-			CompoundTag nodeTag = (CompoundTag) t;
-			TrackNode node1 = indexTracker.get(i);
-			i++;
-
-			if (!nodeTag.contains("Connections"))
-				continue;
-			NBTHelper.iterateCompoundList(nodeTag.getList("Connections", Tag.TAG_COMPOUND), c -> {
-				TrackNode node2 = indexTracker.get(c.getInt("To"));
-				TrackEdge edge = TrackEdge.read(node1, node2, c.getCompound("EdgeData"), graph, dimensions);
-				graph.putConnection(node1, node2, edge);
-			});
-		}
-
-		return graph;
-	}
-
+/**
+ * Real persistent railway topology: reciprocal edges, typed points, crossings, merge and split.
+ * Runtime carriage/signal consumers subscribe to actual mutation events, not fake Train facades.
+ */
+public final class TrackGraph {
+  public static final AtomicInteger graphNetIdGenerator = new AtomicInteger(),
+      nodeNetIdGenerator = new AtomicInteger();
+
+  private record ConnectionData(
+      int to, TrackMaterial material, Optional<BezierConnection> turn, EdgeData.Snapshot data) {
+    static final Codec<ConnectionData> CODEC =
+        RecordCodecBuilder.create(
+            i ->
+                i.group(
+                        Codec.intRange(0, Integer.MAX_VALUE)
+                            .fieldOf("To")
+                            .forGetter(ConnectionData::to),
+                        TrackMaterial.CODEC.fieldOf("Material").forGetter(ConnectionData::material),
+                        BezierConnection.CODEC
+                            .optionalFieldOf("Turn")
+                            .forGetter(ConnectionData::turn),
+                        EdgeData.Snapshot.CODEC.fieldOf("EdgeData").forGetter(ConnectionData::data))
+                    .apply(i, ConnectionData::new));
+  }
+
+  private record NodeData(
+      TrackNodeLocation location, Vec3 normal, List<ConnectionData> connections) {
+    static final Codec<NodeData> CODEC =
+        RecordCodecBuilder.create(
+            i ->
+                i.group(
+                        TrackNodeLocation.CODEC.fieldOf("Location").forGetter(NodeData::location),
+                        RailCodecs.VECTOR.fieldOf("Normal").forGetter(NodeData::normal),
+                        ConnectionData.CODEC
+                            .listOf()
+                            .fieldOf("Connections")
+                            .forGetter(NodeData::connections))
+                    .apply(i, NodeData::new));
+  }
+
+  private record Data(
+      UUID id, int color, long revision, List<NodeData> nodes, List<TrackEdgePoint> points) {
+    static final Codec<Data> CODEC =
+        RecordCodecBuilder.create(
+            i ->
+                i.group(
+                        net.minecraft.core.UUIDUtil.CODEC.fieldOf("Id").forGetter(Data::id),
+                        Codec.INT.fieldOf("Color").forGetter(Data::color),
+                        Codec.LONG.optionalFieldOf("Revision", 0L).forGetter(Data::revision),
+                        NodeData.CODEC.listOf().fieldOf("Nodes").forGetter(Data::nodes),
+                        TrackEdgePoint.CODEC
+                            .listOf()
+                            .optionalFieldOf("Points", List.of())
+                            .forGetter(Data::points))
+                    .apply(i, Data::new));
+  }
+
+  public static final Codec<TrackGraph> CODEC =
+      Data.CODEC.flatXmap(
+          data -> {
+            try {
+              return DataResult.success(decode(data));
+            } catch (IllegalArgumentException invalid) {
+              return DataResult.error(invalid::getMessage);
+            }
+          },
+          graph -> {
+            try {
+              return DataResult.success(graph.snapshot());
+            } catch (IllegalArgumentException invalid) {
+              return DataResult.error(invalid::getMessage);
+            }
+          });
+
+  /**
+   * Full native wire content without consuming integrated-server identity generators. Source
+   * graph/node IDs are restored before this detached graph can be published.
+   */
+  public static final Codec<TrackGraph> TRANSPORT_CODEC =
+      Data.CODEC.flatXmap(
+          data -> {
+            try {
+              return DataResult.success(decode(data, false));
+            } catch (IllegalArgumentException invalid) {
+              return DataResult.error(invalid::getMessage);
+            }
+          },
+          graph -> {
+            try {
+              return DataResult.success(graph.snapshot());
+            } catch (IllegalArgumentException invalid) {
+              return DataResult.error(invalid::getMessage);
+            }
+          });
+
+  public UUID id;
+  public int color;
+  final Map<TrackNodeLocation, TrackNode> nodes = new LinkedHashMap<>();
+  final Map<Integer, TrackNode> nodesById = new HashMap<>();
+  final Map<TrackNode, Map<TrackNode, TrackEdge>> connectionsByNode = new IdentityHashMap<>();
+  final EdgePointStorage edgePoints = new EdgePointStorage();
+  private final Set<TrackEdge> deferredIntersectionUpdates =
+      Collections.newSetFromMap(new IdentityHashMap<>());
+  private RailwayGraphManager manager;
+  private int netId;
+  private long revision;
+
+  public TrackGraph() {
+    this(UUID.randomUUID());
+  }
+
+  public TrackGraph(UUID id) {
+    this(id, true);
+  }
+
+  private TrackGraph(UUID id, boolean allocateIdentity) {
+    setId(id);
+    netId = allocateIdentity ? nextGraphId() : 1;
+  }
+
+  public static int nextNodeId() {
+    return nodeNetIdGenerator.incrementAndGet();
+  }
+
+  public static int nextGraphId() {
+    return graphNetIdGenerator.incrementAndGet();
+  }
+
+  public void setId(UUID id) {
+    if (manager != null) throw new IllegalStateException("Cannot rename an attached railway graph");
+    this.id = Objects.requireNonNull(id);
+    color = 0xFF000000 | new Random(id.getLeastSignificantBits()).nextInt(0x1000000);
+  }
+
+  public int getNetId() {
+    return netId;
+  }
+
+  public void setNetId(int id) {
+    if (id <= 0) throw new IllegalArgumentException("Invalid railway transport id");
+    netId = id;
+    graphNetIdGenerator.accumulateAndGet(id, Math::max);
+  }
+
+  public long revision() {
+    return revision;
+  }
+
+  public RailwayGraphManager manager() {
+    return manager;
+  }
+
+  public void bind(RailwayGraphManager owner) {
+    if (manager != null && owner != null && manager != owner)
+      throw new IllegalStateException("Railway graph already has an owner");
+    manager = owner;
+  }
+
+  /**
+   * Installs source network IDs on a fully decoded detached graph before atomic client publication.
+   * No world, manager, revision, point instance or persistent geometry is changed.
+   */
+  public void restoreTransportIdentity(int graphId, Map<TrackNodeLocation, Integer> identities) {
+    if (manager != null)
+      throw new IllegalStateException("Cannot rewrite transport identity of a server-owned graph");
+    validate();
+    if (graphId <= 0
+        || !identities.keySet().equals(nodes.keySet())
+        || new HashSet<>(identities.values()).size() != identities.size()
+        || identities.values().stream().anyMatch(id -> id == null || id <= 0))
+      throw new IllegalArgumentException("Invalid complete railway transport identity");
+    var replacements = new IdentityHashMap<TrackNode, TrackNode>();
+    var newNodes = new LinkedHashMap<TrackNodeLocation, TrackNode>();
+    var newIds = new HashMap<Integer, TrackNode>();
+    for (var node : nodes.values()) {
+      var copy = new TrackNode(node.location, identities.get(node.location), node.normal);
+      replacements.put(node, copy);
+      newNodes.put(copy.location, copy);
+      newIds.put(copy.netId, copy);
+    }
+    var adjacency = new IdentityHashMap<TrackNode, Map<TrackNode, TrackEdge>>();
+    for (var from : nodes.values())
+      for (var entry : getConnectionsFrom(from).entrySet()) {
+        var a = replacements.get(from);
+        var b = replacements.get(entry.getKey());
+        var edge = entry.getValue();
+        edge.node1 = a;
+        edge.node2 = b;
+        adjacency.computeIfAbsent(a, key -> new IdentityHashMap<>()).put(b, edge);
+      }
+    nodes.clear();
+    nodes.putAll(newNodes);
+    nodesById.clear();
+    nodesById.putAll(newIds);
+    connectionsByNode.clear();
+    connectionsByNode.putAll(adjacency);
+    netId = graphId;
+    validate();
+  }
+
+  public void markDirty() {
+    revision++;
+    if (manager != null) manager.graphChanged(this);
+  }
+
+  public Set<TrackNodeLocation> getNodes() {
+    var result = new LinkedHashSet<TrackNodeLocation>();
+    for (var location : nodes.keySet()) result.add(location.copy());
+    return Collections.unmodifiableSet(result);
+  }
+
+  public TrackNode locateNode(Level level, Vec3 position) {
+    return locateNode(new TrackNodeLocation(position).in(level));
+  }
+
+  public TrackNode locateNode(TrackNodeLocation location) {
+    return nodes.get(location);
+  }
+
+  public TrackNode getNode(int id) {
+    return nodesById.get(id);
+  }
+
+  public boolean createNodeIfAbsent(TrackNodeLocation.DiscoveredLocation location) {
+    return !nodes.containsKey(location)
+        && addNodeIfAbsent(new TrackNode(location, nextNodeId(), location.getNormal()));
+  }
+
+  public void loadNode(TrackNodeLocation location, int id, Vec3 normal) {
+    addNode(new TrackNode(location, id, normal));
+    nodeNetIdGenerator.accumulateAndGet(id, Math::max);
+  }
+
+  public void addNode(TrackNode node) {
+    var old = nodes.get(node.location);
+    if (old != null && old != node)
+      throw new IllegalArgumentException("Duplicate railway vertex " + node.location);
+    if (!addNodeIfAbsent(node) && old != node)
+      throw new IllegalArgumentException("Duplicate railway transport id");
+  }
+
+  public boolean addNodeIfAbsent(TrackNode node) {
+    if (nodes.containsKey(node.location)) return false;
+    if (nodesById.containsKey(node.netId))
+      throw new IllegalArgumentException("Duplicate railway node transport id");
+    nodes.put(node.location, node);
+    nodesById.put(node.netId, node);
+    markDirty();
+    return true;
+  }
+
+  public boolean isEmpty() {
+    return nodes.isEmpty();
+  }
+
+  public Map<TrackNode, TrackEdge> getConnectionsFrom(TrackNode node) {
+    return node == null
+        ? Map.of()
+        : Collections.unmodifiableMap(connectionsByNode.getOrDefault(node, Map.of()));
+  }
+
+  public TrackEdge getConnection(Couple<TrackNode> endpoints) {
+    if (endpoints.getFirst() == null || endpoints.getSecond() == null) return null;
+    return getConnectionsFrom(endpoints.getFirst()).get(endpoints.getSecond());
+  }
+
+  public boolean putConnection(TrackNode from, TrackNode to, TrackEdge edge) {
+    if (nodes.get(from.location) != from
+        || nodes.get(to.location) != to
+        || from == to
+        || edge.node1 != from
+        || edge.node2 != to)
+      throw new IllegalArgumentException("Railway edge endpoints are not actual graph vertices");
+    var map = connectionsByNode.computeIfAbsent(from, key -> new IdentityHashMap<>());
+    var old = map.get(to);
+    if (old != null && old != edge && old.getEdgeData().hasPoints()) return false;
+    map.put(to, edge);
+    markDirty();
+    return old == null;
+  }
+
+  public void connectNodes(
+      LevelAccessor world,
+      TrackNodeLocation.DiscoveredLocation first,
+      TrackNodeLocation.DiscoveredLocation second,
+      BezierConnection turn) {
+    connectNodes(
+        nodes.get(first),
+        nodes.get(second),
+        turn,
+        turn == null ? second.getMaterialA() : turn.getMaterial());
+  }
+
+  public void connectNodes(
+      TrackNode first, TrackNode second, BezierConnection turn, TrackMaterial material) {
+    if (first == null
+        || second == null
+        || first == second
+        || nodes.get(first.location) != first
+        || nodes.get(second.location) != second)
+      throw new IllegalArgumentException("Missing railway endpoints");
+    var old = getConnectionsFrom(first).get(second);
+    if (old != null) {
+      boolean equal =
+          old.getTrackMaterial() == material
+              && (turn == null
+                  ? !old.isTurn()
+                  : old.isTurn() && turn.equalsSansMaterial(old.getTurn()));
+      if (equal) return;
+      if (old.getEdgeData().hasPoints())
+        throw new IllegalArgumentException(
+            "Cannot replace a railway edge while its points are attached");
+      disconnectNodes(first, second);
+    }
+    var forward = new TrackEdge(first, second, turn, material);
+    var backward = new TrackEdge(second, first, turn == null ? null : turn.secondary(), material);
+    putConnection(first, second, forward);
+    putConnection(second, first, backward);
+    discoverIntersections(forward, backward);
+    markDirty();
+  }
+
+  private Collection<TrackGraph> relatedGraphs() {
+    return manager == null ? List.of(this) : manager.getTrackNetworks().values();
+  }
+
+  private record Undirected(
+      TrackNode first, TrackNode second, TrackEdge forward, TrackEdge reverse) {}
+
+  private List<Undirected> undirected() {
+    var result = new ArrayList<Undirected>();
+    for (var first : nodes.values())
+      for (var entry : getConnectionsFrom(first).entrySet())
+        if (first.netId < entry.getKey().netId)
+          result.add(
+              new Undirected(
+                  first,
+                  entry.getKey(),
+                  entry.getValue(),
+                  getConnectionsFrom(entry.getKey()).get(first)));
+    return result;
+  }
+
+  private void discoverIntersections(TrackEdge forward, TrackEdge backward) {
+    if (forward.isInterDimensional()) return;
+    for (var otherGraph : List.copyOf(relatedGraphs()))
+      for (var other : otherGraph.undirected()) {
+        if (other.reverse == null
+            || other.forward == forward
+            || other.forward == backward
+            || other.first.location.equals(forward.node1.location)
+            || other.first.location.equals(forward.node2.location)
+            || other.second.location.equals(forward.node1.location)
+            || other.second.location.equals(forward.node2.location)
+            || !Objects.equals(other.first.location.dimension, forward.node1.location.dimension))
+          continue;
+        if (!forward.isTurn() && !other.forward.isTurn()) continue;
+        for (var intersection :
+            forward.getIntersection(
+                forward.node1, forward.node2, other.forward, other.first, other.second)) {
+          if (intersection == null) continue;
+          var id = UUID.randomUUID();
+          double a = intersection[0], b = intersection[1];
+          forward.getEdgeData().addIntersection(this, id, a, other.first, other.second, b);
+          backward
+              .getEdgeData()
+              .addIntersection(this, id, forward.getLength() - a, other.first, other.second, b);
+          other
+              .forward
+              .getEdgeData()
+              .addIntersection(otherGraph, id, b, forward.node1, forward.node2, a);
+          other
+              .reverse
+              .getEdgeData()
+              .addIntersection(
+                  otherGraph, id, other.forward.getLength() - b, forward.node1, forward.node2, a);
+        }
+      }
+  }
+
+  public void disconnectNodes(TrackNode first, TrackNode second) {
+    if (first == null || second == null) return;
+    var edge = getConnectionsFrom(first).get(second);
+    if (edge == null) return;
+    for (var point : List.copyOf(edge.getEdgeData().getPoints()))
+      removePoint(point.getType(), point.id);
+    var intersections =
+        edge.getEdgeData().getIntersections().stream().map(value -> value.id).toList();
+    var forward = connectionsByNode.get(first);
+    var reverse = connectionsByNode.get(second);
+    if (forward != null) forward.remove(second);
+    if (reverse != null) reverse.remove(first);
+    for (var graph : List.copyOf(relatedGraphs()))
+      for (var crossing : graph.undirected())
+        for (var id : intersections) {
+          crossing.forward.getEdgeData().removeIntersection(graph, id);
+          if (crossing.reverse != null)
+            crossing.reverse.getEdgeData().removeIntersection(graph, id);
+        }
+    markDirty();
+  }
+
+  public boolean removeNode(LevelAccessor world, TrackNodeLocation location) {
+    var node = nodes.get(location);
+    if (node == null) return false;
+    var affected =
+        edgePoints.all().stream()
+            .filter(
+                point ->
+                    point.edgeLocation.getFirst().equals(location)
+                        || point.edgeLocation.getSecond().equals(location))
+            .toList();
+    if (world != null) for (var point : affected) point.preflightInvalidation(world);
+    for (var point : affected) {
+      if (world != null) point.invalidate(world);
+      removePoint(point.getType(), point.id);
+    }
+    for (var other : List.copyOf(getConnectionsFrom(node).keySet())) disconnectNodes(node, other);
+    nodes.remove(node.location);
+    nodesById.remove(node.netId);
+    connectionsByNode.remove(node);
+    markDirty();
+    if (manager != null) manager.nodeRemoved(this, node);
+    return true;
+  }
+
+  public <T extends TrackEdgePoint> void addPoint(EdgePointType<T> type, T point) {
+    if (point.getType() != type) throw new IllegalArgumentException("Railway point type mismatch");
+    if (point.graph() != null)
+      throw new IllegalArgumentException("Railway point already has a graph owner");
+    EdgePointManager.requireEndpoints(this, point);
+    if (edgePoints.get(type, point.id) != null)
+      throw new IllegalArgumentException("Duplicate railway point UUID");
+    edgePoints.put(type, point);
+    EdgePointManager.onEdgePointAdded(this, point, type);
+    markDirty();
+  }
+
+  public <T extends TrackEdgePoint> T getPoint(EdgePointType<T> type, UUID id) {
+    return edgePoints.get(type, id);
+  }
+
+  public <T extends TrackEdgePoint> Collection<T> getPoints(EdgePointType<T> type) {
+    return edgePoints.values(type);
+  }
+
+  public <T extends TrackEdgePoint> T removePoint(EdgePointType<T> type, UUID id) {
+    var point = edgePoints.remove(type, id);
+    if (point != null) {
+      EdgePointManager.onEdgePointRemoved(this, point, type);
+      markDirty();
+    }
+    return point;
+  }
+
+  public void tickPoints(boolean preTrains) {
+    edgePoints.tick(this, preTrains);
+  }
+
+  public void preflightMerge(TrackGraph target) {
+    if (target == this) return;
+    validate();
+    target.validate();
+    if (manager != null && target.manager != null && manager != target.manager)
+      throw new IllegalArgumentException("Cannot merge railway graphs from different servers");
+    for (var node : nodes.values()) {
+      var collision = target.nodesById.get(node.netId);
+      if (collision != null && !collision.location.equals(node.location))
+        throw new IllegalArgumentException("Conflicting railway transport id during merge");
+    }
+    for (var point : edgePoints.all()) {
+      var existing = target.getPoint(point.getType(), point.id);
+      if (existing != null && existing != point)
+        throw new IllegalArgumentException("Conflicting railway point identity during merge");
+    }
+    for (var first : nodes.values())
+      for (var entry : getConnectionsFrom(first).entrySet()) {
+        var a = target.locateNode(first.location);
+        var b = target.locateNode(entry.getKey().location);
+        if (a == null || b == null) continue;
+        var existing = target.getConnectionsFrom(a).get(b);
+        if (existing != null && existing != entry.getValue())
+          throw new IllegalArgumentException("Cannot silently coalesce duplicate railway edges");
+      }
+  }
+
+  public void transferAll(TrackGraph target) {
+    if (target == this) return;
+    preflightMerge(target);
+    for (var node : List.copyOf(nodes.values())) target.addNodeIfAbsent(node);
+    for (var first : List.copyOf(nodes.values()))
+      for (var entry : List.copyOf(getConnectionsFrom(first).entrySet())) {
+        var a = target.locateNode(first.location);
+        var b = target.locateNode(entry.getKey().location);
+        var edge = entry.getValue();
+        edge.node1 = a;
+        edge.node2 = b;
+        target.putConnection(a, b, edge);
+        if (edge.getEdgeData().hasIntersections())
+          edge.getEdgeData().refreshIntersectingSignalGroups(target);
+      }
+    edgePoints.transferAll(target, target.edgePoints);
+    target.deferredIntersectionUpdates.addAll(deferredIntersectionUpdates);
+    deferredIntersectionUpdates.clear();
+    nodes.clear();
+    nodesById.clear();
+    connectionsByNode.clear();
+    markDirty();
+    target.markDirty();
+    if (manager != null) manager.graphMerged(this, target);
+  }
+
+  public Set<TrackGraph> findDisconnectedGraphs(
+      LevelAccessor world, Map<Integer, Pair<Integer, UUID>> ids) {
+    var remaining = Collections.newSetFromMap(new IdentityHashMap<TrackNode, Boolean>());
+    remaining.addAll(nodes.values());
+    var components = new ArrayList<Set<TrackNode>>();
+    while (!remaining.isEmpty()) {
+      var component = Collections.newSetFromMap(new IdentityHashMap<TrackNode, Boolean>());
+      var queue = new ArrayDeque<TrackNode>();
+      var first = remaining.iterator().next();
+      queue.add(first);
+      remaining.remove(first);
+      while (!queue.isEmpty()) {
+        var current = queue.remove();
+        component.add(current);
+        for (var next : getConnectionsFrom(current).keySet())
+          if (remaining.remove(next)) queue.add(next);
+      }
+      components.add(component);
+    }
+    components.sort(
+        Comparator.<Set<TrackNode>>comparingInt(Set::size)
+            .reversed()
+            .thenComparingInt(set -> set.stream().mapToInt(TrackNode::getNetId).min().orElse(0)));
+    var result = new LinkedHashSet<TrackGraph>();
+    for (int i = 1; i < components.size(); i++) {
+      var target = new TrackGraph();
+      if (ids != null)
+        for (var node : components.get(i)) {
+          var saved = ids.get(node.netId);
+          if (saved != null) {
+            target.setId(saved.getSecond());
+            target.setNetId(saved.getFirst());
+            break;
+          }
+        }
+      transferComponent(components.get(i), target);
+      result.add(target);
+    }
+    return result;
+  }
+
+  private void transferComponent(Set<TrackNode> component, TrackGraph target) {
+    if (target == this)
+      throw new IllegalArgumentException("Cannot split a railway component into itself");
+    if (manager != null && target.manager != null && manager != target.manager)
+      throw new IllegalArgumentException(
+          "Cannot transfer railway components between server managers");
+    for (var node : component) {
+      if (nodes.get(node.location) != node
+          || target.locateNode(node.location) != null
+          || target.getNode(node.netId) != null)
+        throw new IllegalArgumentException("Conflicting railway component destination");
+      for (var next : getConnectionsFrom(node).keySet())
+        if (!component.contains(next))
+          throw new IllegalArgumentException("Railway transfer must include a complete component");
+    }
+    var moving =
+        edgePoints.all().stream()
+            .filter(
+                point ->
+                    component.stream()
+                        .anyMatch(node -> node.location.equals(point.edgeLocation.getFirst())))
+            .toList();
+    for (var point : moving)
+      if (target.getPoint(point.getType(), point.id) != null)
+        throw new IllegalArgumentException("Conflicting railway point in component destination");
+    for (var node : component) {
+      target.addNode(node);
+      var edges = connectionsByNode.remove(node);
+      if (edges != null) {
+        target.connectionsByNode.put(node, edges);
+        for (var edge : edges.values())
+          if (edge.getEdgeData().hasIntersections())
+            edge.getEdgeData().refreshIntersectingSignalGroups(target);
+      }
+      nodes.remove(node.location);
+      nodesById.remove(node.netId);
+    }
+    for (var point : moving) {
+      edgePoints.remove(point.getType(), point.id);
+      point.bind(null);
+      target.edgePoints.put(point.getType(), point);
+      point.bind(target);
+    }
+    for (var edge : List.copyOf(deferredIntersectionUpdates))
+      if (component.contains(edge.node1)) {
+        deferredIntersectionUpdates.remove(edge);
+        target.deferredIntersectionUpdates.add(edge);
+      }
+    markDirty();
+    target.markDirty();
+    if (manager != null) manager.graphSplit(this, target);
+  }
+
+  /** Transferring a connected component preserves reciprocal edges and live point identity. */
+  public void transfer(LevelAccessor world, TrackNode node, TrackGraph target) {
+    var component = Collections.newSetFromMap(new IdentityHashMap<TrackNode, Boolean>());
+    var queue = new ArrayDeque<TrackNode>();
+    queue.add(node);
+    while (!queue.isEmpty()) {
+      var current = queue.remove();
+      if (!component.add(current)) continue;
+      queue.addAll(getConnectionsFrom(current).keySet());
+    }
+    transferComponent(component, target);
+  }
+
+  public int getChecksum() {
+    return nodes.values().stream().mapToInt(TrackNode::getNetId).sum();
+  }
+
+  public void invalidateBounds() {
+    markDirty();
+  }
+
+  public TrackGraphBounds getBounds(Level level) {
+    return new TrackGraphBounds(this, level.dimension());
+  }
+
+  public float distanceToLocationSqr(Level level, Vec3 position) {
+    float result = Float.MAX_VALUE;
+    for (var node : nodes.values())
+      if (Objects.equals(node.location.dimension, level.dimension()))
+        result = Math.min(result, (float) node.location.getLocation().distanceToSqr(position));
+    return result;
+  }
+
+  public void deferIntersectionUpdate(TrackEdge edge) {
+    deferredIntersectionUpdates.add(edge);
+  }
+
+  public void resolveIntersectingEdgeGroups(Level level) {
+    for (var edge : List.copyOf(deferredIntersectionUpdates)) {
+      if (getConnectionsFrom(edge.node1).get(edge.node2) != edge) continue;
+      for (var crossing : edge.getEdgeData().getIntersections()) {
+        var group = edge.getEdgeData().getGroupAtPosition(this, crossing.location);
+        if (!Objects.equals(group, crossing.groupId)) {
+          crossing.groupId = group;
+          markDirty();
+          if (manager != null) manager.intersectionChanged(this, crossing);
+        }
+      }
+    }
+    deferredIntersectionUpdates.clear();
+  }
+
+  public void validate() {
+    if (nodesById.size() != nodes.size())
+      throw new IllegalArgumentException("Invalid railway transport index");
+    for (var node : nodes.values()) {
+      if (node.location.dimension == null
+          || nodesById.get(node.netId) != node
+          || nodes.get(node.location) != node)
+        throw new IllegalArgumentException("Invalid railway node identity");
+      for (var entry : getConnectionsFrom(node).entrySet()) {
+        var edge = entry.getValue();
+        var reverse = getConnectionsFrom(entry.getKey()).get(node);
+        if (nodes.get(entry.getKey().location) != entry.getKey()
+            || edge.node1 != node
+            || edge.node2 != entry.getKey()
+            || reverse == null)
+          throw new IllegalArgumentException("Missing reciprocal railway edge");
+        if (!Double.isFinite(edge.getLength())
+            || edge.getLength() < 0
+            || Math.abs(edge.getLength() - reverse.getLength()) > 1e-6
+            || edge.getTrackMaterial() != reverse.getTrackMaterial()
+            || edge.isTurn() != reverse.isTurn()
+            || edge.isTurn() && !edge.getTurn().equalsSansMaterial(reverse.getTurn()))
+          throw new IllegalArgumentException("Inconsistent reciprocal railway geometry");
+        for (var point : edge.getEdgeData().getPoints()) {
+          if (edgePoints.get(point.getType(), point.id) != point
+              || !(point.edgeLocation.getFirst().equals(node.location)
+                      && point.edgeLocation.getSecond().equals(entry.getKey().location)
+                  || point.edgeLocation.getSecond().equals(node.location)
+                      && point.edgeLocation.getFirst().equals(entry.getKey().location)))
+            throw new IllegalArgumentException("Foreign railway point on directed edge");
+        }
+        for (var crossing : edge.getEdgeData().getIntersections())
+          if (crossing.location < 0 || crossing.location > edge.getLength() + 1e-6)
+            throw new IllegalArgumentException("Railway intersection outside edge");
+      }
+    }
+    for (var point : edgePoints.all()) {
+      EdgePointManager.requireEndpoints(this, point);
+      if (point.graph() != this || edgePoints.get(point.getType(), point.id) != point)
+        throw new IllegalArgumentException("Invalid railway point ownership");
+      var first = locateNode(point.edgeLocation.getFirst());
+      var second = locateNode(point.edgeLocation.getSecond());
+      if (!getConnectionsFrom(first).get(second).getEdgeData().getPoints().contains(point)
+          || !getConnectionsFrom(second).get(first).getEdgeData().getPoints().contains(point))
+        throw new IllegalArgumentException("Railway point missing directed reference");
+    }
+  }
+
+  private Data snapshot() {
+    validate();
+    var ordered = new ArrayList<>(nodes.values());
+    ordered.sort(
+        Comparator.comparing((TrackNode node) -> node.location.dimension.identifier().toString())
+            .thenComparingInt(node -> node.location.getX())
+            .thenComparingInt(node -> node.location.getY())
+            .thenComparingInt(node -> node.location.getZ())
+            .thenComparingInt(node -> node.location.yOffsetPixels));
+    var indices = new IdentityHashMap<TrackNode, Integer>();
+    for (int i = 0; i < ordered.size(); i++) indices.put(ordered.get(i), i);
+    var encoded = new ArrayList<NodeData>();
+    for (var node : ordered) {
+      var connections = new ArrayList<ConnectionData>();
+      for (var entry : getConnectionsFrom(node).entrySet()) {
+        var edge = entry.getValue();
+        connections.add(
+            new ConnectionData(
+                indices.get(entry.getKey()),
+                edge.getTrackMaterial(),
+                Optional.ofNullable(edge.getTurn()),
+                edge.getEdgeData().snapshot()));
+      }
+      connections.sort(Comparator.comparingInt(ConnectionData::to));
+      encoded.add(new NodeData(node.location, node.normal, List.copyOf(connections)));
+    }
+    return new Data(id, color, revision, List.copyOf(encoded), edgePoints.all());
+  }
+
+  private static TrackGraph decode(Data data) {
+    return decode(data, true);
+  }
+
+  private static TrackGraph decode(Data data, boolean allocateIdentity) {
+    var graph = new TrackGraph(data.id, allocateIdentity);
+    graph.color = data.color;
+    if (data.revision < 0) throw new IllegalArgumentException("Invalid railway graph revision");
+    var ordered = new ArrayList<TrackNode>();
+    for (var entry : data.nodes) {
+      var node =
+          new TrackNode(
+              entry.location, allocateIdentity ? nextNodeId() : ordered.size() + 1, entry.normal);
+      if (!graph.addNodeIfAbsent(node))
+        throw new IllegalArgumentException("Duplicate railway node position");
+      ordered.add(node);
+    }
+    for (var point : data.points) graph.edgePoints.put(point.getType(), point);
+    for (int i = 0; i < ordered.size(); i++)
+      for (var connection : data.nodes.get(i).connections) {
+        if (connection.to >= ordered.size() || connection.to == i)
+          throw new IllegalArgumentException("Invalid railway edge index");
+        var from = ordered.get(i);
+        var to = ordered.get(connection.to);
+        if (graph.getConnectionsFrom(from).containsKey(to))
+          throw new IllegalArgumentException("Duplicate directed railway edge");
+        var edge = new TrackEdge(from, to, connection.turn.orElse(null), connection.material);
+        edge.getEdgeData().restore(connection.data, graph);
+        graph.putConnection(from, to, edge);
+      }
+    for (var point : graph.edgePoints.all()) point.bind(graph);
+    graph.validate();
+    graph.revision = data.revision;
+    return graph;
+  }
+
+  public CompoundTag write(HolderLookup.Provider registries, DimensionPalette dimensions) {
+    return (CompoundTag)
+        CODEC
+            .encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), this)
+            .getOrThrow();
+  }
+
+  public static TrackGraph read(
+      CompoundTag tag, HolderLookup.Provider registries, DimensionPalette dimensions) {
+    return CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE), tag).getOrThrow();
+  }
 }

@@ -1,69 +1,24 @@
 package com.simibubi.create.content.fluids.spout;
 
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-import com.simibubi.create.foundation.advancement.AdvancementBehaviour;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.blockEntity.ComparatorUtil;
+import net.minecraft.core.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.phys.shapes.*;
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.pathfinder.PathComputationType;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
-
-public class SpoutBlock extends Block implements IWrenchable, IBE<SpoutBlockEntity> {
-
-	public SpoutBlock(Properties p_i48440_1_) {
-		super(p_i48440_1_);
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState p_220053_1_, BlockGetter p_220053_2_, BlockPos p_220053_3_,
-		CollisionContext p_220053_4_) {
-		return AllShapes.SPOUT;
-	}
-
-	@Override
-	public void setPlacedBy(Level pLevel, BlockPos pPos, BlockState pState, LivingEntity pPlacer, ItemStack pStack) {
-		super.setPlacedBy(pLevel, pPos, pState, pPlacer, pStack);
-		AdvancementBehaviour.setPlacedBy(pLevel, pPos, pPlacer);
-	}
-
-	@Override
-	public boolean hasAnalogOutputSignal(BlockState state) {
-		return true;
-	}
-
-	@Override
-	public int getAnalogOutputSignal(BlockState blockState, Level worldIn, BlockPos pos) {
-		return ComparatorUtil.levelOfSmartFluidTank(worldIn, pos);
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	public Class<SpoutBlockEntity> getBlockEntityClass() {
-		return SpoutBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends SpoutBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.SPOUT.get();
-	}
-
-	@Override
-	public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-		IBE.onRemove(state, level, pos, newState);
-	}
+public final class SpoutBlock extends BaseEntityBlock {
+    private static final VoxelShape SHAPE=Shapes.or(box(1,2,1,15,14,15),box(2,0,2,14,16,14));
+    public SpoutBlock(Properties properties){super(properties);}
+    @Override public void setPlacedBy(net.minecraft.world.level.Level level,net.minecraft.core.BlockPos pos,net.minecraft.world.level.block.state.BlockState state,net.minecraft.world.entity.LivingEntity placer,net.minecraft.world.item.ItemStack stack){super.setPlacedBy(level,pos,state,placer,stack);if(com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,pos) instanceof SpoutBlockEntity device)device.sourceAdvancements.place(placer);}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new SpoutBlockEntity(pos,state);}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return SHAPE;}
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.SPOUT,SpoutBlockEntity::tick);}
+    @Override protected boolean hasAnalogOutputSignal(BlockState state){return true;}
+    @Override protected int getAnalogOutputSignal(BlockState state,Level level,BlockPos pos,Direction side){
+        if(!(level.getBlockEntity(pos) instanceof SpoutBlockEntity spout)||spout.tank.isEmpty())return 0;
+        return 1+(int)(14*spout.tank.getAmount()/spout.tank.getCapacity());
+    }
 }

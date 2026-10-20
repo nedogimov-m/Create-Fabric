@@ -2,7 +2,7 @@ package com.simibubi.create.content.equipment.zapper.terrainzapper;
 
 import java.util.Collection;
 
-import com.simibubi.create.foundation.utility.CreateLang;
+
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -15,7 +15,7 @@ public abstract class Brush {
 	protected int param0;
 	protected int param1;
 	protected int param2;
-	int amtParams;
+	public final int amtParams;
 
 	public Brush(int amtParams) {
 		this.amtParams = amtParams;
@@ -43,17 +43,16 @@ public abstract class Brush {
 		return false;
 	}
 
-	int getMax(int paramIndex) {
+	public int getMax(int paramIndex) {
 		return Integer.MAX_VALUE;
 	}
 
-	int getMin(int paramIndex) {
+	public int getMin(int paramIndex) {
 		return 0;
 	}
 
-	Component getParamLabel(int paramIndex) {
-		return CreateLang
-			.translateDirect(paramIndex == 0 ? "generic.width" : paramIndex == 1 ? "generic.height" : "generic.length");
+	public Component getParamLabel(int paramIndex) {
+		return Component.translatable("create."+(paramIndex == 0 ? "generic.width" : paramIndex == 1 ? "generic.height" : "generic.length"));
 	}
 
 	public int get(int paramIndex) {

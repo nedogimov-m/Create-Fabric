@@ -12,6 +12,10 @@ import net.minecraft.world.phys.AABB;
 
 public class SimpleKineticBlockEntity extends KineticBlockEntity {
 
+	public SimpleKineticBlockEntity(BlockPos pos, BlockState state) {
+		this(com.simibubi.create.AllBlockEntityTypes.simpleType(state), pos, state);
+	}
+
 	public SimpleKineticBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
 		super(type, pos, state);
 	}

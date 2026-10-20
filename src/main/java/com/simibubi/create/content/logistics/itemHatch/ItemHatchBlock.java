@@ -1,198 +1,52 @@
 package com.simibubi.create.content.logistics.itemHatch;
-
-import java.util.ArrayList;
-import java.util.List;
-
-import com.mojang.serialization.MapCodec;
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllShapes;
 import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-import com.simibubi.create.content.logistics.box.PackageItem;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.block.ProperWaterloggedBlock;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.fabricmc.fabric.api.entity.FakePlayer;
+import net.minecraft.core.*;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.TagKey;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.HorizontalDirectionalBlock;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.material.*;
 import net.minecraft.world.level.pathfinder.PathComputationType;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
-
-import net.neoforged.neoforge.capabilities.Capabilities.ItemHandler;
-import net.neoforged.neoforge.common.Tags.Items;
-import net.neoforged.neoforge.common.util.FakePlayer;
-import net.neoforged.neoforge.items.IItemHandler;
-import net.neoforged.neoforge.items.ItemHandlerHelper;
-
-public class ItemHatchBlock extends HorizontalDirectionalBlock
-	implements IBE<ItemHatchBlockEntity>, IWrenchable, ProperWaterloggedBlock {
-	public static final MapCodec<ItemHatchBlock> CODEC = simpleCodec(ItemHatchBlock::new);
-
-	public static final BooleanProperty OPEN = BooleanProperty.create("open");
-
-	public ItemHatchBlock(Properties pProperties) {
-		super(pProperties);
-		registerDefaultState(defaultBlockState().setValue(OPEN, false)
-			.setValue(WATERLOGGED, false));
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> pBuilder) {
-		super.createBlockStateDefinition(pBuilder.add(OPEN, FACING, WATERLOGGED));
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext pContext) {
-		BlockState state = super.getStateForPlacement(pContext);
-		if (state == null)
-			return state;
-		if (pContext.getClickedFace()
-			.getAxis()
-			.isVertical())
-			return null;
-
-		return withWater(state.setValue(FACING, pContext.getClickedFace()
-			.getOpposite())
-			.setValue(OPEN, false), pContext);
-	}
-
-	@Override
-	public FluidState getFluidState(BlockState pState) {
-		return fluidState(pState);
-	}
-
-	@Override
-	public BlockState updateShape(BlockState pState, Direction pDirection, BlockState pNeighborState,
-		LevelAccessor pLevel, BlockPos pPos, BlockPos pNeighborPos) {
-		updateWater(pLevel, pState, pPos);
-		return pState;
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (level.isClientSide())
-			return ItemInteractionResult.SUCCESS;
-		if (player instanceof FakePlayer)
-			return ItemInteractionResult.SUCCESS;
-
-		BlockEntity blockEntity = level.getBlockEntity(pos.relative(state.getValue(FACING)));
-		if (blockEntity == null)
-			return ItemInteractionResult.FAIL;
-		IItemHandler targetInv = level.getCapability(ItemHandler.BLOCK, blockEntity.getBlockPos(), null);
-		if (targetInv == null)
-			return ItemInteractionResult.FAIL;
-
-		FilteringBehaviour filter = BlockEntityBehaviour.get(level, pos, FilteringBehaviour.TYPE);
-		if (filter == null)
-			return ItemInteractionResult.FAIL;
-
-		Inventory inventory = player.getInventory();
-		List<ItemStack> failedInsertions = new ArrayList<>();
-		boolean anyInserted = false;
-		boolean depositItemInHand = !player.isShiftKeyDown();
-
-		if (!depositItemInHand && stack.is(Items.TOOLS_WRENCH))
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		for (int i = 0; i < inventory.items.size(); i++) {
-			if (Inventory.isHotbarSlot(i) != depositItemInHand)
-				continue;
-			if (depositItemInHand && i != inventory.selected)
-				continue;
-			ItemStack item = inventory.getItem(i);
-			if (item.isEmpty())
-				continue;
-			if (!item.getItem()
-				.canFitInsideContainerItems() && !PackageItem.isPackage(item))
-				continue;
-			if (!filter.getFilter()
-				.isEmpty() && !filter.test(item))
-				continue;
-
-			ItemStack remainder = ItemHandlerHelper.insertItemStacked(targetInv, item, true);
-			if (remainder.getCount() == item.getCount())
-				continue;
-
-			ItemStack extracted = inventory.removeItem(i, item.getCount() - remainder.getCount());
-			remainder = ItemHandlerHelper.insertItemStacked(targetInv, extracted, false);
-			anyInserted = true;
-
-			// remainder might not be empty in itemhandler edge cases
-			if (!remainder.isEmpty())
-				failedInsertions.add(remainder);
-		}
-
-		failedInsertions.forEach(inventory::placeItemBackInInventory);
-
-		if (!anyInserted)
-			return ItemInteractionResult.SUCCESS;
-
-		AllSoundEvents.ITEM_HATCH.playOnServer(level, pos);
-		level.setBlockAndUpdate(pos, state.setValue(OPEN, true));
-		level.scheduleTick(pos, this, 10);
-
-		CreateLang.translate(depositItemInHand ? "item_hatch.deposit_item" : "item_hatch.deposit_inventory")
-			.sendStatus(player);
-		return ItemInteractionResult.SUCCESS;
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState pState, BlockGetter pLevel, BlockPos pPos, CollisionContext pContext) {
-		return AllShapes.ITEM_HATCH.get(pState.getValue(FACING)
-			.getOpposite());
-	}
-
-	@Override
-	public void tick(BlockState pState, ServerLevel pLevel, BlockPos pPos, RandomSource pRandom) {
-		if (pState.getValue(OPEN))
-			pLevel.setBlockAndUpdate(pPos, pState.setValue(OPEN, false));
-	}
-
-	@Override
-	public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean movedByPiston) {
-		IBE.onRemove(state, level, pos, newState);
-	}
-
-	@Override
-	public Class<ItemHatchBlockEntity> getBlockEntityClass() {
-		return ItemHatchBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends ItemHatchBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.ITEM_HATCH.get();
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	protected MapCodec<? extends HorizontalDirectionalBlock> codec() {
-		return CODEC;
-	}
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
+public final class ItemHatchBlock extends HorizontalDirectionalBlock implements EntityBlock,SimpleWaterloggedBlock {
+ public static final BooleanProperty OPEN=BlockStateProperties.OPEN,WATERLOGGED=BlockStateProperties.WATERLOGGED;
+ private static final TagKey<Item> WRENCHES=TagKey.create(net.minecraft.core.registries.Registries.ITEM,net.minecraft.resources.Identifier.parse("c:tools/wrench"));
+ private static final Map<Direction,VoxelShape> SHAPES=shapes();
+ public ItemHatchBlock(Properties properties){super(properties);registerDefaultState(defaultBlockState().setValue(FACING,Direction.NORTH).setValue(OPEN,false).setValue(WATERLOGGED,false));}
+ @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> b){b.add(FACING,OPEN,WATERLOGGED);}
+ @Override public BlockState getStateForPlacement(BlockPlaceContext c){return c.getClickedFace().getAxis().isVertical()?null:defaultBlockState().setValue(FACING,c.getClickedFace().getOpposite()).setValue(WATERLOGGED,c.getLevel().getFluidState(c.getClickedPos()).is(net.minecraft.tags.FluidTags.WATER));}
+ @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new ItemHatchBlockEntity(pos,state);}
+ @Override protected FluidState getFluidState(BlockState state){return state.getValue(WATERLOGGED)?Fluids.WATER.getSource(false):super.getFluidState(state);}
+ @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction side,BlockPos otherPos,BlockState other,RandomSource random){if(state.getValue(WATERLOGGED))ticks.scheduleTick(pos,Fluids.WATER,Fluids.WATER.getTickDelay(level));return state;}
+ @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){return deposit(stack,state,level,pos,player);}
+ public InteractionResult deposit(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player){
+  if(player.isSpectator()||!player.mayBuild()||!level.mayInteract(player,pos))return InteractionResult.PASS;
+  if(level.isClientSide()||player instanceof FakePlayer)return InteractionResult.SUCCESS;
+  if(!(LoadedLevelAccess.blockEntity(level,pos) instanceof ItemHatchBlockEntity hatch))return InteractionResult.FAIL;
+  if(player.isShiftKeyDown()&&stack.is(WRENCHES))return InteractionResult.PASS;
+  boolean heldOnly=!player.isShiftKeyDown();var result=ItemHatchTransfer.deposit(level,pos,hatch,player,heldOnly);if(result==ItemHatchTransfer.Result.NO_STORAGE)return InteractionResult.FAIL;if(result==ItemHatchTransfer.Result.NO_INSERTION)return InteractionResult.SUCCESS;
+  level.playSound(null,pos,AllSoundEvents.ITEM_HATCH,SoundSource.BLOCKS,.25f,1.4f);level.playSound(null,pos,AllSoundEvents.ITEM_HATCH_COMPOUNDED_1,SoundSource.BLOCKS,.75f,1.15f);
+  if(LoadedLevelAccess.blockEntity(level,pos)==hatch){level.setBlockAndUpdate(pos,state.setValue(OPEN,true));level.scheduleTick(pos,this,10);}
+  player.sendOverlayMessage(Component.translatable(heldOnly?"create.item_hatch.deposit_item":"create.item_hatch.deposit_inventory"));return InteractionResult.SUCCESS;
+ }
+ @Override protected void tick(BlockState state,ServerLevel level,BlockPos pos,RandomSource random){if(state.getValue(OPEN))level.setBlockAndUpdate(pos,state.setValue(OPEN,false));}
+ @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return SHAPES.get(state.getValue(FACING));}
+ @Override protected boolean isPathfindable(BlockState state,PathComputationType type){return false;}
+ @Override protected BlockState rotate(BlockState state,Rotation rotation){return state.setValue(FACING,rotation.rotate(state.getValue(FACING)));}
+ @Override protected BlockState mirror(BlockState state,Mirror mirror){return state.rotate(mirror.getRotation(state.getValue(FACING)));}
+ private static Map<Direction,VoxelShape> shapes(){var map=new EnumMap<Direction,VoxelShape>(Direction.class);double[][] boxes={{1,0,0,15,16,2},{2,2,0,14,13,3.8},{2,4,0,14,11,5.8},{2,6,0,14,9,7.8}};for(var side:Direction.Plane.HORIZONTAL){var shape=Shapes.empty();for(var b:boxes){double x0=b[0],z0=b[2],x1=b[3],z1=b[5];if(side==Direction.SOUTH){x0=16-b[3];x1=16-b[0];z0=16-b[5];z1=16-b[2];}else if(side==Direction.EAST){x0=16-b[5];x1=16-b[2];z0=b[0];z1=b[3];}else if(side==Direction.WEST){x0=b[2];x1=b[5];z0=16-b[3];z1=16-b[0];}shape=Shapes.or(shape,Block.box(x0,b[1],z0,x1,b[4],z1));}map.put(side,shape);}return Map.copyOf(map);}
 }

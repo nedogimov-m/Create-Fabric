@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "create",
+  "version": "${version}",
+  "name": "Create (26.3 port development)",
+  "description": "Fabric port of Create 6.0.10 for Minecraft 26.3.",
+  "authors": [
+    "simibubi",
+    "Creators of Create",
+    "Fabric port contributors"
+  ],
+  "contact": {
+    "sources": "https://github.com/nedogimov-m/Create-Fabric",
+    "issues": "https://github.com/nedogimov-m/Create-Fabric/issues"
+  },
+  "license": "LicenseRef-Create",
+  "environment": "*",
+  "mixins": [
+    "create.mixins.json",
+    "ponder-native.mixins.json",
+    {
+      "config": "ponder.frontend.mixins.json",
+      "environment": "client"
+    },
+    {
+      "config": "create.ponder.navigation.mixins.json",
+      "environment": "client"
+    },
+    {
+      "config": "create.kinetic-preview.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "entrypoints": {
+    "main": [
+      "com.simibubi.create.Create"
+    ],
+    "client": [
+      "net.createmod.catnip.lang.LangClient",
+      "com.simibubi.create.CreateClient",
+      "net.createmod.ponder.PonderClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "26.3",
+    "java": ">=25",
+    "fabric-api": ">=0.163.0+26.3"
+  }
+}

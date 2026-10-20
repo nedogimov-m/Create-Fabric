@@ -1,87 +1,31 @@
 package com.simibubi.create.content.schematics;
 
-import java.util.Iterator;
-
 import com.simibubi.create.AllEntityTypes;
 import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
-
-import net.createmod.catnip.nbt.NBTHelper;
-import net.createmod.catnip.registry.RegisteredObjectsHelper;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.DoubleTag;
-import net.minecraft.nbt.IntTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.nbt.*;
+import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.TagValueOutput;
+import net.minecraft.world.phys.*;
 
-public class SchematicAndQuillItem extends Item {
-
-	public SchematicAndQuillItem(Properties properties) {
-		super(properties);
-	}
-
-	public static void replaceStructureVoidWithAir(CompoundTag nbt) {
-		String air = RegisteredObjectsHelper.getKeyOrThrow(Blocks.AIR)
-			.toString();
-		String structureVoid = RegisteredObjectsHelper.getKeyOrThrow(Blocks.STRUCTURE_VOID)
-			.toString();
-
-		NBTHelper.iterateCompoundList(nbt.getList("palette", 10), c -> {
-			if (c.contains("Name") && c.getString("Name")
-				.equals(structureVoid)) {
-				c.putString("Name", air);
-			}
-		});
-	}
-
-	public static void clampGlueBoxes(Level level, AABB aabb, CompoundTag nbt) {
-		ListTag listtag = nbt.getList("entities", 10)
-			.copy();
-
-		for (Iterator<Tag> iterator = listtag.iterator(); iterator.hasNext();) {
-			Tag tag = iterator.next();
-			if (!(tag instanceof CompoundTag compoundtag))
-				continue;
-			if (compoundtag.contains("nbt") && ResourceLocation.parse(compoundtag.getCompound("nbt")
-				.getString("id")).equals(AllEntityTypes.SUPER_GLUE.getId())) {
-				iterator.remove();
-			}
-		}
-
-		for (SuperGlueEntity entity : SuperGlueEntity.collectCropped(level, aabb)) {
-			Vec3 vec3 = new Vec3(entity.getX() - aabb.minX, entity.getY() - aabb.minY, entity.getZ() - aabb.minZ);
-			CompoundTag compoundtag = new CompoundTag();
-			entity.save(compoundtag);
-			BlockPos blockpos = BlockPos.containing(vec3);
-
-			CompoundTag entityTag = new CompoundTag();
-			entityTag.put("pos", newDoubleList(vec3.x, vec3.y, vec3.z));
-			entityTag.put("blockPos", newIntegerList(blockpos.getX(), blockpos.getY(), blockpos.getZ()));
-			entityTag.put("nbt", compoundtag.copy());
-			listtag.add(entityTag);
-		}
-
-		nbt.put("entities", listtag);
-	}
-
-	private static ListTag newIntegerList(int... pValues) {
-		ListTag listtag = new ListTag();
-		for (int i : pValues)
-			listtag.add(IntTag.valueOf(i));
-		return listtag;
-	}
-
-	private static ListTag newDoubleList(double... pValues) {
-		ListTag listtag = new ListTag();
-		for (double d0 : pValues)
-			listtag.add(DoubleTag.valueOf(d0));
-		return listtag;
-	}
-
+/** Source quill/export helpers using actual current native entity serialization. */
+public final class SchematicAndQuillItem extends Item {
+    public SchematicAndQuillItem(Properties properties){super(properties);}
+    public static void replaceStructureVoidWithAir(CompoundTag tag){
+        replacePalette(tag.getListOrEmpty("palette"));for(var value:tag.getListOrEmpty("palettes"))if(value instanceof ListTag palette)replacePalette(palette);
+    }
+    private static void replacePalette(ListTag palette){for(var value:palette)if(value instanceof CompoundTag entry&&entry.getStringOr("id","").equals("minecraft:structure_void"))entry.putString("id","minecraft:air");}
+    public static void clampGlueBoxes(Level level,AABB bounds,CompoundTag tag){
+        var entities=tag.getListOrEmpty("entities").copy();entities.removeIf(value->value instanceof CompoundTag entity&&entity.getCompound("nbt").map(nbt->nbt.getStringOr("id","").equals(net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(AllEntityTypes.SUPER_GLUE).toString())).orElse(false));
+        for(var glue:SuperGlueEntity.collectCropped(level,bounds)){
+            var relative=glue.position().subtract(bounds.minX,bounds.minY,bounds.minZ);var problems=new ProblemReporter.Collector(glue.problemPath());var output=TagValueOutput.createWithContext(problems,level.registryAccess());
+            if(!glue.save(output)||!problems.isEmpty())throw new IllegalStateException("Native cropped glue serialization failed: "+problems.getReport());
+            var entry=new CompoundTag();entry.put("pos",doubles(relative.x,relative.y,relative.z));var pos=BlockPos.containing(relative);entry.put("blockPos",integers(pos.getX(),pos.getY(),pos.getZ()));entry.put("nbt",output.buildResult());entities.add(entry);
+        }
+        tag.put("entities",entities);
+    }
+    public static ListTag integers(int...values){var list=new ListTag();for(var value:values)list.add(IntTag.valueOf(value));return list;}
+    public static ListTag doubles(double...values){var list=new ListTag();for(var value:values)list.add(DoubleTag.valueOf(value));return list;}
 }

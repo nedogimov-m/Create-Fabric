@@ -1,0 +1,49 @@
+{
+  "type": "create:sequenced_assembly",
+  "ingredient": "#create:sleepers",
+  "results": [
+    {
+      "id": "create:track"
+    }
+  ],
+  "sequence": [
+    {
+      "type": "create:deploying",
+      "ingredients": [
+        "create:incomplete_track",
+        "#create:track_nuggets"
+      ],
+      "results": [
+        {
+          "id": "create:incomplete_track"
+        }
+      ]
+    },
+    {
+      "type": "create:deploying",
+      "ingredients": [
+        "create:incomplete_track",
+        "#create:track_nuggets"
+      ],
+      "results": [
+        {
+          "id": "create:incomplete_track"
+        }
+      ]
+    },
+    {
+      "type": "create:pressing",
+      "ingredients": [
+        "create:incomplete_track"
+      ],
+      "results": [
+        {
+          "id": "create:incomplete_track"
+        }
+      ]
+    }
+  ],
+  "transitional_item": {
+    "id": "create:incomplete_track"
+  }
+}

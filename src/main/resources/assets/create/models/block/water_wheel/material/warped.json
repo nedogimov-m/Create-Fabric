@@ -1,0 +1,7 @@
+{
+  "parent": "create:block/water_wheel/wheel",
+  "textures": {
+    "planks": "minecraft:block/warped_planks",
+    "log": "minecraft:block/warped_stem"
+  }
+}

@@ -1,199 +1,240 @@
 package com.simibubi.create.content.trains.signal;
 
-import java.util.List;
-
-import org.jetbrains.annotations.Nullable;
-
+import com.mojang.serialization.Codec;
 import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.api.contraption.transformable.TransformableBlockEntity;
-import com.simibubi.create.compat.Mods;
-import com.simibubi.create.compat.computercraft.AbstractComputerBehaviour;
-import com.simibubi.create.compat.computercraft.ComputerCraftProxy;
-import com.simibubi.create.compat.computercraft.events.SignalStateChangeEvent;
 import com.simibubi.create.content.contraptions.StructureTransform;
-import com.simibubi.create.content.trains.graph.EdgePointType;
-import com.simibubi.create.content.trains.signal.SignalBlock.SignalType;
-import com.simibubi.create.content.trains.track.TrackTargetingBehaviour;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import dan200.computercraft.api.peripheral.PeripheralCapability;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
+import com.simibubi.create.content.trains.track.*;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.*;
 
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
+/**
+ * Real native signal owner and source state/overlay/input lifecycle. Traffic consumers remain
+ * absent.
+ */
+public final class SignalBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity
+    implements TrackEdgePoint.MigrationReceiver,
+        TrackTargetingBlockItem.Target,
+        TransformableBlockEntity {
+  public enum OverlayState {
+    RENDER,
+    SKIP,
+    DUAL
+  }
 
-public class SignalBlockEntity extends SmartBlockEntity implements TransformableBlockEntity {
+  public enum SignalState {
+    RED,
+    YELLOW,
+    GREEN,
+    INVALID;
+    public static final Codec<SignalState> CODEC =
+        Codec.STRING.xmap(SignalState::valueOf, SignalState::name);
 
-	public static enum OverlayState {
-		RENDER, SKIP, DUAL
-	}
+    public boolean isRedLight(float time) {
+      return this == RED || this == INVALID && time % 40 < 3;
+    }
 
-	public static enum SignalState {
-		RED, YELLOW, GREEN, INVALID;
+    public boolean isYellowLight(float time) {
+      return this == YELLOW;
+    }
 
-		public boolean isRedLight(float renderTime) {
-			return this == RED || this == INVALID && renderTime % 40 < 3;
-		}
+    public boolean isGreenLight(float time) {
+      return this == GREEN;
+    }
+  }
 
-		public boolean isYellowLight(float renderTime) {
-			return this == YELLOW;
-		}
+  private final TrackTargetingBehaviour<SignalBoundary> targeting;
+  private SignalState signalState = SignalState.INVALID;
+  private OverlayState overlay = OverlayState.SKIP;
+  private int switchToRedAfterTrainEntered;
+  private boolean lastReportedPower;
+  private long revision;
 
-		public boolean isGreenLight(float renderTime) {
-			return this == GREEN;
-		}
-	}
+  public SignalBlockEntity(BlockPos pos, BlockState state) {
+    super(AllBlockEntityTypes.TRACK_SIGNAL, pos, state);
+    targeting =
+        new TrackTargetingBehaviour<>(this, SignalEdgePoints.SIGNAL, this::targetingChanged);
+  }
 
-	public TrackTargetingBehaviour<SignalBoundary> edgePoint;
+  @Override
+  public TrackTargetingBehaviour<SignalBoundary> targeting() {
+    return targeting;
+  }
 
-	private SignalState state;
-	private OverlayState overlay;
-	private int switchToRedAfterTrainEntered;
-	private boolean lastReportedPower;
-	public AbstractComputerBehaviour computerBehaviour;
+  @Override
+  public boolean setTarget(TrackTargetingSelection selected) {
+    boolean accepted = targeting.configure(selected);
+    if (accepted) targeting.resolveTick();
+    return accepted;
+  }
 
-	public SignalBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		this.state = SignalState.INVALID;
-		this.overlay = OverlayState.SKIP;
-		this.lastReportedPower = false;
-	}
+  public SignalBoundary getSignal() {
+    var point = targeting.getEdgePoint();
+    return point != null && level != null && point.hasOwner(owner()) ? point : null;
+  }
 
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		if (Mods.COMPUTERCRAFT.isLoaded()) {
-			event.registerBlockEntity(
-				PeripheralCapability.get(),
-				AllBlockEntityTypes.TRACK_SIGNAL.get(),
-				(be, context) -> be.computerBehaviour.getPeripheralCapability()
-			);
-		}
-	}
+  public GlobalPos owner() {
+    return GlobalPos.of(level.dimension(), worldPosition);
+  }
 
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-		NBTHelper.writeEnum(tag, "State", state);
-		NBTHelper.writeEnum(tag, "Overlay", overlay);
-		tag.putBoolean("Power", lastReportedPower);
-	}
+  public boolean getReportedPower() {
+    return lastReportedPower;
+  }
 
-	@Override
-	protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(tag, registries, clientPacket);
-		state = NBTHelper.readEnum(tag, "State", SignalState.class);
-		overlay = NBTHelper.readEnum(tag, "Overlay", OverlayState.class);
-		lastReportedPower = tag.getBoolean("Power");
-		invalidateRenderBoundingBox();
-	}
+  public SignalState getState() {
+    return signalState;
+  }
 
-	@Nullable
-	public SignalBoundary getSignal() {
-		return edgePoint.getEdgePoint();
-	}
+  public OverlayState getOverlay() {
+    return overlay;
+  }
 
-	public boolean isPowered() {
-		return state == SignalState.RED;
-	}
+  public boolean isPowered() {
+    return signalState == SignalState.RED;
+  }
 
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		edgePoint = new TrackTargetingBehaviour<>(this, EdgePointType.SIGNAL);
-		behaviours.add(edgePoint);
-		behaviours.add(computerBehaviour = ComputerCraftProxy.behaviour(this));
-	}
+  public long revision() {
+    return revision;
+  }
 
-	@Override
-	public void tick() {
-		super.tick();
-		if (level.isClientSide)
-			return;
+  private void targetingChanged() {
+    revision = Math.incrementExact(revision);
+    notifyUpdate();
+  }
 
-		SignalBoundary boundary = getSignal();
-		if (boundary == null) {
-			enterState(SignalState.INVALID);
-			setOverlay(OverlayState.RENDER);
-			return;
-		}
+  public void notifyUpdate() {
+    setChanged();
+    if (level != null && !level.isClientSide())
+      level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), Block.UPDATE_CLIENTS);
+  }
 
-		BlockState blockState = getBlockState();
+  public static void tick(Level level, BlockPos pos, BlockState state, SignalBlockEntity signal) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, signal)) {
+            if (!createTick.shouldTick()) return;
 
-		blockState.getOptionalValue(SignalBlock.POWERED).ifPresent(powered -> {
-			if (lastReportedPower == powered)
-				return;
-			lastReportedPower = powered;
-			boundary.updateBlockEntityPower(this);
-			notifyUpdate();
-		});
+    
+    if (level.isClientSide()) return;
+    var boundary = signal.getSignal();
+    if (boundary == null) {
+      signal.enterState(SignalState.INVALID);
+      signal.setOverlay(OverlayState.RENDER);
+      return;
+    }
+    boolean power = state.getValue(SignalBlock.POWERED);
+    if (signal.lastReportedPower != power) {
+      signal.lastReportedPower = power;
+      boundary.updateBlockEntityPower(signal);
+      signal.notifyUpdate();
+    }
+    var type = boundary.getTypeFor(signal.owner());
+    if (state.getValue(SignalBlock.TYPE) != type)
+      level.setBlock(pos, state.setValue(SignalBlock.TYPE, type), Block.UPDATE_ALL);
+    signal.enterState(boundary.getStateFor(signal.owner()));
+    signal.setOverlay(boundary.getOverlayFor(signal.owner()));
+  
+        }
+    }
 
-		blockState.getOptionalValue(SignalBlock.TYPE)
-			.ifPresent(stateType -> {
-				SignalType targetType = boundary.getTypeFor(worldPosition);
-				if (stateType != targetType) {
-					level.setBlock(worldPosition, blockState.setValue(SignalBlock.TYPE, targetType), Block.UPDATE_ALL);
-					refreshBlockState();
-				}
-			});
+  public boolean configure(Player player, SignalBlock.SignalType type, long expectedRevision) {
+    if (level == null
+        || level.isClientSide()
+        || player.level() != level
+        || !SignalMenu.canEdit(player, worldPosition)
+        || expectedRevision != revision
+        || getSignal() == null
+        || type == null) return false;
+    getSignal().setSignalType(owner(), type);
+    revision = Math.incrementExact(revision);
+    notifyUpdate();
+    return true;
+  }
 
-		enterState(boundary.getStateFor(worldPosition));
-		setOverlay(boundary.getOverlayFor(worldPosition));
-	}
+  public void cycleType(Player player) {
+    if (level == null
+        || level.isClientSide()
+        || player.level() != level
+        || !SignalMenu.canEdit(player, worldPosition)) return;
+    var boundary = getSignal();
+    if (boundary == null) {
+      player.sendOverlayMessage(Component.translatable("create.track_signal.cannot_change_mode"));
+      return;
+    }
+    boundary.cycleSignalType(owner());
+    revision = Math.incrementExact(revision);
+    notifyUpdate();
+    player.sendOverlayMessage(
+        Component.translatable(
+            "create.track_signal.mode_change." + boundary.getTypeFor(owner()).getSerializedName()));
+  }
 
-	public boolean getReportedPower() {
-		return lastReportedPower;
-	}
+  public void setOverlay(OverlayState next) {
+    if (overlay != next) {
+      overlay = next;
+      notifyUpdate();
+    }
+  }
 
-	public SignalState getState() {
-		return state;
-	}
+  public void enterState(SignalState next) {
+    if (switchToRedAfterTrainEntered > 0) switchToRedAfterTrainEntered--;
+    if (signalState == next || next == SignalState.RED && switchToRedAfterTrainEntered > 0) return;
+    signalState = next;
+    switchToRedAfterTrainEntered = next == SignalState.GREEN || next == SignalState.YELLOW ? 15 : 0;
+    notifyUpdate();
+    if (level != null && !level.isClientSide())
+      level.updateNeighbourForOutputSignal(worldPosition, getBlockState().getBlock());
+  }
 
-	public OverlayState getOverlay() {
-		return overlay;
-	}
+  @Override
+  public void transform(BlockEntity entity, StructureTransform transform) {
+    targeting.transform(entity, transform);
+  }
 
-	public void setOverlay(OverlayState state) {
-		if (this.overlay == state)
-			return;
-		this.overlay = state;
-		notifyUpdate();
-	}
+  @Override
+  public void invalidateEdgePoint(CompoundTag sourceData) {
+    targeting.invalidateEdgePoint(sourceData);
+  }
 
-	public void enterState(SignalState state) {
-		if (switchToRedAfterTrainEntered > 0)
-			switchToRedAfterTrainEntered--;
-		if (this.state == state)
-			return;
-		if (state == SignalState.RED && switchToRedAfterTrainEntered > 0)
-			return;
-		this.state = state;
-		switchToRedAfterTrainEntered = state == SignalState.GREEN || state == SignalState.YELLOW ? 15 : 0;
-		if (computerBehaviour.hasAttachedComputer())
-			computerBehaviour.prepareComputerEvent(new SignalStateChangeEvent(state));
-		notifyUpdate();
-	}
+  @Override
+  protected void write(ValueOutput out, boolean clientPacket) {
+    super.write(out, clientPacket);
+    
+    out.putString("State", signalState.name());
+    out.putString("Overlay", overlay.name());
+    out.putBoolean("Power", lastReportedPower);
+    out.putLong("ConfigurationRevision", revision);
+  }
 
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		computerBehaviour.removePeripheral();
-	}
+  @Override
+  protected void read(ValueInput in, boolean clientPacket) {
+    super.read(in, clientPacket);
+    
+    signalState = SignalState.valueOf(in.getStringOr("State", "INVALID"));
+    overlay = OverlayState.valueOf(in.getStringOr("Overlay", "SKIP"));
+    lastReportedPower = in.getBooleanOr("Power", false);
+    revision = in.getLongOr("ConfigurationRevision", 0);
+    if (revision < 0)
+      throw new IllegalArgumentException("Negative actual signal configuration revision");
+  }
 
-	@Override
-	protected AABB createRenderBoundingBox() {
-		return new AABB(Vec3.atLowerCornerOf(worldPosition), Vec3.atLowerCornerOf(edgePoint.getGlobalPosition())).inflate(2);
-	}
+  @Override
+  public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+    return super.getUpdateTag(registries);
+  }
 
-	@Override
-	public void transform(BlockEntity be, StructureTransform transform) {
-		edgePoint.transform(be, transform);
-	}
-
+  @Override
+  public ClientboundBlockEntityDataPacket getUpdatePacket() {
+    return ClientboundBlockEntityDataPacket.create(this);
+  }
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (targeting != null) behaviours.add(targeting);
+    }
 }

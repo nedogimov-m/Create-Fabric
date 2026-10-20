@@ -1,325 +1,105 @@
 package com.simibubi.create.content.contraptions.elevator;
 
-import java.util.List;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.contraptions.AssemblyException;
-import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
-import com.simibubi.create.content.contraptions.elevator.ElevatorColumn.ColumnCoords;
-import com.simibubi.create.content.contraptions.pulley.PulleyBlockEntity;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import net.createmod.catnip.platform.CatnipServices;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
+import com.simibubi.create.*;
+import com.simibubi.create.content.contraptions.*;
+import com.simibubi.create.content.contraptions.pulley.*;
+import com.simibubi.create.content.kinetics.transmission.sequencer.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
+/** Source floor target, acceleration/braking and arrival: no physical rope or empty cabin surrogate. */
 public class ElevatorPulleyBlockEntity extends PulleyBlockEntity {
+    private float previousSpeed;
+    private boolean arrived=true;
+    private int clientOffsetTarget,namesVersion=-1,lastSyncedTarget=Integer.MIN_VALUE;
+    private boolean lastSyncedArrived;
+    private Integer lastTargetY;
+    public ElevatorPulleyBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.ELEVATOR_PULLEY,pos,state);movementMode=MovementMode.MOVE_NEVER_PLACE;offset=-1;}
+    public boolean hasArrived(){return arrived;}
+    public boolean retainsColumnOwner(UUID owner){getMovedContraption();return Objects.equals(movedUuid,owner)||transferring&&pendingColumn!=null;}
+    @Override public MovementMode getMovementMode(){return MovementMode.MOVE_NEVER_PLACE;}
+    @Override public void setMovementMode(MovementMode ignored){movementMode=MovementMode.MOVE_NEVER_PLACE;}
+    @Override protected boolean isControllerBlock(BlockState state){return state.getBlock() instanceof ElevatorPulleyBlock;}
+    @Override protected boolean requiresBody(){return true;}
+    @Override protected boolean mayStartAt(int offset,int range){return true;}
+    @Override protected boolean shouldCheckInitialCollision(){return false;}
+    @Override protected boolean shouldStopOnTerrainCollision(){return false;}
+    @Override protected net.minecraft.world.phys.Vec3 toMotionVector(float amount){return arrived?net.minecraft.world.phys.Vec3.ZERO:super.toMotionVector(amount);}
+    @Override protected void updateContraptionPose(LinearContraptionEntity owner,float next){
+        // Source stops coarse cabin motion once within half a block, while controller
+        // offset keeps converging. Preserve that actual pose before quarter correction.
+        double y=owner.getY();super.updateContraptionPose(owner,next);if(arrived)owner.setPoseBiasY((float)(owner.getPoseBiasY()+y-owner.getY()));
+    }
+    @Override protected boolean shouldCreateRopes(){return false;}
+    @Override protected PulleyContraption createContraption(int offset){return new ElevatorContraption(offset);}
+    @Override protected boolean matches(LinearContraptionEntity owner){return owner.getContraption() instanceof ElevatorContraption&&super.matches(owner);}
+    @Override protected List<BlockState> scanRopes(ServerLevel server)throws AssemblyException{
+        var states=new ArrayList<BlockState>();for(int i=1;i<=newAssemblyRange();i++){var pos=worldPosition.below(i);if(!LoadedLevelAccess.isLoaded(server,pos))throw AssemblyException.entitiesNotReady(pos);com.simibubi.create.foundation.utility.LoadedEntityAccess.requireReady(server,pos);var state=LoadedLevelAccess.blockState(server,pos);if(!state.getCollisionShape(server,pos).isEmpty()&&!state.canBeReplaced())break;states.add(state);}return states;
+    }
+    @Override protected void removeSourceRopes(ServerLevel server,List<BlockState> states){ropesRemoved=true;setChanged();}
+    @Override protected void beforeBodyTransfer(LinearContraptionEntity owner,PulleyContraption structure)throws AssemblyException{
+        var cabin=(ElevatorContraption)structure;cabin.maxContactY=worldPosition.getY()+cabin.getContactYOffset()-1;cabin.minContactY=cabin.maxContactY-travelRange;
+        var column=ElevatorColumn.getOrCreate(level,cabin.getGlobalColumn());if(!column.claim(owner.getUUID(),worldPosition))throw new AssemblyException(net.minecraft.network.chat.Component.translatable("create.gui.assembly.exception.column_conflict"));pendingColumn=cabin.getGlobalColumn();
+    }
+    @Override protected void releaseUnusedReservation(LinearContraptionEntity owner){if(owner.getContraption()!=null)return;if(pendingColumn!=null){var column=ElevatorColumn.get(level,pendingColumn);if(column!=null)column.release(owner.getUUID());pendingColumn=null;}}
+    private ElevatorColumn.ColumnCoords pendingColumn;
+    @Override protected void onBodyAssembled(LinearContraptionEntity owner,PulleyContraption structure){
+        var cabin=(ElevatorContraption)structure;pendingColumn=null;var column=ElevatorColumn.getOrCreate(level,cabin.getGlobalColumn());column.target(cabin.anchor.getY()+cabin.getContactYOffset());column.gatherAll();column.markDirty();lastTargetY=column.getTargetedYLevel();arrived=true;previousSpeed=0;namesVersion=-1;cabin.arrived=true;synchronize(cabin,column,owner,true);
+    }
+    private boolean ensureColumn(LinearContraptionEntity owner,ElevatorContraption cabin){var column=ElevatorColumn.getOrCreate(level,cabin.getGlobalColumn());column.adoptOriginalActive(owner,this);if(!column.claim(owner.getUUID(),worldPosition))return false;if(!column.isTargetAvailable())column.target(lastTargetY!=null?lastTargetY:cabin.clientYTarget);return true;}
+    private int targetOffset(){
+        if(level!=null&&level.isClientSide())return clientOffsetTarget;var owner=getMovedContraption();if(owner==null||!(owner.getContraption() instanceof ElevatorContraption cabin))return (int)offset;var target=cabin.getCurrentTargetY(level);if(target==null)return (int)offset;lastTargetY=target;return worldPosition.getY()-target+cabin.getContactYOffset()-1;
+    }
+    @Override public float getMovementSpeed(){
+        int target=targetOffset();if(level!=null&&!level.isClientSide()&&target!=clientOffsetTarget){clientOffsetTarget=target;setChanged();sync();}
+        float difference=target-offset;float converted=Math.clamp(getSpeed()/256f,-1.99f,1.99f),limit=Math.abs(converted),acceleration=Mth.lerp(Math.abs(converted),.0075f,.0175f),braking=(float)Math.sqrt(2*Math.abs(difference)*acceleration);
+        float speed=Math.clamp(difference,-limit,limit);speed=Math.clamp(speed,previousSpeed-acceleration,previousSpeed+acceleration);speed=Math.clamp(speed,-braking,braking);arrived=Math.abs(difference)<.5f;return previousSpeed=speed;
+    }
+    @Override public void onSpeedChanged(float previous){setChanged();}
+    @Override protected void onSequenceContextChanged(SequencedGearshiftBlockEntity.SequenceContext previous,SequencePhase previousPhase){boolean queued=assembleNextTick;super.onSequenceContextChanged(previous,previousPhase);assembleNextTick=queued;}
+    public void clicked(){
+        if(mirrorParent!=null){if(level!=null&&LoadedLevelAccess.blockEntity(level,mirrorParent) instanceof ElevatorPulleyBlockEntity parent&&getAttachedContraption()!=null)parent.clicked();return;}
+        if(running||movedUuid!=null)disassemble();else requestAssembly();
+    }
+    @Override public boolean disassemble(){
+        var owner=getMovedContraption();var cabin=owner!=null&&owner.getContraption() instanceof ElevatorContraption current?current:null;var id=movedUuid;
+        if(owner!=null){if(!canDisassembleNow())return false;owner.setPoseBiasY(0);}
+        if(!super.disassemble())return false;
+        if(cabin!=null&&id!=null){var column=ElevatorColumn.get(level,cabin.getGlobalColumn());if(column!=null)column.release(id);}offset=-1;ropesRemoved=false;previousSpeed=0;arrived=true;pendingColumn=null;setChanged();sync();return true;
+    }
+    @Override protected boolean finishMirroring(ServerLevel server,BlockPos parent,UUID owner,int grid)throws AssemblyException{boolean complete=super.finishMirroring(server,parent,owner,grid);if(complete){offset=-1;ropesRemoved=false;setChanged();sync();}return complete;}
+    @Override public void attach(ControlledContraptionEntity entity){super.attach(entity);if(entity instanceof LinearContraptionEntity owner&&owner==getMovedContraption()&&owner.getContraption() instanceof ElevatorContraption cabin){if(level!=null&&!level.isClientSide())ensureColumn(owner,cabin);else ElevatorNetworking.requestFloors(owner);}}
+    private void triggerContact(ElevatorContraption cabin,int y){var column=ElevatorColumn.get(level,cabin.getGlobalColumn());if(column==null)return;var pos=column.contactAt(y);if(!LoadedLevelAccess.isLoaded(level,pos)||!(LoadedLevelAccess.blockEntity(level,pos) instanceof ElevatorContactBlockEntity contact)||!(LoadedLevelAccess.blockState(level,pos).getBlock() instanceof ElevatorContactBlock block))return;contact.activateBlock=true;contact.setChanged();block.scheduleActivation(level,pos);column.floorReached(contact.shortName);}
+    private void synchronize(ElevatorContraption cabin,ElevatorColumn column,LinearContraptionEntity owner,boolean force){
+        var target=cabin.getCurrentTargetY(level);int y=target==null?(int)Math.round(owner.getY())+cabin.getContactYOffset():target;cabin.clientYTarget=y;
+        if(force||namesVersion!=column.namesListVersion()||lastSyncedTarget!=y||lastSyncedArrived!=cabin.arrived){namesVersion=column.namesListVersion();cabin.namesList=column.compileNamesList();lastSyncedTarget=y;lastSyncedArrived=cabin.arrived;ElevatorNetworking.sendFloors(owner);}
+    }
+    public static void tick(Level level,BlockPos pos,BlockState state,ElevatorPulleyBlockEntity elevator){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, elevator)) {
+            if (!createTick.shouldTick()) return;
 
-	private float prevSpeed;
-	private boolean arrived;
-	private int clientOffsetTarget;
-	private boolean initialOffsetReceived;
-
-	public ElevatorPulleyBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		prevSpeed = 0;
-		arrived = true;
-		initialOffsetReceived = false;
-	}
-
-	private int getTargetOffset() {
-		if (level.isClientSide)
-			return clientOffsetTarget;
-		if (movedContraption == null || !(movedContraption.getContraption()instanceof ElevatorContraption ec))
-			return (int) offset;
-
-		Integer target = ec.getCurrentTargetY(level);
-		if (target == null)
-			return (int) offset;
-
-		return worldPosition.getY() - target + ec.contactYOffset - 1;
-	}
-
-	@Override
-	public void attach(ControlledContraptionEntity contraption) {
-		super.attach(contraption);
-		if (offset >= 0)
-			resetContraptionToOffset();
-		if (level.isClientSide) {
-			CatnipServices.NETWORK.sendToServer(new ElevatorFloorListPacket.RequestFloorList(contraption));
-			return;
-		}
-
-		if (contraption.getContraption()instanceof ElevatorContraption ec)
-			ElevatorColumn.getOrCreate(level, ec.getGlobalColumn())
-				.setActive(true);
-	}
-
-	@Override
-	public void tick() {
-		boolean wasArrived = arrived;
-		super.tick();
-
-		if (movedContraption == null)
-			return;
-		if (!(movedContraption.getContraption()instanceof ElevatorContraption ec))
-			return;
-		if (level.isClientSide())
-			ec.setClientYTarget(worldPosition.getY() - clientOffsetTarget + ec.contactYOffset - 1);
-
-		waitingForSpeedChange = false;
-		ec.arrived = wasArrived;
-
-		if (!arrived)
-			return;
-
-		double y = movedContraption.getY();
-		int targetLevel = Mth.floor(0.5f + y) + ec.contactYOffset;
-
-		Integer ecCurrentTargetY = ec.getCurrentTargetY(level);
-		if (ecCurrentTargetY != null)
-			targetLevel = ecCurrentTargetY;
-		if (level.isClientSide())
-			targetLevel = ec.clientYTarget;
-		if (!wasArrived && !level.isClientSide()) {
-			triggerContact(ec, targetLevel - ec.contactYOffset);
-			AllSoundEvents.CONTRAPTION_DISASSEMBLE.play(level, null, worldPosition.below((int) offset), 0.75f, 0.8f);
-		}
-
-		double diff = targetLevel - y - ec.contactYOffset;
-		if (Math.abs(diff) > 1f / 128)
-			diff *= 0.25f;
-		movedContraption.setPos(movedContraption.position()
-			.add(0, diff, 0));
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		if (level.isClientSide() || !arrived)
-			return;
-		if (movedContraption == null || !movedContraption.isAlive())
-			return;
-		if (!(movedContraption.getContraption()instanceof ElevatorContraption ec))
-			return;
-		if (getTargetOffset() != (int) offset)
-			return;
-
-		double y = movedContraption.getY();
-		int targetLevel = Mth.floor(0.5f + y);
-		triggerContact(ec, targetLevel);
-	}
-
-	private void triggerContact(ElevatorContraption ec, int targetLevel) {
-		ColumnCoords coords = ec.getGlobalColumn();
-		ElevatorColumn column = ElevatorColumn.get(level, coords);
-		if (column == null)
-			return;
-
-		BlockPos contactPos = column.contactAt(targetLevel + ec.contactYOffset);
-		if (!level.isLoaded(contactPos))
-			return;
-		BlockState contactState = level.getBlockState(contactPos);
-		if (!AllBlocks.ELEVATOR_CONTACT.has(contactState))
-			return;
-		if (contactState.getValue(ElevatorContactBlock.POWERING))
-			return;
-
-		ElevatorContactBlock ecb = AllBlocks.ELEVATOR_CONTACT.get();
-		ecb.withBlockEntityDo(level, contactPos, be -> be.activateBlock = true);
-		ecb.scheduleActivation(level, contactPos);
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(compound, registries, clientPacket);
-		if (clientPacket)
-			compound.putInt("ClientTarget", clientOffsetTarget);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-		if (!clientPacket)
-			return;
-
-		clientOffsetTarget = compound.getInt("ClientTarget");
-		if (initialOffsetReceived)
-			return;
-
-		offset = compound.getFloat("Offset");
-		initialOffsetReceived = true;
-		resetContraptionToOffset();
-	}
-
-	@Override
-	public float getMovementSpeed() {
-		int currentTarget = getTargetOffset();
-
-		if (!level.isClientSide() && currentTarget != clientOffsetTarget) {
-			clientOffsetTarget = currentTarget;
-			sendData();
-		}
-
-		float diff = currentTarget - offset;
-		float movementSpeed = Mth.clamp(convertToLinear(getSpeed() * 2), -1.99f, 1.99f);
-		float rpmLimit = Math.abs(movementSpeed);
-
-		float configacc = Mth.lerp(Math.abs(movementSpeed), 0.0075f, 0.0175f);
-		float decelleration = (float) Math.sqrt(2 * Math.abs(diff) * configacc);
-
-		float speed = diff;
-		speed = Mth.clamp(speed, -rpmLimit, rpmLimit);
-		speed = Mth.clamp(speed, prevSpeed - configacc, prevSpeed + configacc);
-		speed = Mth.clamp(speed, -decelleration, decelleration);
-
-		arrived = Math.abs(diff) < 0.5f;
-
-		if (speed > 1 / 1024f && !level.isClientSide())
-			setChanged();
-
-		return prevSpeed = speed;
-	}
-
-	@Override
-	protected boolean shouldCreateRopes() {
-		return false;
-	}
-
-	@Override
-	public void disassemble() {
-		if (movedContraption != null && movedContraption.getContraption()instanceof ElevatorContraption ec) {
-			ElevatorColumn column = ElevatorColumn.get(level, ec.getGlobalColumn());
-			if (column != null)
-				column.setActive(false);
-		}
-
-		super.disassemble();
-		offset = -1;
-		sendData();
-	}
-
-	public void clicked() {
-		if (isPassive() && level.getBlockEntity(mirrorParent)instanceof ElevatorPulleyBlockEntity parent) {
-			parent.clicked();
-			return;
-		}
-
-		if (running)
-			disassemble();
-		else
-			assembleNextTick = true;
-	}
-
-	@Override
-	protected boolean moveAndCollideContraption() {
-		if (arrived)
-			return false;
-		super.moveAndCollideContraption();
-		return false;
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		registerAwardables(behaviours, AllAdvancements.CONTRAPTION_ACTORS);
-	}
-
-	@Override
-	protected void assemble() throws AssemblyException {
-		if (!(level.getBlockState(worldPosition)
-			.getBlock() instanceof ElevatorPulleyBlock))
-			return;
-		if (getSpeed() == 0)
-			return;
-
-		int maxLength = AllConfigs.server().kinetics.maxRopeLength.get();
-		int i = 1;
-		while (i <= maxLength) {
-			BlockPos ropePos = worldPosition.below(i);
-			BlockState ropeState = level.getBlockState(ropePos);
-			if (!ropeState.getCollisionShape(level, ropePos)
-				.isEmpty()
-				&& !ropeState.canBeReplaced()) {
-				break;
-			}
-			++i;
-		}
-
-		offset = i - 1;
-		forceMove = true;
-
-		// Collect Construct
-		if (!level.isClientSide && mirrorParent == null) {
-			needsContraption = false;
-			BlockPos anchor = worldPosition.below(Mth.floor(offset + 1));
-			offset = Mth.floor(offset);
-			ElevatorContraption contraption = new ElevatorContraption((int) offset);
-
-			float offsetOnSucess = offset;
-			offset = 0;
-
-			boolean canAssembleStructure = contraption.assemble(level, anchor);
-			if (!canAssembleStructure && getSpeed() > 0)
-				return;
-
-			if (!contraption.getBlocks()
-				.isEmpty()) {
-				offset = offsetOnSucess;
-				contraption.removeBlocksFromWorld(level, BlockPos.ZERO);
-				movedContraption = ControlledContraptionEntity.create(level, this, contraption);
-				movedContraption.setPos(anchor.getX(), anchor.getY(), anchor.getZ());
-				contraption.maxContactY = worldPosition.getY() + contraption.contactYOffset - 1;
-				contraption.minContactY = contraption.maxContactY - maxLength;
-				level.addFreshEntity(movedContraption);
-				forceMove = true;
-				needsContraption = true;
-
-				if (contraption.containsBlockBreakers())
-					award(AllAdvancements.CONTRAPTION_ACTORS);
-
-				for (BlockPos pos : contraption.createColliders(level, Direction.UP)) {
-					if (pos.getY() != 0)
-						continue;
-					pos = pos.offset(anchor);
-					if (level.getBlockEntity(new BlockPos(pos.getX(), worldPosition.getY(),
-						pos.getZ())) instanceof ElevatorPulleyBlockEntity pbe)
-						pbe.startMirroringOther(worldPosition);
-				}
-
-				ElevatorColumn column = ElevatorColumn.getOrCreate(level, contraption.getGlobalColumn());
-				int target = (int) (worldPosition.getY() + contraption.contactYOffset - 1 - offset);
-				column.target(target);
-				column.gatherAll();
-				column.setActive(true);
-				column.markDirty();
-
-				contraption.broadcastFloorData(level, column.contactAt(target));
-				clientOffsetTarget = column.getTargetedYLevel();
-				arrived = true;
-			}
-		}
-
-		clientOffsetDiff = 0;
-		running = true;
-		sendData();
-	}
-
-	@Override
-	public void onSpeedChanged(float previousSpeed) {
-		setChanged();
-	}
-
-	@Override
-	protected MovementMode getMovementMode() {
-		return MovementMode.MOVE_NEVER_PLACE;
-	}
-
+        boolean wasArrived=elevator.arrived;elevator.waitingForSpeedChange=false;var before=elevator.getMovedContraption();
+        if(!level.isClientSide()&&before!=null&&before.getContraption() instanceof ElevatorContraption cabin&&!elevator.ensureColumn(before,cabin)){before.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);return;}
+        if(before!=null)elevator.arrived=Math.abs(elevator.targetOffset()-elevator.offset)<.5f;PulleyBlockEntity.tick(level,pos,state,elevator);var owner=elevator.getMovedContraption();if(owner==null||!(owner.getContraption() instanceof ElevatorContraption cabin))return;
+        if(level.isClientSide()){cabin.setClientYTarget(elevator.worldPosition.getY()-elevator.clientOffsetTarget+cabin.getContactYOffset()-1);cabin.arrived=wasArrived;ElevatorNetworking.requestFloors(owner);return;}
+        cabin.arrived=wasArrived;
+        if(owner.isStalled()||ContraptionAssemblyGraph.isFrozen(owner)||elevator.pendingDisassembly||elevator.recoveringAssembly||elevator.lastException!=null)return;
+        var target=cabin.getCurrentTargetY(level);if(elevator.arrived&&target!=null){double difference=target-cabin.getContactYOffset()-owner.getY();if(Math.abs(difference)>1f/128)difference*=.25;owner.setPoseBiasY((float)(owner.getPoseBiasY()+difference));if(!wasArrived||level.getGameTime()%10==0)elevator.triggerContact(cabin,target);if(!wasArrived)level.playSound(null,owner.blockPosition(),AllSoundEvents.CONTRAPTION_DISASSEMBLE,SoundSource.BLOCKS,.75f,.8f);}
+        var column=ElevatorColumn.get(level,cabin.getGlobalColumn());if(column!=null){elevator.synchronize(cabin,column,owner,false);}
+    
+        }
+    }
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);out.putFloat("ElevatorPreviousSpeed",previousSpeed);out.putBoolean("ElevatorArrived",arrived);out.putInt("ClientTarget",clientOffsetTarget);if(lastTargetY!=null)out.putInt("ElevatorTargetY",lastTargetY);}
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);previousSpeed=in.getFloatOr("ElevatorPreviousSpeed",0);if(!Float.isFinite(previousSpeed))previousSpeed=0;arrived=in.getBooleanOr("ElevatorArrived",true);clientOffsetTarget=in.getIntOr("ClientTarget",0);lastTargetY=in.getInt("ElevatorTargetY").orElse(null);movementMode=MovementMode.MOVE_NEVER_PLACE;if(!running&&movedUuid==null&&in.read("Offset",com.mojang.serialization.Codec.FLOAT).isEmpty())offset=-1;}
+    @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
+        ids.clear();
+        ids.add("contraption_actors");
+    }
 }

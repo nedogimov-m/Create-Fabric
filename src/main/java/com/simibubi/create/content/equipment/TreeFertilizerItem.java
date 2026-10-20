@@ -1,122 +1,30 @@
 package com.simibubi.create.content.equipment;
 
-
-import net.createmod.catnip.levelWrappers.PlacementSimulationServerLevel;
-import net.minecraft.core.BlockPos;
+import com.simibubi.create.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.List;
+import net.minecraft.core.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.item.BoneMealItem;
-import net.minecraft.world.item.Item;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.BonemealableBlock;
-import net.minecraft.world.level.block.MangrovePropaguleBlock;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
-public class TreeFertilizerItem extends Item {
-
-	public TreeFertilizerItem(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public InteractionResult useOn(UseOnContext context) {
-		BlockState state = context.getLevel()
-			.getBlockState(context.getClickedPos());
-		Block block = state.getBlock();
-		if (block instanceof BonemealableBlock bonemealableBlock && state.is(BlockTags.SAPLINGS)) {
-
-			if (state.getOptionalValue(MangrovePropaguleBlock.HANGING)
-				.orElse(false))
-				return InteractionResult.PASS;
-
-			if (context.getLevel().isClientSide) {
-				BoneMealItem.addGrowthParticles(context.getLevel(), context.getClickedPos(), 100);
-				return InteractionResult.SUCCESS;
-			}
-
-			BlockPos saplingPos = context.getClickedPos();
-			TreesDreamWorld world = new TreesDreamWorld((ServerLevel) context.getLevel(), saplingPos);
-
-			for (BlockPos pos : BlockPos.betweenClosed(-1, 0, -1, 1, 0, 1)) {
-				if (context.getLevel()
-					.getBlockState(saplingPos.offset(pos))
-					.getBlock() == block)
-					world.setBlockAndUpdate(pos.above(10), withStage(state, 1));
-			}
-
-			bonemealableBlock.performBonemeal(world, world.getRandom(), BlockPos.ZERO.above(10),
-					withStage(state, 1));
-
-			for (BlockPos pos : world.blocksAdded.keySet()) {
-				BlockPos actualPos = pos.offset(saplingPos).below(10);
-				BlockState newState = world.blocksAdded.get(pos);
-
-				// Don't replace Bedrock
-				if (context.getLevel()
-					.getBlockState(actualPos)
-					.getDestroySpeed(context.getLevel(), actualPos) == -1)
-					continue;
-				// Don't replace solid blocks with leaves
-				if (!newState.isRedstoneConductor(world, pos)
-					&& !context.getLevel()
-						.getBlockState(actualPos)
-						.getCollisionShape(context.getLevel(), actualPos)
-						.isEmpty())
-					continue;
-
-				context.getLevel().destroyBlock(actualPos, true);
-				context.getLevel()
-					.setBlockAndUpdate(actualPos, newState);
-			}
-
-			if (context.getPlayer() != null && !context.getPlayer()
-				.isCreative())
-				context.getItemInHand()
-					.shrink(1);
-			return InteractionResult.SUCCESS;
-
-		}
-
-		return super.useOn(context);
-	}
-
-	private BlockState withStage(BlockState original, int stage) {
-		if (!original.hasProperty(BlockStateProperties.STAGE))
-			return original;
-		return original.setValue(BlockStateProperties.STAGE, 1);
-	}
-
-	private static class TreesDreamWorld extends PlacementSimulationServerLevel {
-		private final BlockState soil;
-
-		protected TreesDreamWorld(ServerLevel wrapped, BlockPos saplingPos) {
-			super(wrapped);
-			BlockState stateUnderSapling = wrapped.getBlockState(saplingPos.below());
-
-			// Tree features don't seem to succeed with mud as soil
-			if (stateUnderSapling.is(BlockTags.DIRT))
-				stateUnderSapling = Blocks.DIRT.defaultBlockState();
-
-			soil = stateUnderSapling;
-		}
-
-		@Override
-		public BlockState getBlockState(BlockPos pos) {
-			if (pos.getY() <= 9)
-				return soil;
-			return super.getBlockState(pos);
-		}
-
-		@Override
-		public boolean setBlock(BlockPos pos, BlockState newState, int flags) {
-			if (newState.getBlock() == Blocks.PODZOL)
-				return true;
-			return super.setBlock(pos, newState, flags);
-		}
-	}
-
+/** Source detached native bonemeal simulation/replay, not repeated ordinary bonemeal. */
+public final class TreeFertilizerItem extends Item {
+ public TreeFertilizerItem(Properties properties){super(properties);}
+ private static BlockState staged(BlockState state){return state.hasProperty(BlockStateProperties.STAGE)?state.setValue(BlockStateProperties.STAGE,1):state;}
+ @Override public InteractionResult useOn(UseOnContext context){
+  var level=context.getLevel();var sapling=context.getClickedPos();var state=LoadedLevelAccess.blockState(level,sapling);var block=state.getBlock();if(!(block instanceof BonemealableBlock bonemealable)||!state.is(BlockTags.SAPLINGS)||state.getOptionalValue(MangrovePropaguleBlock.HANGING).orElse(false)||TreeFertilizerSimulation.active(level)!=null)return InteractionResult.PASS;
+  var player=context.getPlayer();if(player!=null&&(player.isSpectator()||!player.mayBuild()||!level.mayInteract(player,sapling)))return InteractionResult.PASS;
+  if(level.isClientSide()){BoneMealItem.addGrowthParticles(level,sapling,100);return InteractionResult.SUCCESS;}if(!(level instanceof ServerLevel server)||!LoadedLevelAccess.isLoaded(level,sapling.below()))return InteractionResult.PASS;
+  var soil=LoadedLevelAccess.blockState(level,sapling.below());if(soil.is(BlockTags.SUBSTRATE_OVERWORLD))soil=Blocks.DIRT.defaultBlockState();var starts=new java.util.LinkedHashMap<BlockPos,BlockState>();for(var offset:BlockPos.betweenClosed(-1,0,-1,1,0,1))if(LoadedLevelAccess.blockState(level,sapling.offset(offset)).getBlock()==block)starts.put(offset.above(10).immutable(),staged(state));
+  List<TreeFertilizerSimulation.Placement> placements;TreeFertilizerSimulation simulation;
+  try(var dream=TreeFertilizerSimulation.open(server,soil)){simulation=dream;starts.forEach(dream::setBlock);bonemealable.performBonemeal(server,dream.random,TreeFertilizerSimulation.ORIGIN,staged(state),BonemealSource.INTERACTION);placements=dream.placements();}
+  simulation.replay(placements,sapling,player);if(player!=null&&!player.isCreative())context.getItemInHand().shrink(1);return InteractionResult.SUCCESS;
+ }
+ public static void register(){net.fabricmc.fabric.api.creativetab.v1.CreativeModeTabEvents.modifyOutputEvent(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.CREATIVE_MODE_TAB,Create.asResource("base"))).register(output->output.accept(AllItems.TREE_FERTILIZER));}
 }

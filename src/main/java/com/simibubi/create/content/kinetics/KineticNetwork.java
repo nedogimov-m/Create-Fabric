@@ -34,6 +34,7 @@ public class KineticNetwork {
 	}
 
 	public void addSilently(KineticBlockEntity be, float lastCapacity, float lastStress) {
+		enlist(be);
 		if (members.containsKey(be))
 			return;
 		if (be.isSource()) {
@@ -56,6 +57,7 @@ public class KineticNetwork {
 	}
 
 	public void add(KineticBlockEntity be) {
+		enlist(be);
 		if (members.containsKey(be))
 			return;
 		if (be.isSource())
@@ -66,11 +68,13 @@ public class KineticNetwork {
 	}
 
 	public void updateCapacityFor(KineticBlockEntity be, float capacity) {
+		enlist(be);
 		sources.put(be, capacity);
 		updateCapacity();
 	}
 
 	public void updateStressFor(KineticBlockEntity be, float stress) {
+		enlist(be);
 		members.put(be, stress);
 		updateStress();
 	}
@@ -78,14 +82,12 @@ public class KineticNetwork {
 	public void remove(KineticBlockEntity be) {
 		if (!members.containsKey(be))
 			return;
-		if (be.isSource())
-			sources.remove(be);
+		sources.remove(be);
 		members.remove(be);
 		be.updateFromNetwork(0, 0, 0);
 
 		if (members.isEmpty()) {
-			TorquePropagator.networks.get(be.getLevel())
-				.remove(this.id);
+			TorquePropagator.removeNetwork(be.getLevel(), this);
 			return;
 		}
 
@@ -96,8 +98,8 @@ public class KineticNetwork {
 	}
 
 	public void sync() {
-		for (KineticBlockEntity be : members.keySet())
-			updateFromNetwork(be);
+		for (KineticBlockEntity be : java.util.List.copyOf(members.keySet()))
+			if (members.containsKey(be) && isLoadedOwner(be)) updateFromNetwork(be);
 	}
 
 	private void updateFromNetwork(KineticBlockEntity be) {
@@ -135,11 +137,11 @@ public class KineticNetwork {
 		for (Iterator<KineticBlockEntity> iterator = sources.keySet()
 			.iterator(); iterator.hasNext();) {
 			KineticBlockEntity be = iterator.next();
-			if (be.getLevel()
-				.getBlockEntity(be.getBlockPos()) != be) {
+			if (!isLoadedOwner(be)) {
 				iterator.remove();
 				continue;
 			}
+			enlist(be);
 			presentCapacity += getActualCapacityOf(be);
 		}
 		float newMaxStress = presentCapacity + unloadedCapacity;
@@ -151,11 +153,11 @@ public class KineticNetwork {
 		for (Iterator<KineticBlockEntity> iterator = members.keySet()
 			.iterator(); iterator.hasNext();) {
 			KineticBlockEntity be = iterator.next();
-			if (be.getLevel()
-				.getBlockEntity(be.getBlockPos()) != be) {
+			if (!isLoadedOwner(be)) {
 				iterator.remove();
 				continue;
 			}
+			enlist(be);
 			presentStress += getActualStressOf(be);
 		}
 		float newStress = presentStress + unloadedStress;
@@ -168,6 +170,43 @@ public class KineticNetwork {
 
 	public float getActualStressOf(KineticBlockEntity be) {
 		return members.get(be) * getStressMultiplierForSpeed(be.getTheoreticalSpeed());
+	}
+
+	private static void enlist(KineticBlockEntity be) {
+		if (be.getLevel() instanceof net.minecraft.server.level.ServerLevel server && !be.isVirtual()
+				&& KineticNetworks.isLive(server, be)) KineticNetworks.track(server, be);
+	}
+
+	/** Loaded identity check; addon maps cannot turn a stale owner into a chunk ticket. */
+	private static boolean isLoadedOwner(KineticBlockEntity be) {
+		return be.getLevel() != null && !be.isRemoved()
+			&& com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(be.getLevel(), be.getBlockPos()) == be;
+	}
+
+	/** Remove an unloaded owner while retaining its saved source contributions exactly once. */
+	void unload(KineticBlockEntity be) {
+		Float oldImpact = members.remove(be);
+		if (oldImpact != null) {
+			unloadedMembers++;
+			unloadedStress += oldImpact * getStressMultiplierForSpeed(be.getTheoreticalSpeed());
+		}
+		Float oldCapacity = sources.remove(be);
+		if (oldCapacity != null)
+			unloadedCapacity += oldCapacity * getStressMultiplierForSpeed(be.getGeneratedSpeed());
+	}
+
+	/** Silent canonical rebinding avoids publishing a transient stop inside one solved update. */
+	void unlinkForRebind(KineticBlockEntity be) {
+		members.remove(be);
+		sources.remove(be);
+		if (members.isEmpty() && unloadedMembers == 0)
+			TorquePropagator.removeNetwork(be.getLevel(), this);
+	}
+
+	void linkForRebind(KineticBlockEntity be) {
+		if (members.containsKey(be)) return;
+		members.put(be, be.calculateStressApplied());
+		if (be.isSource()) sources.put(be, be.calculateAddedStressCapacity());
 	}
 
 	private static float getStressMultiplierForSpeed(float speed) {

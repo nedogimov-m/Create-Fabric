@@ -1,22 +1,10 @@
 package com.simibubi.create.infrastructure.worldgen;
-
+import com.mojang.serialization.MapCodec;
 import com.simibubi.create.Create;
-
+import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.level.levelgen.feature.Feature;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.neoforge.registries.DeferredHolder;
-import net.neoforged.neoforge.registries.DeferredRegister;
-
-import org.jetbrains.annotations.ApiStatus.Internal;
-
+/** Actual native feature type; configured data lives in the dynamic Feature registry. */
 public class AllFeatures {
-	private static final DeferredRegister<Feature<?>> REGISTER = DeferredRegister.create(BuiltInRegistries.FEATURE, Create.ID);
-
-	public static final DeferredHolder<Feature<?>, LayeredOreFeature> LAYERED_ORE = REGISTER.register("layered_ore", () -> new LayeredOreFeature());
-
-	@Internal
-	public static void register(IEventBus modEventBus) {
-		REGISTER.register(modEventBus);
-	}
+    public static final MapCodec<LayeredOreFeature> LAYERED_ORE=Registry.register(BuiltInRegistries.FEATURE_TYPE,Create.asResource("layered_ore"),LayeredOreFeature.CODEC);
+    public static void register(){}
 }

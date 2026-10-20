@@ -13,11 +13,8 @@ import com.mojang.serialization.MapCodec;
 import com.simibubi.create.content.logistics.item.filter.attribute.AllItemAttributeTypes;
 import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttribute;
 import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttributeType;
-import com.simibubi.create.foundation.utility.CreateLang;
 
 import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
-import net.createmod.catnip.lang.Lang;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -50,8 +47,8 @@ public record ShulkerFillLevelAttribute(ShulkerLevels levels) implements ItemAtt
 	@Override
 	public Object[] getTranslationParameters() {
 		String parameter = "";
-		if (levels != null)
-			parameter = CreateLang.translateDirect("item_attributes." + getTranslationKey() + "." + levels.key).getString();
+        if (levels != null)
+            parameter = net.minecraft.network.chat.Component.translatable("create.item_attributes." + getTranslationKey() + "." + levels.key).getString();
 		return new Object[]{parameter};
 	}
 
@@ -60,13 +57,13 @@ public record ShulkerFillLevelAttribute(ShulkerLevels levels) implements ItemAtt
 		return AllItemAttributeTypes.SHULKER_FILL_LEVEL;
 	}
 
-	enum ShulkerLevels implements StringRepresentable {
+    public enum ShulkerLevels implements StringRepresentable {
 		EMPTY("empty", amount -> amount == 0),
 		PARTIAL("partial", amount -> amount > 0 && amount < Integer.MAX_VALUE),
 		FULL("full", amount -> amount == Integer.MAX_VALUE);
 
-		public static final Codec<ShulkerLevels> CODEC = StringRepresentable.fromValues(ShulkerLevels::values);
-		public static final StreamCodec<ByteBuf, ShulkerLevels> STREAM_CODEC = CatnipStreamCodecBuilders.ofEnum(ShulkerLevels.class);
+		public static final Codec<ShulkerLevels> CODEC = StringRepresentable.fromEnum(ShulkerLevels::values);
+		public static final StreamCodec<ByteBuf, ShulkerLevels> STREAM_CODEC = net.minecraft.network.codec.ByteBufCodecs.fromCodec(CODEC);
 
 		private final Predicate<Integer> requiredSize;
 		private final String key;
@@ -87,7 +84,7 @@ public record ShulkerFillLevelAttribute(ShulkerLevels levels) implements ItemAtt
 
 		@Override
 		public String getSerializedName() {
-			return Lang.asId(name());
+			return name().toLowerCase(java.util.Locale.ROOT);
 		}
 
 		public boolean canApply(ItemStack testStack) {
@@ -98,8 +95,8 @@ public record ShulkerFillLevelAttribute(ShulkerLevels levels) implements ItemAtt
 				return requiredSize.test(0);
 			if (testStack.has(DataComponents.CONTAINER_LOOT))
 				return false;
-			if (contents.getSlots() > 0) {
-				int rawSize = contents.getSlots();
+			if (contents.size() > 0) {
+				int rawSize = contents.size();
 				if (rawSize < 27)
 					return requiredSize.test(rawSize);
 

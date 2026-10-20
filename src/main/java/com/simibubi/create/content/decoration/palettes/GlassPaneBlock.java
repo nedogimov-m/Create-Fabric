@@ -1,11 +1,3 @@
 package com.simibubi.create.content.decoration.palettes;
-
-import net.minecraft.world.level.block.IronBarsBlock;
-
-public class GlassPaneBlock extends IronBarsBlock {
-
-	public GlassPaneBlock(Properties builder) {
-		super(builder);
-	}
-
-}
+/** Original native cross-collision/waterlogged pane, not a full-block facade. */
+public class GlassPaneBlock extends net.minecraft.world.level.block.IronBarsBlock {public GlassPaneBlock(Properties properties){super(properties);}}

@@ -8,6 +8,10 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 public class GearshiftBlockEntity extends SplitShaftBlockEntity {
 
+	public GearshiftBlockEntity(BlockPos pos, BlockState state) {
+		this(com.simibubi.create.AllBlockEntityTypes.GEARSHIFT, pos, state);
+	}
+
 	public GearshiftBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
 		super(type, pos, state);
 	}

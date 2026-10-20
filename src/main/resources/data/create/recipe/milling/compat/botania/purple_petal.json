@@ -1,0 +1,20 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "#botania:petals/purple"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "id": "minecraft:purple_dye"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "botania"
+      ]
+    }
+  ]
+}

@@ -64,7 +64,7 @@ public final class SingletonItemAttribute implements ItemAttribute {
 
 		@Override
 		public MapCodec<? extends ItemAttribute> codec() {
-			return Codec.unit(attribute).fieldOf("value");
+            return com.mojang.serialization.MapCodec.unit(attribute).codec().fieldOf("value");
 		}
 
 		@Override

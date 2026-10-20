@@ -14,11 +14,10 @@ import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttribute
 import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttributeType;
 
 import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.ItemStack;
@@ -29,9 +28,7 @@ public class InItemGroupAttribute implements ItemAttribute {
 			.xmap(InItemGroupAttribute::new, i -> i.group)
 			.fieldOf("value");
 
-	public static final StreamCodec<ByteBuf, InItemGroupAttribute> STREAM_CODEC = CatnipStreamCodecBuilders.nullable(ResourceLocation.STREAM_CODEC)
-		.map(i -> new InItemGroupAttribute(BuiltInRegistries.CREATIVE_MODE_TAB.get(i)),
-			i -> i.group == null ? null : BuiltInRegistries.CREATIVE_MODE_TAB.getKey(i.group));
+	public static final StreamCodec<RegistryFriendlyByteBuf, InItemGroupAttribute> STREAM_CODEC=net.minecraft.network.codec.ByteBufCodecs.fromCodecWithRegistries(CODEC.codec());
 
 	@Nullable
 	private CreativeModeTab group;
@@ -107,9 +104,10 @@ public class InItemGroupAttribute implements ItemAttribute {
 		public List<ItemAttribute> getAllAttributes(ItemStack stack, Level level) {
 			List<ItemAttribute> list = new ArrayList<>();
 
-			for (CreativeModeTab tab : CreativeModeTabs.tabs()) {
-				if (tab.getType() == CreativeModeTab.Type.CATEGORY && tabContainsItem(tab, stack)) {
-					list.add(new InItemGroupAttribute(tab));
+            for (CreativeModeTab tab : CreativeModeTabs.allTabs()) {
+            var attribute=new InItemGroupAttribute(tab);
+            if (tab.getType() == CreativeModeTab.Type.CATEGORY && attribute.appliesTo(stack,level)) {
+                list.add(attribute);
 				}
 			}
 

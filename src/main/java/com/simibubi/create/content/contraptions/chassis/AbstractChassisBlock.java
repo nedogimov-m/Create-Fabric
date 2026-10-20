@@ -1,189 +1,67 @@
 package com.simibubi.create.content.contraptions.chassis;
 
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllItems;
-import com.simibubi.create.AllSoundEvents;
+import com.simibubi.create.*;
 import com.simibubi.create.api.contraption.transformable.TransformableBlock;
 import com.simibubi.create.content.contraptions.StructureTransform;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.ItemInteractionResult;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Mirror;
-import net.minecraft.world.level.block.RotatedPillarBlock;
-import net.minecraft.world.level.block.Rotation;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.neoforge.common.Tags;
-
-public abstract class AbstractChassisBlock extends RotatedPillarBlock implements IWrenchable, IBE<ChassisBlockEntity>, TransformableBlock {
-
-	public AbstractChassisBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (!player.mayBuild())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		boolean isSlimeBall = stack.is(Tags.Items.SLIMEBALLS) || AllItems.SUPER_GLUE.isIn(stack);
-
-		BooleanProperty affectedSide = getGlueableSide(state, hitResult.getDirection());
-		if (affectedSide == null)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		if (isSlimeBall && state.getValue(affectedSide)) {
-			for (Direction face : Iterate.directions) {
-				BooleanProperty glueableSide = getGlueableSide(state, face);
-				if (glueableSide != null && !state.getValue(glueableSide)
-					&& glueAllowedOnSide(level, pos, state, face)) {
-					if (level.isClientSide) {
-						Vec3 vec = hitResult.getLocation();
-						level.addParticle(ParticleTypes.ITEM_SLIME, vec.x, vec.y, vec.z, 0, 0, 0);
-						return ItemInteractionResult.SUCCESS;
-					}
-					AllSoundEvents.SLIME_ADDED.playOnServer(level, pos, .5f, 1);
-					state = state.setValue(glueableSide, true);
-				}
-			}
-			if (!level.isClientSide)
-				level.setBlockAndUpdate(pos, state);
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		if ((!stack.isEmpty() || !player.isShiftKeyDown()) && !isSlimeBall)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		if (state.getValue(affectedSide) == isSlimeBall)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		if (!glueAllowedOnSide(level, pos, state, hitResult.getDirection()))
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		if (level.isClientSide) {
-			Vec3 vec = hitResult.getLocation();
-			level.addParticle(ParticleTypes.ITEM_SLIME, vec.x, vec.y, vec.z, 0, 0, 0);
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		AllSoundEvents.SLIME_ADDED.playOnServer(level, pos, .5f, 1);
-		level.setBlockAndUpdate(pos, state.setValue(affectedSide, isSlimeBall));
-		return ItemInteractionResult.SUCCESS;
-	}
-
-	@Override
-	public BlockState rotate(BlockState state, Rotation rotation) {
-		if (rotation == Rotation.NONE)
-			return state;
-
-		BlockState rotated = super.rotate(state, rotation);
-		for (Direction face : Iterate.directions) {
-			BooleanProperty glueableSide = getGlueableSide(rotated, face);
-			if (glueableSide != null)
-				rotated = rotated.setValue(glueableSide, false);
-		}
-
-		for (Direction face : Iterate.directions) {
-			BooleanProperty glueableSide = getGlueableSide(state, face);
-			if (glueableSide == null || !state.getValue(glueableSide))
-				continue;
-			Direction rotatedFacing = rotation.rotate(face);
-			BooleanProperty rotatedGlueableSide = getGlueableSide(rotated, rotatedFacing);
-			if (rotatedGlueableSide != null)
-				rotated = rotated.setValue(rotatedGlueableSide, true);
-		}
-
-		return rotated;
-	}
-
-	@Override
-	public BlockState mirror(BlockState state, Mirror mirrorIn) {
-		if (mirrorIn == Mirror.NONE)
-			return state;
-
-		BlockState mirrored = state;
-		for (Direction face : Iterate.directions) {
-			BooleanProperty glueableSide = getGlueableSide(mirrored, face);
-			if (glueableSide != null)
-				mirrored = mirrored.setValue(glueableSide, false);
-		}
-
-		for (Direction face : Iterate.directions) {
-			BooleanProperty glueableSide = getGlueableSide(state, face);
-			if (glueableSide == null || !state.getValue(glueableSide))
-				continue;
-			Direction mirroredFacing = mirrorIn.mirror(face);
-			BooleanProperty mirroredGlueableSide = getGlueableSide(mirrored, mirroredFacing);
-			if (mirroredGlueableSide != null)
-				mirrored = mirrored.setValue(mirroredGlueableSide, true);
-		}
-
-		return mirrored;
-	}
-
-	@Override
-	public BlockState transform(BlockState state, StructureTransform transform) {
-		if (transform.mirror != null) {
-			state = mirror(state, transform.mirror);
-		}
-
-		if (transform.rotationAxis == Direction.Axis.Y) {
-			return rotate(state, transform.rotation);
-		}
-		return transformInner(state, transform);
-	}
-
-	protected BlockState transformInner(BlockState state, StructureTransform transform) {
-		if (transform.rotation == Rotation.NONE)
-			return state;
-
-		BlockState rotated = state.setValue(AXIS, transform.rotateAxis(state.getValue(AXIS)));
-		AbstractChassisBlock block = (AbstractChassisBlock) state.getBlock();
-
-		for (Direction face : Iterate.directions) {
-			BooleanProperty glueableSide = block.getGlueableSide(rotated, face);
-			if (glueableSide != null)
-				rotated = rotated.setValue(glueableSide, false);
-		}
-
-		for (Direction face : Iterate.directions) {
-			BooleanProperty glueableSide = block.getGlueableSide(state, face);
-			if (glueableSide == null || !state.getValue(glueableSide))
-				continue;
-			Direction rotatedFacing = transform.rotateFacing(face);
-			BooleanProperty rotatedGlueableSide = block.getGlueableSide(rotated, rotatedFacing);
-			if (rotatedGlueableSide != null)
-				rotated = rotated.setValue(rotatedGlueableSide, true);
-		}
-
-		return rotated;
-	}
-
-	public abstract BooleanProperty getGlueableSide(BlockState state, Direction face);
-
-	protected boolean glueAllowedOnSide(BlockGetter world, BlockPos pos, BlockState state, Direction side) {
-		return true;
-	}
-
-	@Override
-	public Class<ChassisBlockEntity> getBlockEntityClass() {
-		return ChassisBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends ChassisBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.CHASSIS.get();
-	}
-
+/** Chassis glue is a face setting, separate from an explicit Super Glue entity. */
+public abstract class AbstractChassisBlock extends RotatedPillarBlock implements EntityBlock,TransformableBlock {
+    public static final TagKey<Item> SLIMEBALLS=TagKey.create(Registries.ITEM,Identifier.fromNamespaceAndPath("c","slimeballs"));
+    protected AbstractChassisBlock(Properties properties){super(properties.strength(2).sound(SoundType.WOOD));}
+    public abstract BooleanProperty getGlueableSide(BlockState state,Direction face);
+    public boolean glueAllowedOnSide(BlockGetter level,BlockPos pos,BlockState state,Direction side){return true;}
+    /** Used by both native glue input paths to defer exactly the same permitted face interaction. */
+    public boolean handlesGlueUse(BlockState state,Direction side){return getGlueableSide(state,side)!=null;}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){
+        if(!player.mayBuild()||player.isSpectator()||!level.mayInteract(player,pos))return InteractionResult.TRY_WITH_EMPTY_HAND;
+        var property=getGlueableSide(state,hit.getDirection());if(property==null)return InteractionResult.TRY_WITH_EMPTY_HAND;
+        boolean glue=stack.is(SLIMEBALLS)||stack.is(Items.SLIME_BALL)||stack.is(AllItems.SUPER_GLUE);
+        if(glue&&state.getValue(property)){
+            var next=state;for(var side:Direction.values()){var flag=getGlueableSide(state,side);if(flag!=null&&!next.getValue(flag)&&glueAllowedOnSide(level,pos,state,side)){next=next.setValue(flag,true);if(!level.isClientSide())level.playSound(null,pos,AllSoundEvents.SLIME_ADDED,SoundSource.BLOCKS,.5f,1);}}
+            if(level.isClientSide()){if(next!=state){var point=hit.getLocation();level.addParticle(ParticleTypes.ITEM_SLIME,point.x,point.y,point.z,0,0,0);}}else if(next!=state)level.setBlock(pos,next,Block.UPDATE_ALL);
+            return InteractionResult.SUCCESS;
+        }
+        if((!stack.isEmpty()||!player.isShiftKeyDown())&&!glue||state.getValue(property)==glue||!glueAllowedOnSide(level,pos,state,hit.getDirection()))return InteractionResult.TRY_WITH_EMPTY_HAND;
+        if(level.isClientSide()){var point=hit.getLocation();level.addParticle(ParticleTypes.ITEM_SLIME,point.x,point.y,point.z,0,0,0);}else{level.playSound(null,pos,AllSoundEvents.SLIME_ADDED,SoundSource.BLOCKS,.5f,1);level.setBlock(pos,state.setValue(property,glue),Block.UPDATE_ALL);}
+        return InteractionResult.SUCCESS;
+    }
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){return useItemOn(ItemStack.EMPTY,state,level,pos,player,InteractionHand.MAIN_HAND,hit)==InteractionResult.TRY_WITH_EMPTY_HAND?InteractionResult.PASS:InteractionResult.SUCCESS;}
+    @Override protected BlockState rotate(BlockState state,Rotation rotation){return transformFaces(state,super.rotate(state,rotation),rotation::rotate);}
+    @Override protected BlockState mirror(BlockState state,Mirror mirror){return transformFaces(state,state,mirror::mirror);}
+    private BlockState transformFaces(BlockState original,BlockState transformed,java.util.function.UnaryOperator<Direction> transform){
+        var next=transformed;for(var face:Direction.values()){var flag=getGlueableSide(next,face);if(flag!=null)next=next.setValue(flag,false);}
+        for(var face:Direction.values()){var flag=getGlueableSide(original,face);if(flag==null||!original.getValue(flag))continue;var rotated=getGlueableSide(next,transform.apply(face));if(rotated!=null)next=next.setValue(rotated,true);}
+        return next;
+    }
+    @Override public BlockState transform(BlockState state,StructureTransform transform){
+        if(transform.mirror!=null)state=mirror(state,transform.mirror);
+        if(transform.rotationAxis==Direction.Axis.Y)return rotate(state,transform.rotation);
+        return transform.rotation==Rotation.NONE?state:transformFaces(state,state.setValue(AXIS,transform.rotateAxis(state.getValue(AXIS))),transform::rotateFacing);
+    }
+    public InteractionResult onWrenched(BlockState state,UseOnContext context){
+        if(context.getPlayer()==null)return InteractionResult.PASS;
+        if(context.getPlayer().isShiftKeyDown())return InteractionResult.PASS; // Root's standard removal route handles loot and break hooks.
+        var level=context.getLevel();if(!level.isClientSide()){
+            var next=transform(state,new StructureTransform(BlockPos.ZERO,context.getClickedFace().getAxis()==Direction.Axis.X?90:0,context.getClickedFace().getAxis()==Direction.Axis.Y?90:0,context.getClickedFace().getAxis()==Direction.Axis.Z?90:0));
+            level.setBlock(context.getClickedPos(),next,Block.UPDATE_ALL);level.playSound(null,context.getClickedPos(),AllSoundEvents.WRENCH_ROTATE,SoundSource.BLOCKS,.25f,1.25f);
+        }return InteractionResult.SUCCESS;
+    }
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new ChassisBlockEntity(pos,state);}
 }

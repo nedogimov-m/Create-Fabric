@@ -1,0 +1,25 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "buzzier_bees:pink_clover"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "count": 2,
+      "id": "minecraft:pink_dye"
+    },
+    {
+      "chance": 0.1,
+      "id": "minecraft:lime_dye"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "buzzier_bees"
+      ]
+    }
+  ]
+}

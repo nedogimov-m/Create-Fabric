@@ -1,133 +1,142 @@
 package com.simibubi.create.foundation.advancement;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
+import net.fabricmc.fabric.api.entity.FakePlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.common.util.FakePlayer;
 
+/** Source advancement behaviour over the concrete BE's one canonical persisted Owner. */
 public class AdvancementBehaviour extends BlockEntityBehaviour {
+    public static final BehaviourType<AdvancementBehaviour> TYPE = new BehaviourType<>();
 
-	public static final BehaviourType<AdvancementBehaviour> TYPE = new BehaviourType<>();
+    /** Native devices expose their existing UUID/Owner here; no second behaviour UUID is kept. */
+    public interface OwnerStorage {
+        UUID getPlayerId();
+        void setPlayerId(UUID id);
+        default Collection<String> advancementIds() { return List.of(); }
+        default boolean canClear(Player player) { return true; }
+        default void initialize() {}
+        default void read(ValueInput input) { setPlayerId(input.read("Owner", UUIDUtil.CODEC).orElse(null)); }
+        default void write(ValueOutput output) {
+            var owner = getPlayerId();
+            if (owner != null)
+                output.store("Owner", UUIDUtil.CODEC, owner);
+        }
+    }
 
-	private UUID playerId;
-	private final Set<CreateAdvancement> advancements;
+    /** Used only when the actual Smart owner has no pre-existing native Owner field. */
+    public static final class LocalOwnerStorage implements OwnerStorage {
+        private UUID playerId;
+        @Override public UUID getPlayerId() { return playerId; }
+        @Override public void setPlayerId(UUID id) { playerId = id; }
+    }
 
-	public AdvancementBehaviour(SmartBlockEntity be, CreateAdvancement... advancements) {
-		super(be);
-		this.advancements = new HashSet<>();
-		add(advancements);
-	}
+    private final Set<CreateAdvancement> advancements = new HashSet<>();
 
-	public void add(CreateAdvancement... advancements) {
-		Collections.addAll(this.advancements, advancements);
-	}
+    public AdvancementBehaviour(SmartBlockEntity owner, CreateAdvancement... advancements) {
+        super(owner);
+        add(advancements);
+    }
 
-	public boolean isOwnerPresent() {
-		return playerId != null;
-	}
+    private OwnerStorage owner() { return blockEntity.advancementOwnerStorage(); }
+    public void add(CreateAdvancement... advancements) { Collections.addAll(this.advancements, advancements); }
+    public boolean isOwnerPresent() { return owner().getPlayerId() != null; }
 
-	public void setPlayer(UUID id) {
-		Player player = getWorld().getPlayerByUUID(id);
-		if (player == null)
-			return;
-		playerId = id;
-		removeAwarded();
-		blockEntity.setChanged();
-	}
+    public void setPlayer(UUID id) {
+        if (getWorld() == null)
+            return;
+        var player = getWorld().getPlayerByUUID(id);
+        if (player == null || player instanceof FakePlayer)
+            return;
+        owner().setPlayerId(id);
+        removeAwarded();
+        blockEntity.setChanged();
+    }
 
-	@Override
-	public void initialize() {
-		super.initialize();
-		removeAwarded();
-	}
+    @Override
+    public void initialize() {
+        super.initialize();
+        owner().initialize();
+        removeAwarded();
+    }
 
-	private void removeAwarded() {
-		Player player = getPlayer();
-		if (player == null)
-			return;
-		advancements.removeIf(c -> c.isAlreadyAwardedTo(player));
-		if (advancements.isEmpty()) {
-			playerId = null;
-			blockEntity.setChanged();
-		}
-	}
+    private void removeAwarded() {
+        var player = getPlayer();
+        if (player == null)
+            return;
+        advancements.removeIf(advancement -> advancement.isAlreadyAwardedTo(player));
+        if (advancements.isEmpty() && owner().canClear(player) && owner().getPlayerId() != null) {
+            owner().setPlayerId(null);
+            blockEntity.setChanged();
+        }
+    }
 
-	public void awardPlayerIfNear(CreateAdvancement advancement, int maxDistance) {
-		Player player = getPlayer();
-		if (player == null)
-			return;
-		if (player.distanceToSqr(Vec3.atCenterOf(getPos())) > maxDistance * maxDistance)
-			return;
-		award(advancement, player);
-	}
+    public void awardPlayerIfNear(CreateAdvancement advancement, int maxDistance) {
+        var player = getPlayer();
+        if (player != null && player.distanceToSqr(Vec3.atCenterOf(getPos())) <= (double) maxDistance * maxDistance)
+            award(advancement, player);
+    }
 
-	public void awardPlayer(CreateAdvancement advancement) {
-		Player player = getPlayer();
-		if (player == null)
-			return;
-		award(advancement, player);
-	}
+    public void awardPlayer(CreateAdvancement advancement) {
+        var player = getPlayer();
+        if (player != null)
+            award(advancement, player);
+    }
 
-	private void award(CreateAdvancement advancement, Player player) {
-		if (advancements.contains(advancement))
-			advancement.awardTo(player);
-		removeAwarded();
-	}
+    private void award(CreateAdvancement advancement, Player player) {
+        if (advancements.contains(advancement))
+            advancement.awardTo(player);
+        removeAwarded();
+    }
 
-	private Player getPlayer() {
-		if (playerId == null)
-			return null;
-		return getWorld().getPlayerByUUID(playerId);
-	}
+    private Player getPlayer() {
+        var id = owner().getPlayerId();
+        if (id == null || getWorld() == null)
+            return null;
+        var player = getWorld().getPlayerByUUID(id);
+        return player != null && player.level() == getWorld() && !(player instanceof FakePlayer) ? player : null;
+    }
 
-	@Override
-	public void write(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(nbt, registries, clientPacket);
-		if (playerId != null)
-			nbt.putUUID("Owner", playerId);
-	}
+    /** Pure query used by existing native award hooks before clearing their canonical Owner. */
+    public static boolean hasPendingFor(SmartBlockEntity owner, UUID playerId) {
+        if (playerId == null)
+            return false;
+        var behaviour = owner.getBehaviour(TYPE);
+        if (behaviour == null)
+            return false;
+        var player = owner.getLevel() == null ? null : owner.getLevel().getPlayerByUUID(playerId);
+        return behaviour.advancements.stream().anyMatch(advancement -> player == null || !advancement.isAlreadyAwardedTo(player));
+    }
 
-	@Override
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(nbt, registries, clientPacket);
-		if (nbt.contains("Owner"))
-			playerId = nbt.getUUID("Owner");
-	}
+    @Override public void read(ValueInput input, boolean clientPacket) { owner().read(input); }
+    @Override public void write(ValueOutput output, boolean clientPacket) { owner().write(output); }
+    @Override public BehaviourType<?> getType() { return TYPE; }
 
-	@Override
-	public BehaviourType<?> getType() {
-		return TYPE;
-	}
+    public static void tryAward(BlockGetter level, BlockPos pos, CreateAdvancement advancement) {
+        var behaviour = BlockEntityBehaviour.get(level, pos, TYPE);
+        if (behaviour != null)
+            behaviour.awardPlayer(advancement);
+    }
 
-	public static void tryAward(BlockGetter reader, BlockPos pos, CreateAdvancement advancement) {
-		AdvancementBehaviour behaviour = BlockEntityBehaviour.get(reader, pos, AdvancementBehaviour.TYPE);
-		if (behaviour != null)
-			behaviour.awardPlayer(advancement);
-	}
-
-	public static void setPlacedBy(Level worldIn, BlockPos pos, LivingEntity placer) {
-		AdvancementBehaviour behaviour = BlockEntityBehaviour.get(worldIn, pos, TYPE);
-		if (behaviour == null)
-			return;
-		if (placer instanceof FakePlayer)
-			return;
-		if (placer instanceof ServerPlayer)
-			behaviour.setPlayer(placer.getUUID());
-	}
-
+    public static void setPlacedBy(Level level, BlockPos pos, LivingEntity placer) {
+        var behaviour = BlockEntityBehaviour.get(level, pos, TYPE);
+        if (behaviour != null && placer instanceof ServerPlayer && !(placer instanceof FakePlayer))
+            behaviour.setPlayer(placer.getUUID());
+    }
 }

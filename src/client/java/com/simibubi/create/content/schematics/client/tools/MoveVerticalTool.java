@@ -1,0 +1,5 @@
+package com.simibubi.create.content.schematics.client.tools;
+
+public class MoveVerticalTool extends PlacementToolBase {
+    @Override public boolean handleMouseWheel(double delta){if(schematicHandler.isDeployed()){schematicHandler.getTransformation().move(0,(int)Math.signum(delta),0);schematicHandler.markDirty();}return true;}
+}

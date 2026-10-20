@@ -1,161 +1,52 @@
 package com.simibubi.create.content.logistics.packagerLink;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-
-import org.jetbrains.annotations.Nullable;
-
-import org.apache.commons.lang3.mutable.MutableBoolean;
-
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.logistics.packager.IdentifiedInventory;
-import com.simibubi.create.content.logistics.packager.InventorySummary;
-import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
-import com.simibubi.create.content.logistics.packager.PackagingRequest;
+import com.simibubi.create.*;
+import com.simibubi.create.content.logistics.packager.*;
 import com.simibubi.create.content.logistics.packager.repackager.RepackagerBlockEntity;
 import com.simibubi.create.content.logistics.stockTicker.PackageOrderWithCrafts;
-import com.simibubi.create.content.redstone.displayLink.LinkWithBulbBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.UUID;
 import net.createmod.catnip.data.Pair;
-import net.createmod.catnip.math.AngleHelper;
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.HolderLookup;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.AttachFace;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.*;
+import org.apache.commons.lang3.mutable.MutableBoolean;
 
-public class PackagerLinkBlockEntity extends LinkWithBulbBlockEntity {
-
-	public LogisticallyLinkedBehaviour behaviour;
-	public UUID placedBy;
-
-	public PackagerLinkBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		setLazyTickRate(10);
-		placedBy = null;
-	}
-
-	public InventorySummary fetchSummaryFromPackager(@Nullable IdentifiedInventory ignoredHandler) {
-		PackagerBlockEntity packager = getPackager();
-		if (packager == null)
-			return InventorySummary.EMPTY;
-		if (packager.isTargetingSameInventory(ignoredHandler))
-			return InventorySummary.EMPTY;
-		return packager.getAvailableItems();
-	}
-
-	public void playEffect() {
-		AllSoundEvents.STOCK_LINK.playAt(level, worldPosition, 0.75f, 1.25f, false);
-		Vec3 vec3 = Vec3.atCenterOf(worldPosition);
-
-		BlockState state = getBlockState();
-		float f = 1;
-
-		AttachFace face = state.getOptionalValue(PackagerLinkBlock.FACE)
-			.orElse(AttachFace.FLOOR);
-		if (face != AttachFace.FLOOR)
-			f = -1;
-		if (face == AttachFace.WALL)
-			vec3 = vec3.add(0, 0.25, 0);
-
-		vec3 = vec3.add(Vec3.atLowerCornerOf(state.getOptionalValue(PackagerLinkBlock.FACING)
-				.orElse(Direction.SOUTH)
-				.getNormal())
-			.scale(f * 0.125));
-
-		pulse();
-		level.addParticle(new WiFiParticle.Data(), vec3.x, vec3.y, vec3.z, 1, face == AttachFace.CEILING ? -1 : 1, 1);
-	}
-
-	public Pair<PackagerBlockEntity, PackagingRequest> processRequest(ItemStack stack, int amount, String address,
-		int linkIndex, MutableBoolean finalLink, int orderId, @Nullable PackageOrderWithCrafts context,
-		@Nullable IdentifiedInventory ignoredHandler) {
-		PackagerBlockEntity packager = getPackager();
-		if (packager == null)
-			return null;
-		if (packager.isTargetingSameInventory(ignoredHandler))
-			return null;
-
-		InventorySummary summary = packager.getAvailableItems();
-		int availableCount = summary.getCountOf(stack);
-		if (availableCount == 0)
-			return null;
-		int toWithdraw = Math.min(amount, availableCount);
-		return Pair.of(packager,
-			PackagingRequest.create(stack, toWithdraw, address, linkIndex, finalLink, 0, orderId, context));
-	}
-
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-		if (placedBy != null)
-			tag.putUUID("PlacedBy", placedBy);
-	}
-
-	@Override
-	protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(tag, registries, clientPacket);
-		placedBy = tag.contains("PlacedBy") ? tag.getUUID("PlacedBy") : null;
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(behaviour = new LogisticallyLinkedBehaviour(this, true));
-	}
-
-	@Override
-	public void initialize() {
-		super.initialize();
-		behaviour.redstonePowerChanged(PackagerLinkBlock.getPower(getBlockState(), level, worldPosition));
-		PackagerBlockEntity packager = getPackager();
-		if (packager != null)
-			packager.recheckIfLinksPresent();
-	}
-
-	@Nullable
-	public PackagerBlockEntity getPackager() {
-		BlockState blockState = getBlockState();
-		if (behaviour.redstonePower == 15)
-			return null;
-		BlockPos source = worldPosition.relative(PackagerLinkBlock.getConnectedDirection(blockState)
-			.getOpposite());
-		if (!(level.getBlockEntity(source) instanceof PackagerBlockEntity packager))
-			return null;
-		if (packager instanceof RepackagerBlockEntity)
-			return null;
-		return packager;
-	}
-
-	@Override
-	public Direction getBulbFacing(BlockState state) {
-		return PackagerLinkBlock.getConnectedDirection(state);
-	}
-
-	private static final Map<BlockState, Vec3> bulbOffsets = new HashMap<>();
-
-	@Override
-	public Vec3 getBulbOffset(BlockState state) {
-		return bulbOffsets.computeIfAbsent(state, s -> {
-			Vec3 offset = VecHelper.voxelSpace(5, 6, 11);
-			Vec3 wallOffset = VecHelper.voxelSpace(11, 6, 5);
-			AttachFace face = s.getValue(PackagerLinkBlock.FACE);
-			Vec3 vec = face == AttachFace.WALL ? wallOffset : offset;
-			float angle = AngleHelper.horizontalAngle(s.getValue(PackagerLinkBlock.FACING));
-			if (face == AttachFace.CEILING)
-				angle = -angle;
-			if (face == AttachFace.WALL)
-				angle = 0;
-			return VecHelper.rotateCentered(vec, angle, Axis.Y);
-		});
-	}
-
+public final class PackagerLinkBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements BlockEntityBehaviour.Provider {
+    public final LogisticallyLinkedBehaviour behaviour=new LogisticallyLinkedBehaviour(this,true);
+    public UUID placedBy;
+    private boolean initialized;
+    private float previousGlow,glow;
+    private int pulse;
+    public PackagerLinkBlockEntity(BlockPos pos,BlockState state) { super(AllBlockEntityTypes.PACKAGER_LINK,pos,state); }
+    public void initialize() { super.initialize(); if(level==null||isRemoved()||com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,worldPosition)!=this)return;initialized=true;if(!level.isClientSide())behaviour.redstonePowerChanged(PackagerLinkBlock.getPower(getBlockState(),level,worldPosition));var packager=getAttachedPackager();if(packager!=null)packager.recheckIfLinksPresent(); }
+    public static void tick(Level level,BlockPos pos,BlockState state,PackagerLinkBlockEntity link) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, link)) {
+            if (!createTick.shouldTick()) return;
+ if(level.isClientSide()){link.previousGlow=link.glow;link.glow*=.5f;} 
+        }
+    }
+    public PackagerBlockEntity getAttachedPackager() { if(level==null)return null;var source=worldPosition.relative(PackagerLinkBlock.getConnectedDirection(getBlockState()).getOpposite());return LoadedLevelAccess.blockEntity(level,source) instanceof PackagerBlockEntity packager&&!(packager instanceof RepackagerBlockEntity)?packager:null; }
+    public PackagerBlockEntity getPackager() { return behaviour.redstonePower==15?null:getAttachedPackager(); }
+    public InventorySummary fetchSummaryFromPackager(IdentifiedInventory ignored) { var packager=getPackager();return packager==null||packager.isTargetingSameInventory(ignored)?InventorySummary.EMPTY:packager.getAvailableItems(); }
+    public Pair<PackagerBlockEntity,PackagingRequest> processRequest(ItemStack stack,int amount,String address,int index,MutableBoolean last,int order,PackageOrderWithCrafts context,IdentifiedInventory ignored) { var packager=getPackager();if(packager==null||amount<=0||packager.isTargetingSameInventory(ignored))return null;int count=Math.min(amount,packager.getAvailableItems().getCountOf(stack));return count<=0?null:Pair.of(packager,PackagingRequest.create(stack,count,address,index,last,0,order,context)); }
+    public void notifyUpdate() { setChanged();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS); }
+    public void flash() { pulse++;notifyUpdate(); }
+    public float getGlow(float partial) { return previousGlow+(glow-previousGlow)*partial; }
+    @Override public void invalidate() { initialized=false;super.invalidate(); }
+    @Override protected void write(ValueOutput out, boolean clientPacket) { super.write(out, clientPacket);if(placedBy!=null)out.store("PlacedBy",UUIDUtil.CODEC,placedBy); }
+    @Override protected void read(ValueInput in, boolean clientPacket) { super.read(in, clientPacket);placedBy=in.read("PlacedBy",UUIDUtil.CODEC).orElse(null);int next=in.getIntOr("Pulse",pulse);if(level!=null&&level.isClientSide()&&next!=pulse){previousGlow=glow=2;level.playLocalSound(worldPosition,AllSoundEvents.STOCK_LINK,net.minecraft.sounds.SoundSource.BLOCKS,.75f,1.25f,false);var state=getBlockState();var face=state.getValue(PackagerLinkBlock.FACE);var facing=state.getValue(PackagerLinkBlock.FACING);double sign=face==net.minecraft.world.level.block.state.properties.AttachFace.FLOOR?1:-1;var origin=net.minecraft.world.phys.Vec3.atCenterOf(worldPosition).add(facing.getStepX()*sign*.125,face==net.minecraft.world.level.block.state.properties.AttachFace.WALL?.25:0,facing.getStepZ()*sign*.125);level.addParticle(AllParticleTypes.WIFI,origin.x,origin.y,origin.z,1,face==net.minecraft.world.level.block.state.properties.AttachFace.CEILING?-1:1,1);}pulse=next; }
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket() { return ClientboundBlockEntityDataPacket.create(this); }
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries) { var out=TagValueOutput.createWithContext(net.minecraft.util.ProblemReporter.DISCARDING,registries);write(out, true);out.putInt("Pulse",pulse);return out.buildResult(); }
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (behaviour != null) behaviours.add(behaviour);
+    }
 }

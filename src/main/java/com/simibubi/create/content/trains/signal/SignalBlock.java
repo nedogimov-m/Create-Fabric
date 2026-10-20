@@ -1,149 +1,77 @@
 package com.simibubi.create.content.trains.signal;
 
-import java.util.Optional;
-
-import org.jetbrains.annotations.Nullable;
-
+import com.mojang.serialization.Codec;
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import net.createmod.catnip.lang.Lang;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.Locale;
+import net.minecraft.core.*;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.RandomSource;
-import net.minecraft.util.StringRepresentable;
+import net.minecraft.util.*;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.SignalGetter;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.block.state.properties.EnumProperty;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.redstone.Orientation;
+import net.minecraft.world.phys.BlockHitResult;
 
-public class SignalBlock extends Block implements IBE<SignalBlockEntity>, IWrenchable {
-
-	public static final EnumProperty<SignalType> TYPE = EnumProperty.create("type", SignalType.class);
-	public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
-
-	public enum SignalType implements StringRepresentable {
-		ENTRY_SIGNAL, CROSS_SIGNAL;
-
-		@Override
-		public String getSerializedName() {
-			return Lang.asId(name());
-		}
-	}
-
-	public SignalBlock(Properties p_53182_) {
-		super(p_53182_);
-		registerDefaultState(defaultBlockState().setValue(TYPE, SignalType.ENTRY_SIGNAL)
-			.setValue(POWERED, false));
-	}
-
-	@Override
-	public Class<SignalBlockEntity> getBlockEntityClass() {
-		return SignalBlockEntity.class;
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> pBuilder) {
-		super.createBlockStateDefinition(pBuilder.add(TYPE, POWERED));
-	}
-
-	@Override
-	public boolean shouldCheckWeakPower(BlockState state, SignalGetter level, BlockPos pos, Direction side) {
-		return false;
-	}
-
-	@Nullable
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext pContext) {
-		return this.defaultBlockState()
-			.setValue(POWERED, Boolean.valueOf(pContext.getLevel()
-				.hasNeighborSignal(pContext.getClickedPos())));
-	}
-
-	@Override
-	public void neighborChanged(BlockState pState, Level pLevel, BlockPos pPos, Block pBlock, BlockPos pFromPos,
-		boolean pIsMoving) {
-		if (pLevel.isClientSide)
-			return;
-		boolean powered = pState.getValue(POWERED);
-		Optional<SignalBlockEntity> ste = getBlockEntityOptional(pLevel, pPos);
-		boolean neighborPowered = false;
-		if (ste.isEmpty() || !ste.get().computerBehaviour.hasAttachedComputer()) {
-			neighborPowered = pLevel.hasNeighborSignal(pPos);
-		}
-		if (powered == neighborPowered)
-			return;
-		if (powered) {
-			pLevel.scheduleTick(pPos, this, 4);
-		} else {
-			pLevel.setBlock(pPos, pState.cycle(POWERED), Block.UPDATE_CLIENTS);
-		}
-	}
-
-	@Override
-	public void tick(BlockState pState, ServerLevel pLevel, BlockPos pPos, RandomSource pRand) {
-		Optional<SignalBlockEntity> ste = getBlockEntityOptional(pLevel, pPos);
-		if ((ste.isEmpty() || !ste.get().computerBehaviour.hasAttachedComputer()) && pState.getValue(POWERED) && !pLevel.hasNeighborSignal(pPos))
-			pLevel.setBlock(pPos, pState.cycle(POWERED), Block.UPDATE_CLIENTS);
-	}
-
-	@Override
-	public void onRemove(BlockState state, Level worldIn, BlockPos pos, BlockState newState, boolean isMoving) {
-		IBE.onRemove(state, worldIn, pos, newState);
-	}
-
-	@Override
-	public BlockEntityType<? extends SignalBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.TRACK_SIGNAL.get();
-	}
-
-	@Override
-	public InteractionResult onWrenched(BlockState state, UseOnContext context) {
-		Level level = context.getLevel();
-		BlockPos pos = context.getClickedPos();
-		if (level.isClientSide)
-			return InteractionResult.SUCCESS;
-		withBlockEntityDo(level, pos, ste -> {
-			Player player = context.getPlayer();
-			if (ste.computerBehaviour.hasAttachedComputer()) {
-				if (player != null)
-					player.displayClientMessage(CreateLang.translateDirect("track_signal.mode_controlled_by_computer"), true);
-				return;
-			}
-			SignalBoundary signal = ste.getSignal();
-			if (signal != null) {
-				signal.cycleSignalType(pos);
-				if (player != null)
-					player.displayClientMessage(CreateLang.translateDirect("track_signal.mode_change." + signal.getTypeFor(pos)
-						.getSerializedName()), true);
-			} else if (player != null)
-				player.displayClientMessage(CreateLang.translateDirect("track_signal.cannot_change_mode"), true);
-		});
-		return InteractionResult.SUCCESS;
-	}
-
-	@Override
-	public boolean hasAnalogOutputSignal(BlockState pState) {
-		return true;
-	}
-
-	@Override
-	public int getAnalogOutputSignal(BlockState pState, Level blockAccess, BlockPos pPos) {
-		return getBlockEntityOptional(blockAccess, pPos).filter(SignalBlockEntity::isPowered)
-			.map($ -> 15)
-			.orElse(0);
-	}
-
+/** Actual source mode/power block and four-tick falling edge on the current native API. */
+public final class SignalBlock extends Block implements EntityBlock {
+    public enum SignalType implements StringRepresentable {
+        ENTRY_SIGNAL, CROSS_SIGNAL;
+        public static final Codec<SignalType> CODEC = Codec.STRING.xmap(SignalType::valueOf, SignalType::name);
+        @Override public String getSerializedName() { return name().toLowerCase(Locale.ROOT); }
+    }
+    public static final EnumProperty<SignalType> TYPE = EnumProperty.create("type", SignalType.class);
+    public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
+    public SignalBlock(Properties properties) {
+        super(properties); registerDefaultState(defaultBlockState().setValue(TYPE, SignalType.ENTRY_SIGNAL).setValue(POWERED, false));
+    }
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { builder.add(TYPE, POWERED); }
+    @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new SignalBlockEntity(pos, state); }
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
+        return type == AllBlockEntityTypes.TRACK_SIGNAL ? (world, pos, block, entity) -> SignalBlockEntity.tick(world, pos, block, (SignalBlockEntity) entity) : null;
+    }
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context) {
+        return defaultBlockState().setValue(POWERED, new SignalView(context.getLevel()).hasNeighborSignal(context.getClickedPos()));
+    }
+    @Override protected void neighborChanged(BlockState state, Level level, BlockPos pos, Block neighbor, Orientation orientation, boolean moved) {
+        if (level.isClientSide()) return;
+        boolean before = state.getValue(POWERED), next = new SignalView(level).hasNeighborSignal(pos);
+        if (before == next) return;
+        if (before) level.scheduleTick(pos, this, 4);
+        else level.setBlock(pos, state.setValue(POWERED, true), Block.UPDATE_CLIENTS);
+    }
+    @Override protected void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
+        if (state.getValue(POWERED) && !new SignalView(level).hasNeighborSignal(pos))
+            level.setBlock(pos, state.setValue(POWERED, false), Block.UPDATE_CLIENTS);
+    }
+    public InteractionResult onWrenched(BlockState state, UseOnContext context) {
+        var player = context.getPlayer(); var level = context.getLevel(); var pos = context.getClickedPos();
+        if (player == null || !SignalMenu.canEdit(player, pos)) return InteractionResult.PASS;
+        if (!level.isClientSide() && LoadedLevelAccess.blockEntity(level, pos) instanceof SignalBlockEntity signal)
+            signal.cycleType(player);
+        return InteractionResult.SUCCESS;
+    }
+    @Override protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+        if (player.isShiftKeyDown() || !SignalMenu.canEdit(player, pos)) return InteractionResult.PASS;
+        if (!level.isClientSide() && LoadedLevelAccess.blockEntity(level, pos) instanceof SignalBlockEntity signal)
+            SignalMenu.open(player, signal);
+        return InteractionResult.SUCCESS;
+    }
+    @Override protected boolean hasAnalogOutputSignal(BlockState state) { return true; }
+    @Override protected int getAnalogOutputSignal(BlockState state, Level level, BlockPos pos, Direction direction) {
+        return LoadedLevelAccess.blockEntity(level, pos) instanceof SignalBlockEntity signal && signal.isPowered() ? 15 : 0;
+    }
+    private record SignalView(Level level) implements SignalGetter {
+        @Override public BlockState getBlockState(BlockPos pos) { return LoadedLevelAccess.blockState(level, pos); }
+        @Override public BlockEntity getBlockEntity(BlockPos pos) { return LoadedLevelAccess.blockEntity(level, pos); }
+        @Override public FluidState getFluidState(BlockPos pos) { return getBlockState(pos).getFluidState(); }
+        @Override public int getHeight() { return level.getHeight(); }
+        @Override public int getMinY() { return level.getMinY(); }
+    }
 }

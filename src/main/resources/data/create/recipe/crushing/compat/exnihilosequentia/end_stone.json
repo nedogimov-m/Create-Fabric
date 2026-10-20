@@ -1,0 +1,20 @@
+{
+  "type": "create:crushing",
+  "ingredients": [
+    "minecraft:end_stone"
+  ],
+  "processing_time": 350,
+  "results": [
+    {
+      "id": "exnihilosequentia:crushed_end_stone"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "exnihilosequentia"
+      ]
+    }
+  ]
+}

@@ -1,117 +1,60 @@
 package com.simibubi.create.content.kinetics.mechanicalArm;
 
-import net.minecraft.world.ItemInteractionResult;
-
-import org.apache.commons.lang3.mutable.MutableBoolean;
-
 import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.AllItems;
-import com.simibubi.create.AllShapes;
 import com.simibubi.create.content.kinetics.base.KineticBlock;
-import com.simibubi.create.content.kinetics.mechanicalArm.ArmBlockEntity.Phase;
 import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Prediction;
+import net.minecraft.world.*;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.level.redstone.Orientation;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.*;
 
-public class ArmBlock extends KineticBlock implements IBE<ArmBlockEntity>, ICogWheel {
-
-	public static final BooleanProperty CEILING = BooleanProperty.create("ceiling");
-
-	public ArmBlock(Properties properties) {
-		super(properties);
-		registerDefaultState(defaultBlockState().setValue(CEILING, false));
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> p_206840_1_) {
-		super.createBlockStateDefinition(p_206840_1_.add(CEILING));
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext ctx) {
-		return defaultBlockState().setValue(CEILING, ctx.getClickedFace() == Direction.DOWN);
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter p_220053_2_, BlockPos p_220053_3_,
-		CollisionContext p_220053_4_) {
-		return state.getValue(CEILING) ? AllShapes.MECHANICAL_ARM_CEILING : AllShapes.MECHANICAL_ARM;
-	}
-
-	@Override
-	public void onPlace(BlockState state, Level world, BlockPos pos, BlockState oldState, boolean isMoving) {
-		super.onPlace(state, world, pos, oldState, isMoving);
-		withBlockEntityDo(world, pos, ArmBlockEntity::redstoneUpdate);
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level world, BlockPos pos, Block p_220069_4_,
-		BlockPos p_220069_5_, boolean p_220069_6_) {
-		withBlockEntityDo(world, pos, ArmBlockEntity::redstoneUpdate);
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return Axis.Y;
-	}
-
-	@Override
-	public Class<ArmBlockEntity> getBlockEntityClass() {
-		return ArmBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends ArmBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.MECHANICAL_ARM.get();
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (AllItems.GOGGLES.isIn(stack)) {
-			ItemInteractionResult gogglesResult = onBlockEntityUseItemOn(level, pos, ate -> {
-				if (ate.goggles)
-					return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-				ate.goggles = true;
-				ate.notifyUpdate();
-				return ItemInteractionResult.SUCCESS;
-			});
-			if (gogglesResult.consumesAction())
-				return gogglesResult;
-		}
-
-		MutableBoolean success = new MutableBoolean(false);
-		withBlockEntityDo(level, pos, be -> {
-			if (be.heldItem.isEmpty())
-				return;
-			success.setTrue();
-			if (level.isClientSide)
-				return;
-			player.getInventory().placeItemBackInInventory(be.heldItem);
-			be.heldItem = ItemStack.EMPTY;
-			be.phase = Phase.SEARCH_INPUTS;
-			be.setChanged();
-			be.sendData();
-		});
-
-		return success.booleanValue() ? ItemInteractionResult.SUCCESS : ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-	}
-
+public final class ArmBlock extends KineticBlock implements ICogWheel {
+    public static final BooleanProperty CEILING=BooleanProperty.create("ceiling");
+    private static final VoxelShape FLOOR=Shapes.or(box(2,0,2,14,10,14),box(3,0,3,13,14,13),box(0,0,0,16,6,16));
+    private static final VoxelShape TOP=Shapes.or(box(2,6,2,14,16,14),box(3,2,3,13,16,13),box(0,10,0,16,16,16));
+    public ArmBlock(Properties properties){super(properties);registerDefaultState(defaultBlockState().setValue(CEILING,false));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(CEILING);}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){return defaultBlockState().setValue(CEILING,context.getClickedFace()==Direction.DOWN);}
+    @Override public boolean hasShaftTowards(LevelReader level,BlockPos pos,BlockState state,Direction face){return false;}
+    @Override public Direction.Axis getRotationAxis(BlockState state){return Direction.Axis.Y;}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new ArmBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.MECHANICAL_ARM,ArmBlockEntity::tick);}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return state.getValue(CEILING)?TOP:FLOOR;}
+    @Override public void onPlace(BlockState state,Level level,BlockPos pos,BlockState old,boolean moved){super.onPlace(state,level,pos,old,moved);if(LoadedLevelAccess.blockEntity(level,pos) instanceof ArmBlockEntity arm)arm.redstoneUpdate();}
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block neighbor,Orientation orientation,boolean moved){super.neighborChanged(state,level,pos,neighbor,orientation,moved);if(LoadedLevelAccess.blockEntity(level,pos) instanceof ArmBlockEntity arm)arm.redstoneUpdate();}
+    @Override public void setPlacedBy(Level level,BlockPos pos,BlockState state,LivingEntity placer,ItemStack stack){super.setPlacedBy(level,pos,state,placer,stack);if(placer instanceof ServerPlayer player&&LoadedLevelAccess.blockEntity(level,pos) instanceof ArmBlockEntity arm)arm.beginPlacement(player);}
+    public static boolean settingsHit(BlockState state,BlockPos pos,BlockHitResult hit){
+        if(hit.getDirection().getAxis().isVertical())return false;
+        var relative=hit.getLocation().subtract(pos.getX(),pos.getY(),pos.getZ());
+        double y=state.getValue(CEILING)?13/16d:3/16d;
+        double horizontal=hit.getDirection().getAxis()==Direction.Axis.X?relative.z:relative.x;
+        return Math.abs(relative.y-y)<3/16d&&Math.abs(horizontal-.5)<3/16d;
+    }
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){
+        if(player.isSpectator()||!player.mayBuild()||!level.mayInteract(player,pos))return InteractionResult.PASS;
+        if(!(LoadedLevelAccess.blockEntity(level,pos) instanceof ArmBlockEntity arm))return InteractionResult.PASS;
+        if(stack.is(AllItems.GOGGLES)&&!arm.hasGoggles()){if(!level.isClientSide())arm.setGoggles();return InteractionResult.SUCCESS;}
+        if(!player.isShiftKeyDown()&&settingsHit(state,pos,hit)){
+            if(player instanceof ServerPlayer server)ArmNetworking.openSettings(server,arm);return InteractionResult.SUCCESS;
+        }
+        if(arm.getHeldItem().isEmpty())return InteractionResult.PASS;
+        if(!level.isClientSide())player.getInventory().placeItemBackInInventory(arm.takeHeldItem(),Prediction.SERVER_ONLY);
+        return InteractionResult.SUCCESS;
+    }
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){return useItemOn(ItemStack.EMPTY,state,level,pos,player,InteractionHand.MAIN_HAND,hit);}
 }

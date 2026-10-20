@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/chocolate_bucket",
+    "particle": "create:item/chocolate_bucket"
+  }
+}

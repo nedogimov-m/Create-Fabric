@@ -1,0 +1,7 @@
+{
+  "parent": "create:block/threshold_switch/block_floor",
+  "textures": {
+    "level": "create:block/threshold_switch/level_3",
+    "particle": "create:block/threshold_switch/level_3"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "create:block/palettes/stone_types/natural/asurine_3",
+    "particle": "create:block/palettes/stone_types/natural/asurine_3"
+  }
+}

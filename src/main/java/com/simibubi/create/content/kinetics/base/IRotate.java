@@ -1,21 +1,17 @@
 package com.simibubi.create.content.kinetics.base;
 
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-import com.simibubi.create.foundation.item.TooltipHelper;
 import com.simibubi.create.foundation.utility.CreateLang;
 import com.simibubi.create.infrastructure.config.AllConfigs;
-
 import net.createmod.catnip.lang.Lang;
 import net.createmod.catnip.lang.LangBuilder;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.state.BlockState;
 
-public interface IRotate extends IWrenchable {
-
+// SpeedLevel sourced from Create6.0.10; progress-bar loop retained without client font linkage.
+public interface IRotate {
 	enum SpeedLevel {
 		NONE(ChatFormatting.DARK_GRAY, 0x000000, 0),
 		SLOW(ChatFormatting.GREEN, 0x22FF22, 10),
@@ -74,7 +70,7 @@ public interface IRotate extends IWrenchable {
 
 		public static LangBuilder getFormattedSpeedText(float speed, boolean overstressed) {
 			SpeedLevel speedLevel = of(speed);
-			LangBuilder builder = CreateLang.text(TooltipHelper.makeProgressBar(3, speedLevel.ordinal()));
+			LangBuilder builder = CreateLang.text(makeProgressBar(3, speedLevel.ordinal()));
 
 			builder.translate("tooltip.speedRequirement." + Lang.asId(speedLevel.name()))
 				.space()
@@ -96,65 +92,19 @@ public interface IRotate extends IWrenchable {
 
 	}
 
-	enum StressImpact {
-		LOW(ChatFormatting.YELLOW, ChatFormatting.GREEN),
-		MEDIUM(ChatFormatting.GOLD, ChatFormatting.YELLOW),
-		HIGH(ChatFormatting.RED, ChatFormatting.GOLD),
-		OVERSTRESSED(ChatFormatting.RED, ChatFormatting.RED);
-
-		private final ChatFormatting absoluteColor;
-		private final ChatFormatting relativeColor;
-
-		StressImpact(ChatFormatting absoluteColor, ChatFormatting relativeColor) {
-			this.absoluteColor = absoluteColor;
-			this.relativeColor = relativeColor;
-		}
-
-		public ChatFormatting getAbsoluteColor() {
-			return absoluteColor;
-		}
-
-		public ChatFormatting getRelativeColor() {
-			return relativeColor;
-		}
-
-		public static StressImpact of(double stressPercent) {
-			if (stressPercent > 1)
-				return StressImpact.OVERSTRESSED;
-			if (stressPercent > .75d)
-				return StressImpact.HIGH;
-			if (stressPercent > .5d)
-				return StressImpact.MEDIUM;
-			return StressImpact.LOW;
-		}
-
-		public static boolean isEnabled() {
-			return !AllConfigs.server().kinetics.disableStress.get();
-		}
-
-		public static LangBuilder getFormattedStressText(double stressPercent) {
-			StressImpact stressLevel = of(stressPercent);
-			return CreateLang.text(TooltipHelper.makeProgressBar(3, Math.min(stressLevel.ordinal() + 1, 3)))
-				.translate("tooltip.stressImpact." + Lang.asId(stressLevel.name()))
-				.text(String.format(" (%s%%) ", (int) (stressPercent * 100)))
-				.style(stressLevel.getRelativeColor());
-		}
+	private static String makeProgressBar(int length, int filledLength) {
+		String bar = " ";
+		int emptySpaces = length - filledLength;
+		for (int i = 0; i < filledLength; i++)
+			bar += "\u2588";
+		for (int i = 0; i < emptySpaces; i++)
+			bar += "\u2592";
+		return bar + " ";
 	}
 
-	public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face);
+    default boolean hideStressImpact() { return false; }
 
-	public Axis getRotationAxis(BlockState state);
+    Direction.Axis getRotationAxis(BlockState state);
 
-	public default SpeedLevel getMinimumRequiredSpeedLevel() {
-		return SpeedLevel.NONE;
-	}
-
-	public default boolean hideStressImpact() {
-		return false;
-	}
-
-	public default boolean showCapacityWithAnnotation() {
-		return false;
-	}
-
+    boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face);
 }

@@ -1,388 +1,174 @@
 package com.simibubi.create.content.contraptions.piston;
 
-import java.util.List;
-
-import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
-import com.simibubi.create.content.contraptions.AssemblyException;
-import com.simibubi.create.content.contraptions.ContraptionCollider;
-import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
-import com.simibubi.create.content.contraptions.IControlContraption;
-import com.simibubi.create.content.contraptions.IDisplayAssemblyExceptions;
+import com.simibubi.create.content.contraptions.*;
+import com.simibubi.create.content.kinetics.KineticGraph;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import com.simibubi.create.content.kinetics.transmission.sequencer.SequencePhase;
+import com.simibubi.create.content.kinetics.transmission.sequencer.SequencedGearshiftBlockEntity.SequenceContext;
 import com.simibubi.create.content.kinetics.transmission.sequencer.SequencerInstructions;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollOptionBehaviour;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.foundation.utility.ServerSpeedProvider;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
+import java.util.*;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.util.Mth;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-public abstract class LinearActuatorBlockEntity extends KineticBlockEntity
-	implements IControlContraption, IDisplayAssemblyExceptions {
+/** Common source linear lifecycle, retaining saved identity while native entity data is absent. */
+public abstract class LinearActuatorBlockEntity extends KineticBlockEntity implements IControlContraption {
+    public float offset;
+    public boolean running,assembleNextTick,waitingForSpeedChange;
+    protected LinearContraptionEntity movedContraption;
+    protected UUID movedUuid;
+    protected AssemblyException lastException;
+    protected int retryTicks;
+    protected boolean recoveringAssembly,transferring;
+    protected boolean pendingDisassembly;
+    protected double sequencedOffsetLimit=-1;
+    private double rememberedSequenceRemaining=-1;
+    private SequencePhase rememberedSequencePhase;
+    private CompoundTag pendingError;
+    private boolean clientForceMovementPending;
+    protected MovementMode movementMode=MovementMode.MOVE_PLACE;
+    protected LinearActuatorBlockEntity(BlockEntityType<?> type,BlockPos pos,BlockState state){super(type,pos,state);}
+    protected abstract int getExtensionRange();
+    protected abstract int getInitialOffset();
+    protected abstract Vec3 toMotionVector(float amount);
+    protected abstract Vec3 toPosition(float amount);
+    protected abstract boolean matches(LinearContraptionEntity owner);
+    public abstract boolean assemble()throws AssemblyException;
+    public abstract boolean disassemble();
+    public abstract boolean canDisassembleNow();
+    public boolean isRunning(){return running;}
+    public MovementMode getMovementMode(){return movementMode;}
+    public void setMovementMode(MovementMode mode){movementMode=Objects.requireNonNull(mode);waitingForSpeedChange=false;setChanged();sync();}
+    public AssemblyException getLastAssemblyException(){return lastException;}
+    public void requestAssembly(){assembleNextTick=true;retryTicks=0;waitingForSpeedChange=false;setChanged();}
+    public LinearContraptionEntity getMovedContraption(){
+        if(movedContraption!=null&&movedContraption.isRemoved()){
+            if(movedContraption.getContraption()!=null&&movedContraption.getContraption().disassembled){running=false;movedUuid=null;setChanged();}
+            movedContraption=null;
+        }
+        if(movedContraption!=null&&(!matches(movedContraption)||movedContraption.level()!=level))movedContraption=null;
+        if(movedContraption==null&&movedUuid!=null&&level instanceof ServerLevel server&&server.getEntity(movedUuid) instanceof LinearContraptionEntity owner&&matches(owner))movedContraption=owner;
+        if(movedContraption==null&&movedUuid!=null&&level!=null&&level.isClientSide())for(var owner:level.getEntitiesOfClass(LinearContraptionEntity.class,new AABB(worldPosition).inflate(Math.max(17,getExtensionRange()+2))))if(movedUuid.equals(owner.getUUID())&&matches(owner)){movedContraption=owner;break;}
+        return movedContraption;
+    }
+    protected boolean canAttachWithoutSavedOwner(LinearContraptionEntity owner){return getBlockState().hasProperty(MechanicalPistonBlock.STATE)&&getBlockState().getValue(MechanicalPistonBlock.STATE)==MechanicalPistonBlock.PistonState.MOVING;}
+    protected void tickWithoutContraption(){}
+    protected boolean isPassive(){return false;}
+    protected boolean shouldStopOnTerrainCollision(){return true;}
+    protected void updateContraptionPose(LinearContraptionEntity owner,float next){owner.setProgress(next);}
+    private void consumeForcedClientMovement(){
+        if(!clientForceMovementPending||level==null||!level.isClientSide())return;
+        var actual=getMovedContraption();
+        if(actual==null||!matches(actual)||!isAttachedTo(actual))return;
+        updateContraptionPose(actual,offset);clientForceMovementPending=false;
+    }
+    protected final void consumeSequencedTravel(double travel){if(sequencedOffsetLimit>=0){sequencedOffsetLimit=Math.max(0,sequencedOffsetLimit-travel);rememberedSequenceRemaining=sequencedOffsetLimit;}}
+    @Override protected boolean syncSequenceContext(){return true;}
+    @Override public void attach(ControlledContraptionEntity entity){
+        if(!(entity instanceof LinearContraptionEntity owner)||!matches(owner)||movedUuid!=null&&!movedUuid.equals(owner.getUUID()))return;
+        if(movedUuid==null&&!canAttachWithoutSavedOwner(owner))return;
+        movedContraption=owner;movedUuid=owner.getUUID();running=true;setChanged();sync();
+    }
+    @Override public boolean isAttachedTo(AbstractContraptionEntity owner){return owner==getMovedContraption();}
+    @Override public void onStall(){sync();}
+    @Override public boolean isValid(){return !isRemoved();}
+    @Override public BlockPos getBlockPosition(){return worldPosition;}
+    protected int getGridOffset(float value){return Math.clamp(Math.round(value),0,getExtensionRange());}
+    public float getMovementSpeed(){float speed=Math.clamp(getSpeed()/512f,-.49f,.49f);if(level!=null&&level.isClientSide())speed*=com.simibubi.create.foundation.utility.ServerSpeedProvider.get();return sequencedOffsetLimit<0?speed:(float)Math.clamp(speed,-sequencedOffsetLimit,sequencedOffsetLimit);}
+    public float getInterpolatedOffset(float partial){return Math.clamp(offset+(partial-.5f)*getMovementSpeed(),0,getExtensionRange());}
+    public Vec3 getMotionVector(){return toMotionVector(getMovementSpeed());}
+    protected void failure(AssemblyException failure,boolean retryAssembly){lastException=failure;if(retryAssembly&&failure.canRetry())retryTicks=5;setChanged();sync();}
+    protected boolean tryDisassemble(){
+        if(!isRemoved()&&(movementMode==MovementMode.MOVE_NEVER_PLACE||movementMode==MovementMode.MOVE_PLACE_RETURNED&&getGridOffset(offset)!=getInitialOffset())){
+            waitingForSpeedChange=true;if(getMovedContraption()!=null)getMovedContraption().setDeltaMovement(Vec3.ZERO);setChanged();sync();return false;
+        }return disassemble();
+    }
+    protected void collided(float speed){
+        offset=getGridOffset(getGridOffset(offset)-speed);var owner=getMovedContraption();if(owner!=null){owner.setProgress(offset);owner.setDeltaMovement(Vec3.ZERO);}
+        if(tryDisassemble()&&speed>0)assembleNextTick=true;
+    }
+    public static void tick(Level level,BlockPos pos,BlockState state,LinearActuatorBlockEntity actuator){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, actuator)) {
+            if (!createTick.shouldTick()) return;
 
-	public float offset;
-	public boolean running;
-	public boolean assembleNextTick;
-	public boolean needsContraption;
-	public AbstractContraptionEntity movedContraption;
-	protected boolean forceMove;
-	protected ScrollOptionBehaviour<MovementMode> movementMode;
-	protected boolean waitingForSpeedChange;
-	protected AssemblyException lastException;
-	protected double sequencedOffsetLimit;
-
-	// Custom position sync
-	protected float clientOffsetDiff;
-
-	public LinearActuatorBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
-		super(typeIn, pos, state);
-		setLazyTickRate(3);
-		forceMove = true;
-		needsContraption = true;
-		sequencedOffsetLimit = -1;
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		movementMode = new ScrollOptionBehaviour<>(MovementMode.class, CreateLang.translateDirect("contraptions.movement_mode"),
-			this, getMovementModeSlot());
-		movementMode.withCallback(t -> waitingForSpeedChange = false);
-		behaviours.add(movementMode);
-		registerAwardables(behaviours, AllAdvancements.CONTRAPTION_ACTORS);
-	}
-
-	@Override
-	protected boolean syncSequenceContext() {
-		return true;
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		if (movedContraption != null)
-			if (!movedContraption.isAlive())
-				movedContraption = null;
-
-		if (isPassive())
-			return;
-
-		if (level.isClientSide)
-			clientOffsetDiff *= .75f;
-
-		if (waitingForSpeedChange) {
-			if (movedContraption != null) {
-				if (level.isClientSide) {
-					float syncSpeed = clientOffsetDiff / 2f;
-					offset += syncSpeed;
-					movedContraption.setContraptionMotion(toMotionVector(syncSpeed));
-					return;
-				}
-				movedContraption.setContraptionMotion(Vec3.ZERO);
-			}
-			return;
-		}
-
-		if (!level.isClientSide && assembleNextTick) {
-			assembleNextTick = false;
-			if (running) {
-				if (getSpeed() == 0)
-					tryDisassemble();
-				else
-					sendData();
-				return;
-			} else {
-				if (getSpeed() != 0)
-					try {
-						assemble();
-						lastException = null;
-					} catch (AssemblyException e) {
-						lastException = e;
-					}
-				sendData();
-			}
-			return;
-		}
-
-		if (!running)
-			return;
-
-		boolean contraptionPresent = movedContraption != null;
-		if (needsContraption && !contraptionPresent)
-			return;
-
-		float movementSpeed = getMovementSpeed();
-		boolean locked = false;
-		if (sequencedOffsetLimit > 0) {
-			sequencedOffsetLimit = Math.max(0, sequencedOffsetLimit - Math.abs(movementSpeed));
-			locked = sequencedOffsetLimit == 0;
-		}
-		float newOffset = offset + movementSpeed;
-		if ((int) newOffset != (int) offset)
-			visitNewPosition();
-
-		if (locked) {
-			forceMove = true;
-			resetContraptionToOffset();
-			sendData();
-		}
-
-		if (contraptionPresent) {
-			if (moveAndCollideContraption()) {
-				movedContraption.setContraptionMotion(Vec3.ZERO);
-				offset = getGridOffset(offset);
-				resetContraptionToOffset();
-				collided();
-				return;
-			}
-		}
-
-		if (!contraptionPresent || !movedContraption.isStalled())
-			offset = newOffset;
-
-		int extensionRange = getExtensionRange();
-		if (offset <= 0 || offset >= extensionRange) {
-			offset = offset <= 0 ? 0 : extensionRange;
-			if (!level.isClientSide) {
-				moveAndCollideContraption();
-				resetContraptionToOffset();
-				tryDisassemble();
-				if (waitingForSpeedChange) {
-					forceMove = true;
-					sendData();
-				}
-			}
-			return;
-		}
-	}
-
-	protected boolean isPassive() {
-		return false;
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		if (movedContraption != null && !level.isClientSide)
-			sendData();
-	}
-
-	protected int getGridOffset(float offset) {
-		return Mth.clamp((int) (offset + .5f), 0, getExtensionRange());
-	}
-
-	public float getInterpolatedOffset(float partialTicks) {
-		float interpolatedOffset =
-			Mth.clamp(offset + (partialTicks - .5f) * getMovementSpeed(), 0, getExtensionRange());
-		return interpolatedOffset;
-	}
-
-	@Override
-	public void onSpeedChanged(float prevSpeed) {
-		super.onSpeedChanged(prevSpeed);
-		sequencedOffsetLimit = -1;
-
-		if (isPassive())
-			return;
-
-		assembleNextTick = true;
-		waitingForSpeedChange = false;
-
-		if (movedContraption != null && Math.signum(prevSpeed) != Math.signum(getSpeed()) && prevSpeed != 0) {
-			if (!movedContraption.isStalled()) {
-				offset = Math.round(offset * 16) / 16;
-				resetContraptionToOffset();
-			}
-			movedContraption.getContraption()
-				.stop(level);
-		}
-
-		if (sequenceContext != null && sequenceContext.instruction() == SequencerInstructions.TURN_DISTANCE)
-			sequencedOffsetLimit = sequenceContext.getEffectiveValue(getTheoreticalSpeed());
-	}
-
-	@Override
-	public void remove() {
-		this.remove = true;
-		if (!level.isClientSide)
-			disassemble();
-		super.remove();
-	}
-
-	@Override
-	protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		compound.putBoolean("Running", running);
-		compound.putBoolean("Waiting", waitingForSpeedChange);
-		compound.putFloat("Offset", offset);
-		if (sequencedOffsetLimit >= 0)
-			compound.putDouble("SequencedOffsetLimit", sequencedOffsetLimit);
-		AssemblyException.write(compound, registries, lastException);
-		super.write(compound, registries, clientPacket);
-
-		if (clientPacket && forceMove) {
-			compound.putBoolean("ForceMovement", forceMove);
-			forceMove = false;
-		}
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		boolean forceMovement = compound.contains("ForceMovement");
-		float offsetBefore = offset;
-
-		running = compound.getBoolean("Running");
-		waitingForSpeedChange = compound.getBoolean("Waiting");
-		offset = compound.getFloat("Offset");
-		sequencedOffsetLimit =
-			compound.contains("SequencedOffsetLimit") ? compound.getDouble("SequencedOffsetLimit") : -1;
-		lastException = AssemblyException.read(compound, registries);
-		super.read(compound, registries, clientPacket);
-
-		if (!clientPacket)
-			return;
-		if (forceMovement)
-			resetContraptionToOffset();
-		else if (running) {
-			clientOffsetDiff = offset - offsetBefore;
-			offset = offsetBefore;
-		}
-		if (!running)
-			movedContraption = null;
-	}
-
-	@Override
-	public AssemblyException getLastAssemblyException() {
-		return lastException;
-	}
-
-	public abstract void disassemble();
-
-	protected abstract void assemble() throws AssemblyException;
-
-	protected abstract int getExtensionRange();
-
-	protected abstract int getInitialOffset();
-
-	protected abstract ValueBoxTransform getMovementModeSlot();
-
-	protected abstract Vec3 toMotionVector(float speed);
-
-	protected abstract Vec3 toPosition(float offset);
-
-	protected void visitNewPosition() {}
-
-	protected void tryDisassemble() {
-		if (remove) {
-			disassemble();
-			return;
-		}
-		if (getMovementMode() == MovementMode.MOVE_NEVER_PLACE) {
-			waitingForSpeedChange = true;
-			return;
-		}
-		int initial = getInitialOffset();
-		if ((int) (offset + .5f) != initial && getMovementMode() == MovementMode.MOVE_PLACE_RETURNED) {
-			waitingForSpeedChange = true;
-			return;
-		}
-		disassemble();
-	}
-
-	protected MovementMode getMovementMode() {
-		return movementMode.get();
-	}
-
-	protected boolean moveAndCollideContraption() {
-		if (movedContraption == null)
-			return false;
-		if (movedContraption.isStalled()) {
-			movedContraption.setContraptionMotion(Vec3.ZERO);
-			return false;
-		}
-
-		Vec3 motion = getMotionVector();
-		movedContraption.setContraptionMotion(getMotionVector());
-		movedContraption.move(motion.x, motion.y, motion.z);
-		return ContraptionCollider.collideBlocks(movedContraption);
-	}
-
-	protected void collided() {
-		if (level.isClientSide) {
-			waitingForSpeedChange = true;
-			return;
-		}
-		offset = getGridOffset(offset - getMovementSpeed());
-		resetContraptionToOffset();
-		tryDisassemble();
-	}
-
-	protected void resetContraptionToOffset() {
-		if (movedContraption == null)
-			return;
-		if (!movedContraption.isAlive())
-			return;
-		Vec3 vec = toPosition(offset);
-		movedContraption.setPos(vec.x, vec.y, vec.z);
-		if (getSpeed() == 0 || waitingForSpeedChange)
-			movedContraption.setContraptionMotion(Vec3.ZERO);
-	}
-
-	public float getMovementSpeed() {
-		float movementSpeed = Mth.clamp(convertToLinear(getSpeed()), -.49f, .49f) + clientOffsetDiff / 2f;
-		if (level.isClientSide)
-			movementSpeed *= ServerSpeedProvider.get();
-		if (sequencedOffsetLimit >= 0)
-			movementSpeed = (float) Mth.clamp(movementSpeed, -sequencedOffsetLimit, sequencedOffsetLimit);
-		return movementSpeed;
-	}
-
-	public Vec3 getMotionVector() {
-		return toMotionVector(getMovementSpeed());
-	}
-
-	@Override
-	public void onStall() {
-		if (!level.isClientSide) {
-			forceMove = true;
-			sendData();
-		}
-	}
-
-	public void onLengthBroken() {
-		offset = 0;
-		sendData();
-	}
-
-	@Override
-	public boolean isValid() {
-		return !isRemoved();
-	}
-
-	@Override
-	public void attach(ControlledContraptionEntity contraption) {
-		this.movedContraption = contraption;
-		if (!level.isClientSide) {
-			this.running = true;
-			sendData();
-		}
-	}
-
-	@Override
-	public boolean isAttachedTo(AbstractContraptionEntity contraption) {
-		return movedContraption == contraption;
-	}
-
-	@Override
-	public BlockPos getBlockPosition() {
-		return worldPosition;
-	}
+        KineticBlockEntity.tick(level,pos,state,actuator);if(level.isClientSide()){actuator.consumeForcedClientMovement();return;}
+        if(actuator.isPassive()){actuator.tickWithoutContraption();return;}
+        var owner=actuator.getMovedContraption();
+        if(actuator.recoveringAssembly||owner!=null&&owner.getContraption().getStabilizedSubContraptions().isRecovering()){if(actuator.disassemble()){actuator.recoveringAssembly=false;actuator.requestAssembly();}return;}
+        if(actuator.pendingDisassembly){if(owner!=null)owner.setDeltaMovement(Vec3.ZERO);actuator.disassemble();return;}
+        if(actuator.retryTicks>0&&--actuator.retryTicks==0)actuator.assembleNextTick=true;
+        if(actuator.waitingForSpeedChange){if(owner!=null)owner.setDeltaMovement(Vec3.ZERO);return;}
+        if(actuator.assembleNextTick){
+            actuator.assembleNextTick=false;
+            if(actuator.running){if(actuator.getSpeed()==0)actuator.tryDisassemble();else actuator.sync();}
+            else if(actuator.getSpeed()!=0)try{actuator.assemble();}catch(AssemblyException failure){actuator.failure(failure,true);}
+            return;
+        }
+        if(!actuator.running)return;if(owner==null){actuator.tickWithoutContraption();return;}
+        if(owner.isStalled()||ContraptionAssemblyGraph.isFrozen(owner)){owner.setDeltaMovement(Vec3.ZERO);return;}
+        float speed=actuator.getMovementSpeed(),next=Math.clamp(actuator.offset+speed,0,actuator.getExtensionRange());
+        var motion=actuator.toMotionVector(next-actuator.offset);
+        try{
+            if(ContraptionTerrainCollision.collideBlocks(owner,motion)&&actuator.shouldStopOnTerrainCollision()){actuator.collided(speed);return;}
+        }catch(AssemblyException unavailable){owner.setDeltaMovement(Vec3.ZERO);actuator.failure(unavailable,false);return;}
+        owner.setDeltaMovement(motion);actuator.offset=next;actuator.updateContraptionPose(owner,next);actuator.lastException=null;actuator.setChanged();
+        actuator.consumeSequencedTravel(motion.length());
+        if(level.getGameTime()%3==0)actuator.sync();
+        if(next<=0||next>=actuator.getExtensionRange())actuator.tryDisassemble();
+    
+        }
+    }
+    @Override public void onSpeedChanged(float previous){
+        super.onSpeedChanged(previous);assembleNextTick=true;waitingForSpeedChange=false;
+        var owner=getMovedContraption();if(owner!=null&&previous!=0&&Math.signum(previous)!=Math.signum(getSpeed())){
+            if(!owner.isStalled()&&!ContraptionAssemblyGraph.isFrozen(owner)){offset=Math.round(offset*16)/16f;owner.setProgress(offset);}
+            // Preserve controls and actor ownership; the real actor lifecycle stops at reversal.
+            owner.getContraption().stop(level);
+        }setChanged();
+    }
+    @Override protected void onSequenceContextChanged(SequenceContext previous,SequencePhase previousPhase){
+        super.onSequenceContextChanged(previous,previousPhase);
+        if(sequenceContext!=null&&sequenceContext.instruction()==SequencerInstructions.TURN_DISTANCE){
+            sequencedOffsetLimit=Objects.equals(rememberedSequencePhase,getSequencePhase())&&rememberedSequenceRemaining>=0
+                ?rememberedSequenceRemaining:Math.max(0,sequenceContext.getEffectiveValue(getTheoreticalSpeed()));
+            rememberedSequencePhase=getSequencePhase();rememberedSequenceRemaining=sequencedOffsetLimit;
+        }else{
+            // Upstream native data may disappear before this consumer unloads. Retain the
+            // consumed receipt so the same persisted phase cannot replay its distance.
+            if(previous!=null&&previousPhase!=null&&sequencedOffsetLimit>=0){rememberedSequencePhase=previousPhase;rememberedSequenceRemaining=sequencedOffsetLimit;}
+            sequencedOffsetLimit=-1;
+        }
+        waitingForSpeedChange=false;if(!running)assembleNextTick=true;setChanged();sync();
+    }
+    protected void clearSequenceLimit(){sequencedOffsetLimit=rememberedSequenceRemaining=-1;rememberedSequencePhase=null;}
+    @Override public void preRemoveSideEffects(BlockPos pos,BlockState state){if(level!=null&&!level.isClientSide())disassemble();super.preRemoveSideEffects(pos,state);}
+    @Override public void setLevel(Level level){super.setLevel(level);if(pendingError!=null){lastException=AssemblyException.read(pendingError,level.registryAccess());pendingError=null;}}
+    @Override protected void write(ValueOutput out, boolean clientPacket){
+        super.write(out, clientPacket);out.putBoolean("Running",running);out.putBoolean("Waiting",waitingForSpeedChange);out.putFloat("Offset",offset);out.putInt("ScrollValue",movementMode.ordinal());out.putBoolean("AssemblyQueued",assembleNextTick);out.putInt("AssemblyRetryTicks",retryTicks);out.putBoolean("RecoveringAssembly",recoveringAssembly);out.putBoolean("PendingDisassembly",pendingDisassembly);
+        if(movedUuid!=null)out.store("MovedEntity",UUIDUtil.CODEC,movedUuid);
+        if(sequencedOffsetLimit>=0)out.putDouble("SequencedOffsetLimit",sequencedOffsetLimit);
+        if(rememberedSequencePhase!=null){out.store("SequenceLimitPhase",SequencePhase.CODEC,rememberedSequencePhase);out.putDouble("SequenceLimitRemaining",rememberedSequenceRemaining);}
+        var error=pendingError==null?new CompoundTag():pendingError.copy();if(level!=null)AssemblyException.write(error,level.registryAccess(),lastException);out.store("AssemblyError",CompoundTag.CODEC,error);
+        if(clientPacket&&clientForceMovementPending){out.putBoolean("ForceMovement",true);clientForceMovementPending=false;}
+    }
+    @Override protected void read(ValueInput in, boolean clientPacket){
+        movedUuid=in.read("MovedEntity",UUIDUtil.CODEC).orElse(null);movedContraption=null;running=in.getBooleanOr("Running",false)||movedUuid!=null;waitingForSpeedChange=in.getBooleanOr("Waiting",false);float saved=in.getFloatOr("Offset",0);offset=Float.isFinite(saved)?saved:0;
+        movementMode=MovementMode.values()[Math.clamp(in.getIntOr("ScrollValue",0),0,MovementMode.values().length-1)];assembleNextTick=in.getBooleanOr("AssemblyQueued",false);retryTicks=Math.clamp(in.getIntOr("AssemblyRetryTicks",0),0,5);recoveringAssembly=in.getBooleanOr("RecoveringAssembly",false);pendingDisassembly=in.getBooleanOr("PendingDisassembly",false);
+        double limit=in.getDoubleOr("SequencedOffsetLimit",-1);sequencedOffsetLimit=Double.isFinite(limit)&&limit>=0?limit:-1;
+        super.read(in,clientPacket);rememberedSequencePhase=in.read("SequenceLimitPhase",SequencePhase.CODEC).orElse(getSequencePhase());double remembered=in.getDoubleOr("SequenceLimitRemaining",sequencedOffsetLimit);rememberedSequenceRemaining=Double.isFinite(remembered)&&remembered>=0?remembered:-1;
+        pendingError=in.read("AssemblyError",CompoundTag.CODEC).orElse(new CompoundTag()).copy();if(level!=null){lastException=AssemblyException.read(pendingError,level.registryAccess());pendingError=null;}
+        clientForceMovementPending=clientPacket&&in.getBooleanOr("ForceMovement",false);consumeForcedClientMovement();
+    
+        
+    }
+    @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
+        super.addNativeAdvancementIds(ids);
+        ids.add("contraption_actors");
+    }
 }

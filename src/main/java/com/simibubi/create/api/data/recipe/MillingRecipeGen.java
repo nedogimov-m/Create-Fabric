@@ -1,39 +1,43 @@
 package com.simibubi.create.api.data.recipe;
 
-import java.util.concurrent.CompletableFuture;
-
-import org.jetbrains.annotations.ApiStatus.ScheduledForRemoval;
-
 import com.simibubi.create.AllRecipeTypes;
-import com.simibubi.create.AllTags;
-import com.simibubi.create.content.kinetics.millstone.MillingRecipe;
-import com.tterrag.registrate.util.entry.ItemEntry;
+import com.simibubi.create.*;
+import com.simibubi.create.content.processing.recipe.ProcessingRecipeBuilder;
+import com.simibubi.create.foundation.data.recipe.*;
+import com.simibubi.create.content.decoration.palettes.AllPaletteStoneTypes;
+import com.simibubi.create.foundation.block.CopperBlockSet;
+import com.simibubi.create.foundation.block.CopperBlockSet.Variant;
+import java.util.*;
+import java.util.function.*;
+import net.createmod.catnip.lang.Lang;
+import net.fabricmc.fabric.api.resource.conditions.v1.ResourceConditions;
+import net.minecraft.core.registries.*;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.*;
+import net.minecraft.util.Mth;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.ItemLike;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.WeatheringCopper.WeatherState;
+import net.minecraft.world.level.material.Fluids;
 
+import com.simibubi.create.content.kinetics.millstone.MillingRecipe;
+import java.util.concurrent.CompletableFuture;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.data.PackOutput;
-import net.minecraft.world.item.Item;
+import net.minecraft.world.item.crafting.RecipeType;
 
-import net.neoforged.neoforge.common.conditions.NotCondition;
-import net.neoforged.neoforge.common.conditions.TagEmptyCondition;
-
-/**
- * The base class for Milling recipe generation.
- * Addons should extend this and use the {@link ProcessingRecipeGen#create} methods
- * or the helper methods contained in this class to make recipes.
- * For an example of how you might do this, see Create's implementation: {@link com.simibubi.create.foundation.data.recipe.CreateMillingRecipeGen}.
- * Needs to be added to a registered recipe provider to do anything, see {@link com.simibubi.create.foundation.data.recipe.CreateRecipeProvider}
- */
+/** Source recipe-generator category backed by the native 26.3 serializer. */
 public abstract class MillingRecipeGen extends StandardProcessingRecipeGen<MillingRecipe> {
-
 	/**
 	 * @deprecated poor API. Requires an ItemEntry, and uses a string to create a tag. Unused by Create.
 	 */
-	@ScheduledForRemoval(inVersion = "1.21.1+ Port")
 	@Deprecated(since = "6.0.7", forRemoval = true)
-	protected GeneratedRecipe metalOre(String name, ItemEntry<? extends Item> crushed, int duration) {
+	protected GeneratedRecipe metalOre(String name, Supplier<? extends Item> crushed, int duration) {
 		return create(name + "_ore", b -> b.duration(duration)
-			.withCondition(new NotCondition(new TagEmptyCondition("c", "ores/" + name)))
-			.require(AllTags.commonItemTag("ores/" + name))
+			.withCondition(ResourceConditions.tagsPopulated(TagKey.create(Registries.ITEM, Identifier.fromNamespaceAndPath("c", "ores/" + name))))
+			.require(TagKey.create(Registries.ITEM, Identifier.fromNamespaceAndPath("c", "ores/" + name)))
 			.output(crushed.get()));
 	}
 
@@ -45,13 +49,7 @@ public abstract class MillingRecipeGen extends StandardProcessingRecipeGen<Milli
 			.whenModLoaded(mod.getId()));
 	}
 
-	public MillingRecipeGen(PackOutput output, CompletableFuture<HolderLookup.Provider> registries, String defaultNamespace) {
-		super(output, registries, defaultNamespace);
-	}
 
-	@Override
-	protected AllRecipeTypes getRecipeType() {
-		return AllRecipeTypes.MILLING;
-	}
-
+    public MillingRecipeGen(PackOutput output, CompletableFuture<HolderLookup.Provider> registries, String namespace) { super(output, registries, namespace); }
+    @Override protected RecipeType<MillingRecipe> getRecipeType() { return AllRecipeTypes.MILLING; }
 }

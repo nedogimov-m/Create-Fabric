@@ -18,7 +18,8 @@ import com.google.common.collect.Sets;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.AllFluids;
 import com.simibubi.create.AllItems;
-import com.simibubi.create.AllTags.AllItemTags;
+import com.simibubi.create.Create;
+import net.minecraft.tags.TagKey;
 import com.simibubi.create.content.logistics.box.PackageStyles;
 import com.simibubi.create.foundation.advancement.CreateAdvancement.Builder;
 
@@ -31,15 +32,15 @@ import net.minecraft.data.CachedOutput;
 import net.minecraft.data.DataProvider;
 import net.minecraft.data.PackOutput;
 import net.minecraft.data.PackOutput.PathProvider;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.armortrim.ArmorTrim;
-import net.minecraft.world.item.armortrim.TrimMaterial;
-import net.minecraft.world.item.armortrim.TrimMaterials;
-import net.minecraft.world.item.armortrim.TrimPattern;
-import net.minecraft.world.item.armortrim.TrimPatterns;
+import net.minecraft.world.item.equipment.trim.ArmorTrim;
+import net.minecraft.world.item.equipment.trim.TrimMaterial;
+import net.minecraft.world.item.equipment.trim.TrimMaterials;
+import net.minecraft.world.item.equipment.trim.TrimPattern;
+import net.minecraft.world.item.equipment.trim.TrimPatterns;
 import net.minecraft.world.level.block.Blocks;
 
 public class AllAdvancements implements DataProvider {
@@ -282,7 +283,7 @@ public class AllAdvancements implements DataProvider {
 
 	// Logistics - Secret
 
-	PACKAGE_CHUTE_THROW = create("package_chute_throw", b -> b.icon(PackageStyles.getDefaultBox())
+	PACKAGE_CHUTE_THROW = create("package_chute_throw", b -> b.icon(registries -> PackageStyles.getDefaultBox())
 		.title("Nothing but net")
 		.description("Land your cardboard package throw in an item chute")
 		.after(CARDBOARD_ARMOR)
@@ -361,8 +362,7 @@ public class AllAdvancements implements DataProvider {
 		.description("Lower a Hose Pulley and watch it drain or fill a body of fluid")
 		.after(WATER_SUPPLY)),
 
-	CHOCOLATE_BUCKET = create("chocolate_bucket", b -> b.icon(AllFluids.CHOCOLATE.get()
-			.getBucket())
+	CHOCOLATE_BUCKET = create("chocolate_bucket", b -> b.icon(AllItems.CHOCOLATE_BUCKET)
 		.title("A World of Imagination")
 		.description("Obtain a bucket of molten chocolate")
 		.whenIconCollected()
@@ -605,7 +605,7 @@ public class AllAdvancements implements DataProvider {
 	TRAIN_TRACK = create("track_0", b -> b.icon(AllBlocks.TRACK)
 		.title("A New Gauge")
 		.description("Obtain some Train Tracks")
-		.whenItemCollected(AllItemTags.TRACKS.tag)
+		.whenItemCollected(TagKey.create(Registries.ITEM, Create.asResource("tracks")))
 		.after(STURDY_SHEET)),
 
 	TRAIN_WHISTLE = create("train_whistle", b -> b.icon(AllBlocks.STEAM_WHISTLE)
@@ -677,7 +677,7 @@ public class AllAdvancements implements DataProvider {
 			patternLookup.getOrThrow(TrimPatterns.SENTRY)
 		);
 
-		ItemStack asStack = AllItems.CARDBOARD_CHESTPLATE.asStack();
+		ItemStack asStack = new ItemStack(AllItems.CARDBOARD_CHESTPLATE);
 		asStack.set(DataComponents.TRIM, trim);
 		return asStack;
 	}
@@ -702,9 +702,9 @@ public class AllAdvancements implements DataProvider {
 			PathProvider pathProvider = output.createPathProvider(PackOutput.Target.DATA_PACK, "advancement");
 			List<CompletableFuture<?>> futures = new ArrayList<>();
 
-			Set<ResourceLocation> set = Sets.newHashSet();
+			Set<Identifier> set = Sets.newHashSet();
 			Consumer<AdvancementHolder> consumer = (advancement) -> {
-				ResourceLocation id = advancement.id();
+				Identifier id = advancement.id();
 				if (!set.add(id))
 					throw new IllegalStateException("Duplicate advancement " + id);
 				Path path = pathProvider.json(id);
@@ -730,6 +730,10 @@ public class AllAdvancements implements DataProvider {
 	}
 
 	public static void register() {
+	}
+
+	public static CreateAdvancement find(String id) {
+		return ENTRIES.stream().filter(advancement -> advancement.id().equals(id)).findFirst().orElse(null);
 	}
 
 }

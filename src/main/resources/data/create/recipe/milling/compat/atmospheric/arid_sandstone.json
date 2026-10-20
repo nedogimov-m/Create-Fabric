@@ -1,0 +1,20 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "atmospheric:arid_sandstone"
+  ],
+  "processing_time": 150,
+  "results": [
+    {
+      "id": "atmospheric:arid_sand"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "atmospheric"
+      ]
+    }
+  ]
+}

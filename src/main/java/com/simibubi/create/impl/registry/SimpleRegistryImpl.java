@@ -36,6 +36,7 @@ public abstract sealed class SimpleRegistryImpl<K, V> implements SimpleRegistry<
 		}
 
 		this.registrations.put(object, value);
+		this.invalidate();
 	}
 
 	@Override
@@ -47,6 +48,7 @@ public abstract sealed class SimpleRegistryImpl<K, V> implements SimpleRegistry<
 
 		// add to start of list so it's queried first
 		this.providers.add(0, provider);
+		this.invalidate();
 		provider.onRegister(this::invalidate);
 	}
 
@@ -99,7 +101,7 @@ public abstract sealed class SimpleRegistryImpl<K, V> implements SimpleRegistry<
 		}
 
 		@Override
-		public void invalidate() {
+		public synchronized void invalidate() {
 			this.providedValues.clear();
 		}
 
@@ -122,6 +124,7 @@ public abstract sealed class SimpleRegistryImpl<K, V> implements SimpleRegistry<
 			}
 
 			this.registrations.get(object).add(value);
+			this.invalidate();
 		}
 
 		@Override

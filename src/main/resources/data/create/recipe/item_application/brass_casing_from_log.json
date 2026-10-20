@@ -1,0 +1,12 @@
+{
+  "type": "create:item_application",
+  "ingredients": [
+    "#c:stripped_logs",
+    "#c:ingots/brass"
+  ],
+  "results": [
+    {
+      "id": "create:brass_casing"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "type": "create:filling",
+  "ingredients": [
+    "minecraft:apple",
+    {
+      "fluid_tag": "c:honey",
+      "amount": 20250
+    }
+  ],
+  "results": [
+    {
+      "id": "create:honeyed_apple"
+    }
+  ]
+}

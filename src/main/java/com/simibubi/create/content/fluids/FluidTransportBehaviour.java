@@ -1,36 +1,21 @@
 package com.simibubi.create.content.fluids;
-
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.IdentityHashMap;
-import java.util.Map;
-import java.util.function.Predicate;
-
+import java.util.*;
 import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.content.fluids.pipes.EncasedPipeBlock;
-import com.simibubi.create.content.fluids.pump.PumpBlock;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.data.WorldAttached;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.BlockAndTintGetter;
+import java.util.function.Predicate;
+import com.simibubi.create.foundation.fluid.FluidStack;
+import net.minecraft.core.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
+public abstract class FluidTransportBehaviour extends com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour {
+    public static final com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType<FluidTransportBehaviour> TYPE = new com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType<>();
+    @Override public com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType<?> getType() { return TYPE; }
 
-import net.neoforged.neoforge.fluids.FluidStack;
+    public interface Provider { FluidTransportBehaviour transport(); }
+    public Level getWorld() { return blockEntity.getLevel(); }
+    public BlockPos getPos() { return blockEntity.getBlockPos(); }
+    public void sync() { blockEntity.setChanged(); var world=getWorld();if(world!=null&&!world.isClientSide())world.sendBlockUpdated(getPos(),blockEntity.getBlockState(),blockEntity.getBlockState(),3); }
 
-public abstract class FluidTransportBehaviour extends BlockEntityBehaviour {
-
-	public static final BehaviourType<FluidTransportBehaviour> TYPE = new BehaviourType<>();
 
 	public enum UpdatePhase {
 		WAIT_FOR_PUMPS, // Do not run Layer II logic while pumps could still be distributing pressure
@@ -41,7 +26,7 @@ public abstract class FluidTransportBehaviour extends BlockEntityBehaviour {
 	public Map<Direction, PipeConnection> interfaces;
 	public UpdatePhase phase;
 
-	public FluidTransportBehaviour(SmartBlockEntity be) {
+	public FluidTransportBehaviour(net.minecraft.world.level.block.entity.BlockEntity be) {
 		super(be);
 		phase = UpdatePhase.WAIT_FOR_PUMPS;
 	}
@@ -52,18 +37,15 @@ public abstract class FluidTransportBehaviour extends BlockEntityBehaviour {
 
 	public abstract boolean canHaveFlowToward(BlockState state, Direction direction);
 
-	@Override
 	public void initialize() {
-		super.initialize();
 		createConnectionData();
 	}
 
-	@Override
 	public void tick() {
-		super.tick();
+        super.tick();
 		Level world = getWorld();
 		BlockPos pos = getPos();
-		boolean onServer = !world.isClientSide || blockEntity.isVirtual();
+		boolean onServer = !world.isClientSide() || blockEntity.isVirtual();
 
 		if (interfaces == null)
 			return;
@@ -91,7 +73,7 @@ public abstract class FluidTransportBehaviour extends BlockEntityBehaviour {
 				connection.manageSource(world, pos, blockEntity);
 			}
 			if (sendUpdate)
-				blockEntity.notifyUpdate();
+				sync();
 		}
 
 		if (phase == UpdatePhase.FLIP_FLOWS) {
@@ -135,42 +117,11 @@ public abstract class FluidTransportBehaviour extends BlockEntityBehaviour {
 			}
 
 			if (sendUpdate)
-				blockEntity.notifyUpdate();
+				sync();
 		}
 
 		for (PipeConnection connection : connections)
 			connection.tickFlowProgress(world, pos);
-	}
-
-	@Override
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(nbt, registries, clientPacket);
-		if (interfaces == null)
-			interfaces = new IdentityHashMap<>();
-		for (Direction face : Iterate.directions)
-			if (nbt.contains(face.getName()))
-				interfaces.computeIfAbsent(face, d -> new PipeConnection(d));
-
-		// Invalid data (missing/outdated). Defer init to runtime
-		if (interfaces.isEmpty()) {
-			interfaces = null;
-			return;
-		}
-
-		interfaces.values()
-			.forEach(connection -> connection.deserializeNBT(nbt, registries, blockEntity.getBlockPos(), clientPacket));
-	}
-
-	@Override
-	public void write(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(nbt, registries, clientPacket);
-		if (clientPacket)
-			createConnectionData();
-		if (interfaces == null)
-			return;
-
-		interfaces.values()
-			.forEach(connection -> connection.serializeNBT(nbt, registries, clientPacket));
 	}
 
 	public FluidStack getProvidedOutwardFluid(Direction side) {
@@ -209,12 +160,12 @@ public abstract class FluidTransportBehaviour extends BlockEntityBehaviour {
 			return;
 		interfaces.get(side)
 			.addPressure(inbound, pressure);
-		blockEntity.sendData();
+		sync();
 	}
 
 	public void wipePressure() {
 		if (interfaces != null)
-			for (Direction d : Iterate.directions) {
+			for (Direction d : Direction.values()) {
 				if (!canHaveFlowToward(blockEntity.getBlockState(), d))
 					interfaces.remove(d);
 				else
@@ -224,91 +175,62 @@ public abstract class FluidTransportBehaviour extends BlockEntityBehaviour {
 		createConnectionData();
 		interfaces.values()
 			.forEach(PipeConnection::wipePressure);
-		blockEntity.sendData();
+		sync();
 	}
 
 	private void createConnectionData() {
 		if (interfaces != null)
 			return;
 		interfaces = new IdentityHashMap<>();
-		for (Direction d : Iterate.directions)
+		for (Direction d : Direction.values())
 			if (canHaveFlowToward(blockEntity.getBlockState(), d))
 				interfaces.put(d, new PipeConnection(d));
 	}
 
-	public AttachmentTypes getRenderedRimAttachment(BlockAndTintGetter world, BlockPos pos, BlockState state,
-		Direction direction) {
-		if (!canHaveFlowToward(state, direction))
-			return AttachmentTypes.NONE;
-
-		BlockPos offsetPos = pos.relative(direction);
-		BlockState facingState = world.getBlockState(offsetPos);
-
-		if (facingState.getBlock() instanceof PumpBlock
-			&& facingState.getValue(PumpBlock.FACING) == direction.getOpposite())
-			return AttachmentTypes.NONE;
-
-		if (AllBlocks.ENCASED_FLUID_PIPE.has(facingState)
-			&& facingState.getValue(EncasedPipeBlock.FACING_TO_PROPERTY_MAP.get(direction.getOpposite())))
-			return AttachmentTypes.RIM;
-
-		if (FluidPropagator.hasFluidCapability(world, offsetPos, direction.getOpposite())
-			&& !AllBlocks.HOSE_PULLEY.has(facingState))
-			return AttachmentTypes.DRAIN;
-
-		return AttachmentTypes.RIM;
-	}
-
-	public enum AttachmentTypes {
-		NONE,
-		CONNECTION(ComponentPartials.CONNECTION),
-		DETAILED_CONNECTION(ComponentPartials.RIM_CONNECTOR),
-		RIM(ComponentPartials.RIM_CONNECTOR, ComponentPartials.RIM),
-		PARTIAL_RIM(ComponentPartials.RIM),
-		DRAIN(ComponentPartials.RIM_CONNECTOR, ComponentPartials.DRAIN),
-		PARTIAL_DRAIN(ComponentPartials.DRAIN);
-
-		public final ComponentPartials[] partials;
-
-		AttachmentTypes(ComponentPartials... partials) {
-			this.partials = partials;
-		}
-
-		public AttachmentTypes withoutConnector() {
-			if (this == AttachmentTypes.RIM)
-				return AttachmentTypes.PARTIAL_RIM;
-			if (this == AttachmentTypes.DRAIN)
-				return AttachmentTypes.PARTIAL_DRAIN;
-			return this;
-		}
-
-		public enum ComponentPartials {
-			CONNECTION, RIM_CONNECTOR, RIM, DRAIN;
-		}
-	}
-
-	@Override
-	public BehaviourType<?> getType() {
-		return TYPE;
-	}
-
-	// for switching TEs, but retaining flows
-
-	public static final WorldAttached<Map<BlockPos, Map<Direction, PipeConnection>>> interfaceTransfer =
-		new WorldAttached<>($ -> new HashMap<>());
-
-	public static void cacheFlows(LevelAccessor world, BlockPos pos) {
-		FluidTransportBehaviour pipe = BlockEntityBehaviour.get(world, pos, FluidTransportBehaviour.TYPE);
-		if (pipe != null)
-			interfaceTransfer.get(world)
-				.put(pos, pipe.interfaces);
-	}
-
-	public static void loadFlows(LevelAccessor world, BlockPos pos) {
-		FluidTransportBehaviour newPipe = BlockEntityBehaviour.get(world, pos, FluidTransportBehaviour.TYPE);
-		if (newPipe != null)
-			newPipe.interfaces = interfaceTransfer.get(world)
-				.remove(pos);
-	}
-
+    public enum AttachmentTypes {
+        NONE, CONNECTION, DETAILED_CONNECTION, RIM, PARTIAL_RIM, DRAIN, PARTIAL_DRAIN;
+        public AttachmentTypes withoutConnector(){return this==RIM?PARTIAL_RIM:this==DRAIN?PARTIAL_DRAIN:this;}
+        public java.util.List<String> parts(){return switch(this){case NONE->java.util.List.of();case CONNECTION->java.util.List.of("connection");case DETAILED_CONNECTION->java.util.List.of("rim_connector");case RIM->java.util.List.of("rim_connector","rim");case PARTIAL_RIM->java.util.List.of("rim");case DRAIN->java.util.List.of("rim_connector","drain");case PARTIAL_DRAIN->java.util.List.of("drain");};}
+    }
+    public record PipeRenderData(java.util.List<AttachmentTypes> attachments,boolean casing){}
+    /** Source rim hook on common native BlockGetter; no client-only world type is required. */
+    public AttachmentTypes getRenderedRimAttachment(net.minecraft.world.level.BlockGetter world,BlockPos pos,BlockState state,Direction direction){
+        if(!canHaveFlowToward(state,direction))return AttachmentTypes.NONE;
+        var offset=pos.relative(direction);var next=FluidPropagator.stateAt(world,offset);
+        if(next.getBlock() instanceof com.simibubi.create.content.fluids.pump.PumpBlock
+            &&next.getValue(com.simibubi.create.content.fluids.pump.PumpBlock.FACING)==direction.getOpposite())return AttachmentTypes.NONE;
+        if(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.EncasedPipeBlock
+            &&com.simibubi.create.content.fluids.pipes.FluidPipeBlock.isOpenAt(next,direction.getOpposite()))return AttachmentTypes.RIM;
+        if(FluidPropagator.hasFluidCapability(world,offset,direction.getOpposite())
+            &&!next.is(com.simibubi.create.AllBlocks.HOSE_PULLEY))return AttachmentTypes.DRAIN;
+        return AttachmentTypes.RIM;
+    }
+    public PipeRenderData renderData(){
+        var state=blockEntity.getBlockState();var level=getWorld();var attachments=new java.util.ArrayList<AttachmentTypes>();
+        for(var side:Direction.values()){
+            var type=AttachmentTypes.NONE;
+            if(level!=null&&canHaveFlowToward(state,side)){
+                var pos=getPos().relative(side);var next=level.isLoaded(pos)?FluidPropagator.stateAt(level,pos):net.minecraft.world.level.block.Blocks.AIR.defaultBlockState();
+                boolean normal=state.getBlock() instanceof com.simibubi.create.content.fluids.pipes.FluidPipeBlock,glass=state.getBlock() instanceof com.simibubi.create.content.fluids.pipes.IAxisPipe;
+                var axis=FluidPropagator.getStraightPipeAxis(state);var otherAxis=FluidPropagator.getStraightPipeAxis(next);
+                type=getRenderedRimAttachment(level,getPos(),state,side);
+                if(next.getBlock() instanceof com.simibubi.create.content.fluids.pump.PumpBlock&&next.getValue(com.simibubi.create.content.fluids.pump.PumpBlock.FACING)==side.getOpposite())type=AttachmentTypes.NONE;
+                if(normal&&!(state.getBlock() instanceof com.simibubi.create.content.fluids.pipes.EncasedPipeBlock)){
+                    if(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.FluidPipeBlock&&!(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.EncasedPipeBlock))type=axis==side.getAxis()?AttachmentTypes.CONNECTION:AttachmentTypes.DETAILED_CONNECTION;
+                    else if(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.AxisPipeBlock&&otherAxis==side.getAxis())type=axis==side.getAxis()?AttachmentTypes.CONNECTION:AttachmentTypes.DETAILED_CONNECTION;
+                    else if(type==AttachmentTypes.RIM&&FluidPropagator.getPipe(level,pos)!=null&&!(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.FluidPipeBlock))type=AttachmentTypes.DETAILED_CONNECTION;
+                }
+                if(state.getBlock() instanceof com.simibubi.create.content.fluids.pipes.EncasedPipeBlock&&type!=AttachmentTypes.DRAIN)type=AttachmentTypes.NONE;
+                if(glass){if(type==AttachmentTypes.RIM&&(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.FluidPipeBlock||axis==otherAxis))type=AttachmentTypes.NONE;type=type.withoutConnector();}
+                if((blockEntity instanceof com.simibubi.create.content.fluids.pump.PumpBlockEntity||blockEntity instanceof com.simibubi.create.content.fluids.pipes.valve.FluidValveBlockEntity)&&type==AttachmentTypes.RIM)type=AttachmentTypes.NONE;
+            }
+            attachments.add(type);
+        }
+        boolean casing=state.getBlock() instanceof com.simibubi.create.content.fluids.pipes.FluidPipeBlock&&!(state.getBlock() instanceof com.simibubi.create.content.fluids.pipes.EncasedPipeBlock)&&java.util.Arrays.stream(Direction.Axis.values()).anyMatch(axis->java.util.Arrays.stream(Direction.values()).filter(side->side.getAxis()!=axis&&canHaveFlowToward(state,side)).count()>2);
+        return new PipeRenderData(java.util.List.copyOf(attachments),casing);
+    }
+    public PipeRenderData clientRenderData=new PipeRenderData(java.util.Collections.nCopies(6,AttachmentTypes.NONE),false);
+    public Object getRenderData(){return clientRenderData;}
+    public void read(ValueInput root) { var in=root.childOrEmpty("Transport"); clientRenderData=new PipeRenderData(in.read("Attachments",com.mojang.serialization.Codec.INT.listOf()).orElse(java.util.List.of()).stream().map(n->AttachmentTypes.values()[Math.clamp(n,0,AttachmentTypes.values().length-1)]).toList(),in.getBooleanOr("Casing",false)); if(clientRenderData.attachments().size()!=6)clientRenderData=new PipeRenderData(java.util.Collections.nCopies(6,AttachmentTypes.NONE),false); interfaces=new IdentityHashMap<>();for(var side:Direction.values())in.child(side.getName()).ifPresent(data->{var connection=new PipeConnection(side);connection.read(data,getPos());interfaces.put(side,connection);});if(interfaces.isEmpty())interfaces=null; }
+    public void write(ValueOutput root) { var out=root.child("Transport"); var render=renderData();out.store("Attachments",com.mojang.serialization.Codec.INT.listOf(),render.attachments().stream().map(Enum::ordinal).toList());out.putBoolean("Casing",render.casing());createConnectionData();interfaces.forEach((side,c)->c.write(out.child(side.getName()))); }
 }

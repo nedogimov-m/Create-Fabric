@@ -1,335 +1,100 @@
 package com.simibubi.create.content.schematics;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.stream.Stream;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllItems;
-import com.simibubi.create.Create;
-import com.simibubi.create.content.schematics.SchematicExport.SchematicExportResult;
-import com.simibubi.create.content.schematics.table.SchematicTableBlockEntity;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.foundation.utility.CreatePaths;
-import com.simibubi.create.foundation.utility.FilesHelper;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-import com.simibubi.create.infrastructure.config.CSchematics;
-
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
-import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
+import com.simibubi.create.*;
+import com.simibubi.create.content.schematics.table.*;
+import com.simibubi.create.content.schematics.packet.SchematicUploadStatusPacket;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+import net.fabricmc.fabric.api.event.lifecycle.v1.*;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.core.*;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.item.ItemStack;
 
-public class ServerSchematicLoader {
-
-	private final Map<String, SchematicUploadEntry> activeUploads;
-
-	public static class SchematicUploadEntry {
-		public Level world;
-		public BlockPos tablePos;
-		public OutputStream stream;
-		public long bytesUploaded;
-		public long totalBytes;
-		public int idleTime;
-
-		public SchematicUploadEntry(OutputStream stream, long totalBytes, Level world, BlockPos tablePos) {
-			this.stream = stream;
-			this.totalBytes = totalBytes;
-			this.tablePos = tablePos;
-			this.world = world;
-			this.bytesUploaded = 0;
-			this.idleTime = 0;
-		}
-	}
-
-	public ServerSchematicLoader() {
-		activeUploads = new HashMap<>();
-	}
-
-	private final ObjectArrayList<String> deadEntries = ObjectArrayList.of();
-
-	public void tick() {
-		// Detect Timed out Uploads
-		int timeout = getConfig().schematicIdleTimeout.get();
-		for (String upload : activeUploads.keySet()) {
-			SchematicUploadEntry entry = activeUploads.get(upload);
-
-			if (entry.idleTime++ > timeout) {
-				Create.LOGGER.warn("Schematic Upload timed out: " + upload);
-				deadEntries.add(upload);
-			}
-		}
-
-		// Remove Timed out Uploads
-		for (String toRemove : deadEntries) {
-			this.cancelUpload(toRemove);
-		}
-		deadEntries.clear();
-	}
-
-	public void shutdown() {
-		// Close open streams
-		new HashSet<>(activeUploads.keySet()).forEach(this::cancelUpload);
-	}
-
-	public void handleNewUpload(ServerPlayer player, String schematic, long size, BlockPos pos) {
-		String playerName = player.getGameProfile().getName();
-
-		Path baseDir = CreatePaths.UPLOADED_SCHEMATICS_DIR;
-		Path playerPath = baseDir.resolve(playerName).normalize();
-		Path uploadPath = playerPath.resolve(schematic).normalize();
-		String playerSchematicId = playerName + "/" + schematic;
-
-		if (playerPath.startsWith(baseDir) && uploadPath.startsWith(playerPath)) {
-			FilesHelper.createFolderIfMissing(playerPath);
-		} else {
-			Create.LOGGER.warn("Attempted Schematic Upload with path traversal: {}", playerSchematicId);
-			return;
-		}
-
-		// Unsupported Format
-		if (!schematic.endsWith(".nbt")) {
-			Create.LOGGER.warn("Attempted Schematic Upload with non-supported Format: {}", playerSchematicId);
-			return;
-		}
-
-		// Too big
-		if (!validateSchematicSizeOnServer(player, size))
-			return;
-
-		// Skip existing Uploads
-		if (activeUploads.containsKey(playerSchematicId))
-			return;
-
-		try {
-			// Validate Referenced Block
-			SchematicTableBlockEntity table = getTable(player.getCommandSenderWorld(), pos);
-			if (table == null)
-				return;
-
-			// Delete schematic with same name
-			Files.deleteIfExists(uploadPath);
-
-			// Too many Schematics
-			long count;
-			try (Stream<Path> list = Files.list(playerPath)) {
-				count = list.count();
-			}
-
-			if (count >= getConfig().maxSchematics.get()) {
-				Stream<Path> list2 = Files.list(playerPath);
-				Optional<Path> lastFilePath = list2.filter(f -> !Files.isDirectory(f))
-					.min(Comparator.comparingLong(f -> f.toFile()
-						.lastModified()));
-				list2.close();
-				if (lastFilePath.isPresent()) {
-					Files.deleteIfExists(lastFilePath.get());
-				}
-			}
-
-			// Open Stream
-			OutputStream writer = Files.newOutputStream(uploadPath);
-			activeUploads.put(playerSchematicId, new SchematicUploadEntry(writer, size, player.level(), pos));
-
-			// Notify Block Entity
-			table.startUpload(schematic);
-		} catch (IOException e) {
-			Create.LOGGER.error("Exception Thrown when starting Upload: {}", playerSchematicId, e);
-		}
-	}
-
-	protected boolean validateSchematicSizeOnServer(ServerPlayer player, long size) {
-		long maxFileSize = getConfig().maxTotalSchematicSize.get();
-		if (size > maxFileSize * 1000) {
-			player.sendSystemMessage(CreateLang.translateDirect("schematics.uploadTooLarge")
-				.append(Component.literal(" (" + size / 1000 + " KB).")));
-			player.sendSystemMessage(CreateLang.translateDirect("schematics.maxAllowedSize")
-				.append(Component.literal(" " + maxFileSize + " KB")));
-			return false;
-		}
-		return true;
-	}
-
-	public CSchematics getConfig() {
-		return AllConfigs.server().schematics;
-	}
-
-	public void handleWriteRequest(ServerPlayer player, String schematic, byte[] data) {
-		String playerSchematicId = player.getGameProfile()
-			.getName() + "/" + schematic;
-
-		if (activeUploads.containsKey(playerSchematicId)) {
-			SchematicUploadEntry entry = activeUploads.get(playerSchematicId);
-			entry.bytesUploaded += data.length;
-
-			// Size Validations
-			if (data.length > getConfig().maxSchematicPacketSize.get()) {
-				Create.LOGGER.warn("Oversized Upload Packet received: {}", playerSchematicId);
-				cancelUpload(playerSchematicId);
-				return;
-			}
-
-			if (entry.bytesUploaded > entry.totalBytes) {
-				Create.LOGGER.warn("Received more data than Expected: {}", playerSchematicId);
-				cancelUpload(playerSchematicId);
-				return;
-			}
-
-			try {
-				entry.stream.write(data);
-				entry.idleTime = 0;
-
-				SchematicTableBlockEntity table = getTable(entry.world, entry.tablePos);
-				if (table == null)
-					return;
-				table.uploadingProgress = (float) ((double) entry.bytesUploaded / entry.totalBytes);
-				table.sendUpdate = true;
-
-			} catch (IOException e) {
-				Create.LOGGER.error("Exception Thrown when uploading Schematic: {}", playerSchematicId, e);
-				cancelUpload(playerSchematicId);
-			}
-		}
-	}
-
-	protected void cancelUpload(String playerSchematicId) {
-		if (!activeUploads.containsKey(playerSchematicId))
-			return;
-
-		SchematicUploadEntry entry = activeUploads.remove(playerSchematicId);
-		try {
-			entry.stream.close();
-			Files.deleteIfExists(CreatePaths.UPLOADED_SCHEMATICS_DIR.resolve(playerSchematicId));
-			Create.LOGGER.warn("Cancelled Schematic Upload: {}", playerSchematicId);
-		} catch (IOException e) {
-			Create.LOGGER.error("Exception Thrown when cancelling Upload: {}", playerSchematicId, e);
-		}
-
-		BlockPos pos = entry.tablePos;
-		if (pos == null)
-			return;
-
-		SchematicTableBlockEntity table = getTable(entry.world, pos);
-		if (table != null)
-			table.finishUpload();
-	}
-
-	public SchematicTableBlockEntity getTable(Level world, BlockPos pos) {
-		BlockEntity be = world.getBlockEntity(pos);
-		if (!(be instanceof SchematicTableBlockEntity table))
-			return null;
-		return table;
-	}
-
-	public void handleFinishedUpload(ServerPlayer player, String schematic) {
-		String playerSchematicId = player.getGameProfile()
-			.getName() + "/" + schematic;
-
-		if (activeUploads.containsKey(playerSchematicId)) {
-			try {
-				activeUploads.get(playerSchematicId).stream.close();
-				SchematicUploadEntry removed = activeUploads.remove(playerSchematicId);
-				Level world = removed.world;
-				BlockPos pos = removed.tablePos;
-
-				Create.LOGGER.info("New Schematic Uploaded: " + playerSchematicId);
-				if (pos == null)
-					return;
-
-				BlockState blockState = world.getBlockState(pos);
-				if (AllBlocks.SCHEMATIC_TABLE.get() != blockState.getBlock())
-					return;
-
-				SchematicTableBlockEntity table = getTable(world, pos);
-				if (table == null)
-					return;
-				table.finishUpload();
-				table.inventory.setStackInSlot(1, SchematicItem.create(world, schematic, player.getGameProfile()
-					.getName()));
-
-			} catch (IOException e) {
-				Create.LOGGER.error("Exception Thrown when finishing Upload: {}", playerSchematicId, e);
-			}
-		}
-	}
-
-	public void handleInstantSchematic(ServerPlayer player, String schematic, Level world, BlockPos pos,
-									   BlockPos bounds) {
-		String playerName = player.getGameProfile().getName();
-
-		Path baseDir = CreatePaths.UPLOADED_SCHEMATICS_DIR;
-		Path playerPath = baseDir.resolve(playerName).normalize();
-		Path uploadPath = playerPath.resolve(schematic).normalize();
-		String playerSchematicId = playerName + "/" + schematic;
-
-		if (playerPath.startsWith(baseDir) && uploadPath.startsWith(playerPath)) {
-			FilesHelper.createFolderIfMissing(playerPath);
-		} else {
-			Create.LOGGER.warn("Attempted Schematic Upload with path traversal: {}", playerSchematicId);
-			return;
-		}
-
-		// Unsupported Format
-		if (!schematic.endsWith(".nbt")) {
-			Create.LOGGER.warn("Attempted Schematic Upload with non-supported Format: {}", playerSchematicId);
-			return;
-		}
-
-		// Not holding S&Q
-		if (!AllItems.SCHEMATIC_AND_QUILL.isIn(player.getMainHandItem()))
-			return;
-
-		// if there's too many schematics, delete oldest
-		if (!tryDeleteOldestSchematic(playerPath))
-			return;
-
-		SchematicExportResult result = SchematicExport.saveSchematic(
-			playerPath, schematic, true,
-			world, pos, pos.offset(bounds).offset(-1, -1, -1)
-		);
-		if (result != null)
-			player.setItemInHand(InteractionHand.MAIN_HAND,
-				SchematicItem.create(world, schematic, playerName));
-		else
-			CreateLang.translate("schematicAndQuill.instant_failed")
-				.style(ChatFormatting.RED)
-				.sendStatus(player);
-	}
-
-	private boolean tryDeleteOldestSchematic(Path dir) {
-		try (Stream<Path> stream = Files.list(dir)) {
-			List<Path> files = stream.toList();
-			if (files.size() < getConfig().maxSchematics.get())
-				return true;
-			Optional<Path> oldest = files.stream().min(Comparator.comparingLong(this::getLastModifiedTime));
-			Files.delete(oldest.orElseThrow());
-			return true;
-		} catch (IOException | IllegalStateException e) {
-			Create.LOGGER.error("Error deleting oldest schematic", e);
-			return false;
-		}
-	}
-
-	private long getLastModifiedTime(Path file) {
-		try {
-			return Files.getLastModifiedTime(file).toMillis();
-		} catch (IOException e) {
-			Create.LOGGER.error("Error getting modification time of file {}", file.getFileName(), e);
-			throw new IllegalStateException(e);
-		}
-	}
-
+/** Actual live table/menu uploads; incomplete files never replace complete schematics or original fees. */
+public final class ServerSchematicLoader {
+    private static final Map<MinecraftServer,ServerSchematicLoader> SERVERS=new WeakHashMap<>();
+    private static final class Upload {
+        final UUID token,player;
+        final int menu,packetBytes;
+        final String file,owner;
+        final long expected;
+        final SchematicTableBlockEntity table;
+        final Path temporary,target;
+        final OutputStream stream;
+        long received,lastActivity;
+        Upload(UUID token,ServerPlayer player,int menu,String file,String owner,long expected,SchematicTableBlockEntity table,Path temporary,Path target,OutputStream stream,int packetBytes,long tick){this.token=token;this.player=player.getUUID();this.menu=menu;this.file=file;this.owner=owner;this.expected=expected;this.table=table;this.temporary=temporary;this.target=target;this.stream=stream;this.packetBytes=packetBytes;lastActivity=tick;}
+    }
+    private final MinecraftServer server;
+    private final Path root;
+    private final Map<UUID,Upload> uploads=new LinkedHashMap<>();
+    private ServerSchematicLoader(MinecraftServer server,Path root){this.server=Objects.requireNonNull(server);this.root=root.toAbsolutePath().normalize();}
+    public static ServerSchematicLoader get(MinecraftServer server){return SERVERS.computeIfAbsent(server,s->new ServerSchematicLoader(s,SchematicFiles.uploadedRoot()));}
+    public MinecraftServer server(){return server;}
+    public int activeUploads(){return uploads.size();}
+    public boolean handleInstantSchematic(ServerPlayer player,String schematic,BlockPos origin,BlockPos bounds){
+        if(player.level().getServer()!=server||server.getPlayerList().getPlayer(player.getUUID())!=player||player.isSpectator()||!player.mayBuild()||!player.getMainHandItem().is(AllItems.SCHEMATIC_AND_QUILL)||bounds.getX()<1||bounds.getY()<1||bounds.getZ()<1)return false;
+        var held=player.getMainHandItem();
+        try{
+            var file=SchematicFiles.fileName(schematic);var owner=SchematicFiles.ownerName(player.getName().getString());var last=new BlockPos(Math.addExact(origin.getX(),bounds.getX()-1),Math.addExact(origin.getY(),bounds.getY()-1),Math.addExact(origin.getZ(),bounds.getZ()-1));
+            if(!player.level().mayInteract(player,origin)||!player.level().mayInteract(player,last))return false;
+            var tag=SchematicExport.capture(player.level(),origin,last);var path=SchematicFiles.writeAtomic(root.resolve(owner),file,tag,true,Long.MAX_VALUE);
+            if(player.getMainHandItem()!=held)return false;var blueprint=SchematicItem.create(player.level(),file,owner);player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND,blueprint);trimCompletedFiles(path.getParent(),file);return true;
+        }catch(IOException|IllegalArgumentException|ArithmeticException failure){Create.LOGGER.warn("Unable to complete actual native instant quill export {}",schematic,failure);player.sendOverlayMessage(net.minecraft.network.chat.Component.translatable("create.schematicAndQuill.instant_failed").withStyle(net.minecraft.ChatFormatting.RED));return false;}
+    }
+    public boolean isActive(SchematicTableBlockEntity table,UUID token){return uploads.values().stream().anyMatch(upload->upload.table==table&&upload.token.equals(token));}
+    private long now(){return server.overworld().getGameTime();}
+    private boolean ownsMenu(ServerPlayer player,int id,SchematicTableBlockEntity table){return player.level().getServer()==server&&server.getPlayerList().getPlayer(player.getUUID())==player&&player.containerMenu instanceof SchematicTableMenu menu&&menu.containerId==id&&menu.owner==table&&menu.stillValid(player);}
+    private boolean current(Upload upload){var player=server.getPlayerList().getPlayer(upload.player);return player!=null&&ownsMenu(player,upload.menu,upload.table)&&upload.table.ownsUpload(this,upload.token);}
+    public boolean handleNewUpload(ServerPlayer player,int menu,UUID token,String schematic,long size,BlockPos pos){
+        if(uploads.containsKey(player.getUUID())||size<=0||size>SchematicConfig.get().maxTotalSchematicSize()*1000L||!(com.simibubi.create.content.schematics.SchematicWorldAccess.blockEntity(player.level(),pos) instanceof SchematicTableBlockEntity table)||!ownsMenu(player,menu,table))return false;
+        Path temporary=null;OutputStream stream=null;
+        try{
+            String file=SchematicFiles.fileName(schematic),owner=SchematicFiles.ownerName(player.getName().getString());var target=SchematicFiles.contained(root.resolve(owner),file);Files.createDirectories(target.getParent());temporary=Files.createTempFile(target.getParent(),".create-upload-",".pending");stream=Files.newOutputStream(temporary,StandardOpenOption.WRITE);
+            if(!table.beginUpload(this,token,file)){stream.close();Files.deleteIfExists(temporary);return false;}
+            var entry=new Upload(token,player,menu,file,owner,size,table,temporary,target,stream,SchematicConfig.get().maxSchematicPacketSize(),now());uploads.put(player.getUUID(),entry);status(entry,SchematicUploadStatusPacket.Stage.ACCEPTED);return true;
+        }catch(IOException|IllegalArgumentException failure){
+            if(stream!=null)try{stream.close();}catch(IOException close){failure.addSuppressed(close);}if(temporary!=null)try{Files.deleteIfExists(temporary);}catch(IOException cleanup){failure.addSuppressed(cleanup);}Create.LOGGER.warn("Unable to start native schematic upload {}",schematic,failure);return false;
+        }
+    }
+    public boolean handleWriteRequest(ServerPlayer player,UUID token,long offset,byte[] bytes){
+        var upload=uploads.get(player.getUUID());if(upload==null||!upload.token.equals(token))return false;
+        if(!current(upload)||bytes.length==0||bytes.length>upload.packetBytes||offset!=upload.received||bytes.length>upload.expected-upload.received){cancel(upload);return false;}
+        try{upload.stream.write(bytes);upload.received+=bytes.length;upload.lastActivity=now();upload.table.uploadProgress(this,token,upload.received,upload.expected);return true;}catch(IOException failure){Create.LOGGER.warn("Native schematic upload write failed",failure);cancel(upload);return false;}
+    }
+    public boolean handleFinishedUpload(ServerPlayer player,UUID token){
+        var upload=uploads.get(player.getUUID());if(upload==null||!upload.token.equals(token))return false;
+        if(!current(upload)||upload.received!=upload.expected){cancel(upload);return false;}
+        try{
+            upload.stream.close();var tag=SchematicFiles.readTag(upload.temporary);var template=SchematicFiles.decode(player.level(),tag);
+            if(!current(upload)){cancel(upload);return false;}
+            SchematicFiles.moveCompleted(upload.temporary,upload.target,true);
+            // Use metadata from the actual validated completed native structure.
+            var result=new ItemStack(AllItems.SCHEMATIC);result.set(AllDataComponents.SCHEMATIC_DEPLOYED,false);result.set(AllDataComponents.SCHEMATIC_OWNER,upload.owner);result.set(AllDataComponents.SCHEMATIC_FILE,upload.file);result.set(AllDataComponents.SCHEMATIC_ANCHOR,BlockPos.ZERO);result.set(AllDataComponents.SCHEMATIC_ROTATION,net.minecraft.world.level.block.Rotation.NONE);result.set(AllDataComponents.SCHEMATIC_MIRROR,net.minecraft.world.level.block.Mirror.NONE);result.set(AllDataComponents.SCHEMATIC_BOUNDS,template.getSize());
+            if(!upload.table.completeUpload(this,token,result)){cancel(upload);return false;}
+            uploads.remove(upload.player);status(upload,SchematicUploadStatusPacket.Stage.COMPLETED);trimCompletedFiles(upload.target.getParent(),upload.file);return true;
+        }catch(IOException|IllegalArgumentException failure){Create.LOGGER.warn("Unable to complete actual native schematic upload",failure);cancel(upload);return false;}
+    }
+    private void trimCompletedFiles(Path directory,String keep){
+        try{var files=new ArrayList<>(SchematicFiles.list(directory));files.remove(keep);files.sort(Comparator.comparingLong(name->{try{return Files.getLastModifiedTime(directory.resolve(name),LinkOption.NOFOLLOW_LINKS).toMillis();}catch(IOException failure){throw new UncheckedIOException(failure);}}));int remove=Math.max(0,files.size()+1-SchematicConfig.get().maxSchematics());for(int i=0;i<remove;i++)Files.delete(directory.resolve(files.get(i)));}catch(IOException|UncheckedIOException failure){Create.LOGGER.warn("Unable to prune an old completed schematic after successful native output",failure);}
+    }
+    public void tick(){for(var upload:List.copyOf(uploads.values()))if(!current(upload)||now()-upload.lastActivity>SchematicConfig.get().schematicIdleTimeout())cancel(upload);}
+    public void cancel(SchematicTableBlockEntity table,UUID token){for(var upload:List.copyOf(uploads.values()))if(upload.table==table&&upload.token.equals(token))cancel(upload);}
+    public void cancelForMenu(ServerPlayer player,int menu){var upload=uploads.get(player.getUUID());if(upload!=null&&upload.menu==menu)cancel(upload);}
+    public boolean cancelForMenu(ServerPlayer player,int menu,UUID token){var upload=uploads.get(player.getUUID());if(upload==null||upload.menu!=menu||!upload.token.equals(token))return false;cancel(upload);return true;}
+    private void status(Upload upload,SchematicUploadStatusPacket.Stage stage){var player=server.getPlayerList().getPlayer(upload.player);if(player!=null&&ServerPlayNetworking.canSend(player,SchematicUploadStatusPacket.TYPE))ServerPlayNetworking.send(player,new SchematicUploadStatusPacket(upload.token,stage,upload.file));}
+    private void cancel(Upload upload){
+        if(!uploads.remove(upload.player,upload))return;
+        try{upload.stream.close();}catch(IOException failure){Create.LOGGER.warn("Unable to close interrupted native schematic upload",failure);}
+        try{Files.deleteIfExists(upload.temporary);}catch(IOException failure){Create.LOGGER.warn("Unable to remove incomplete native schematic upload",failure);}
+        // Removed/unloaded BE objects never refund into the world. The saved native owner keeps
+        // its original private receipt and recovers it when that actual table loads again.
+        if(!upload.table.isRemoved()&&upload.table.getLevel()!=null&&com.simibubi.create.content.schematics.SchematicWorldAccess.blockEntity(upload.table.getLevel(),upload.table.getBlockPos())==upload.table)upload.table.cancelUpload(this,upload.token);
+        status(upload,SchematicUploadStatusPacket.Stage.CANCELLED);
+    }
+    public void shutdown(){for(var upload:List.copyOf(uploads.values()))cancel(upload);}
+    public static void register(){ServerTickEvents.END_SERVER_TICK.register(server->get(server).tick());ServerLifecycleEvents.SERVER_STOPPING.register(server->{var loader=SERVERS.remove(server);if(loader!=null)loader.shutdown();});}
 }

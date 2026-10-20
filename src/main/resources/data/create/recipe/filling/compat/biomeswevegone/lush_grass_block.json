@@ -1,0 +1,23 @@
+{
+  "type": "create:filling",
+  "ingredients": [
+    "biomeswevegone:lush_dirt",
+    {
+      "fluid": "minecraft:water",
+      "amount": 40500
+    }
+  ],
+  "results": [
+    {
+      "id": "biomeswevegone:lush_grass_block"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "biomeswevegone"
+      ]
+    }
+  ]
+}

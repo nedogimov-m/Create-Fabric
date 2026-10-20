@@ -4,8 +4,7 @@ import java.util.List;
 
 import com.google.common.collect.ImmutableList;
 import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.foundation.gui.ModularGuiLineBuilder;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.trains.schedule.ScheduleText;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
@@ -14,8 +13,6 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 public abstract class TimedWaitCondition extends ScheduleWaitCondition {
 
@@ -35,7 +32,7 @@ public abstract class TimedWaitCondition extends ScheduleWaitCondition {
 		}
 
 		public static List<Component> translatedOptions() {
-			return CreateLang.translatedOptions(null, TICKS.key, SECONDS.key, MINUTES.key);
+			return ScheduleText.options(null, TICKS.key, SECONDS.key, MINUTES.key);
 		}
 	}
 
@@ -60,14 +57,14 @@ public abstract class TimedWaitCondition extends ScheduleWaitCondition {
 		if (compact) {
             return Component.literal(getValue() + getUnit().suffix);
         }
-		return Component.literal(getValue() + " ").append(CreateLang.translateDirect(getUnit().key));
+		return Component.literal(getValue() + " ").append(ScheduleText.translate(getUnit().key));
 	}
 
 	@Override
 	public List<Component> getTitleAs(String type) {
 		return ImmutableList.of(
 			Component.translatable(getId().getNamespace() + ".schedule." + type + "." + getId().getPath()),
-			CreateLang.translateDirect("schedule.condition.for_x_time", formatTime(false))
+			ScheduleText.translate("schedule.condition.for_x_time", formatTime(false))
 				.withStyle(ChatFormatting.DARK_AQUA));
 	}
 
@@ -78,7 +75,7 @@ public abstract class TimedWaitCondition extends ScheduleWaitCondition {
 
 	@Override
 	public List<Component> getSecondLineTooltip(int slot) {
-		return ImmutableList.of(CreateLang.translateDirect("generic.duration"));
+		return ImmutableList.of(ScheduleText.translate("generic.duration"));
 	}
 
 	public int getValue() {
@@ -89,34 +86,19 @@ public abstract class TimedWaitCondition extends ScheduleWaitCondition {
 		return enumData("TimeUnit", TimeUnit.class);
 	}
 
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void initConfigurationWidgets(ModularGuiLineBuilder builder) {
-		builder.addScrollInput(0, 31, (i, l) -> {
-			i.titled(CreateLang.translateDirect("generic.duration"))
-				.withShiftStep(15)
-				.withRange(0, 121);
-			i.lockedTooltipX = -15;
-			i.lockedTooltipY = 35;
-		}, "Value");
-
-		builder.addSelectionScrollInput(36, 85, (i, l) -> {
-			i.forOptions(TimeUnit.translatedOptions())
-				.titled(CreateLang.translateDirect("generic.timeUnit"));
-		}, "TimeUnit");
-	}
+	
 
 	@Override
 	public MutableComponent getWaitingStatus(Level level, Train train, CompoundTag tag) {
-		int time = tag.getInt("Time");
+		int time = tag.getIntOr("Time", 0);
 		int ticksUntilDeparture = totalWaitTicks() - time;
 		boolean showInMinutes = ticksUntilDeparture >= 20 * 60;
 		int num =
 			(int) (showInMinutes ? Math.floor(ticksUntilDeparture / (20 * 60f)) : Math.ceil(ticksUntilDeparture / 100f) * 5);
 		String key = "generic." + (showInMinutes ? num == 1 ? "daytime.minute" : "unit.minutes"
 			: num == 1 ? "daytime.second" : "unit.seconds");
-        return CreateLang.translateDirect("schedule.condition." + getId().getPath() + ".status",
-			Component.literal(num + " ").append(CreateLang.translateDirect(key)));
+        return ScheduleText.translate("schedule.condition." + getId().getPath() + ".status",
+			Component.literal(num + " ").append(ScheduleText.translate(key)));
 	}
 
 }

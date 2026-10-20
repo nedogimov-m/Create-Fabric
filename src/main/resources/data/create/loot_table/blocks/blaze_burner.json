@@ -1,0 +1,107 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "bonus_rolls": 0.0,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "create:empty_blaze_burner",
+          "condition": {
+            "type": "minecraft:all_of",
+            "terms": [
+              {
+                "type": "minecraft:survives_explosion"
+              },
+              {
+                "type": "minecraft:match_block",
+                "blocks": "create:blaze_burner",
+                "state": {
+                  "blaze": "none"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "minecraft:item",
+          "name": "create:blaze_burner",
+          "condition": {
+            "type": "minecraft:all_of",
+            "terms": [
+              {
+                "type": "minecraft:survives_explosion"
+              },
+              {
+                "type": "minecraft:match_block",
+                "blocks": "create:blaze_burner",
+                "state": {
+                  "blaze": "smouldering"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "minecraft:item",
+          "name": "create:blaze_burner",
+          "condition": {
+            "type": "minecraft:all_of",
+            "terms": [
+              {
+                "type": "minecraft:survives_explosion"
+              },
+              {
+                "type": "minecraft:match_block",
+                "blocks": "create:blaze_burner",
+                "state": {
+                  "blaze": "fading"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "minecraft:item",
+          "name": "create:blaze_burner",
+          "condition": {
+            "type": "minecraft:all_of",
+            "terms": [
+              {
+                "type": "minecraft:survives_explosion"
+              },
+              {
+                "type": "minecraft:match_block",
+                "blocks": "create:blaze_burner",
+                "state": {
+                  "blaze": "kindled"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "minecraft:item",
+          "name": "create:blaze_burner",
+          "condition": {
+            "type": "minecraft:all_of",
+            "terms": [
+              {
+                "type": "minecraft:survives_explosion"
+              },
+              {
+                "type": "minecraft:match_block",
+                "blocks": "create:blaze_burner",
+                "state": {
+                  "blaze": "seething"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "rolls": 1.0
+    }
+  ],
+  "random_sequence": "create:blocks/blaze_burner"
+}

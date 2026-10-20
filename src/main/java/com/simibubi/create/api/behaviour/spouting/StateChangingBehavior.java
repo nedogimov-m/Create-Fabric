@@ -12,7 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.material.Fluid;
 
-import net.neoforged.neoforge.fluids.FluidStack;
+import com.simibubi.create.foundation.fluid.FluidStack;
 
 /**
  * An implementation of {@link BlockSpoutingBehaviour} that allows for easily modifying a BlockState through spouting.
@@ -21,14 +21,14 @@ import net.neoforged.neoforge.fluids.FluidStack;
  * @param canFill a predicate that must match the target BlockState to fill it
  * @param fillFunction a function that converts the current state into the filled one
  */
-public record StateChangingBehavior(int amount, Predicate<Fluid> fluidTest, Predicate<BlockState> canFill,
+public record StateChangingBehavior(long amount, Predicate<Fluid> fluidTest, Predicate<BlockState> canFill,
 									UnaryOperator<BlockState> fillFunction) implements BlockSpoutingBehaviour {
 	@Override
-	public int fillBlock(Level level, BlockPos pos, SpoutBlockEntity spout, FluidStack availableFluid, boolean simulate) {
-		if (availableFluid.getAmount() < this.amount || !this.fluidTest.test(availableFluid.getFluid()))
+	public long fillBlock(Level level, BlockPos pos, SpoutBlockEntity spout, FluidStack availableFluid, boolean simulate) {
+		if (availableFluid.getAmount() < this.amount || !this.fluidTest.test(availableFluid.variant().getFluid()))
 			return 0;
 
-		BlockState state = level.getBlockState(pos);
+		BlockState state = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockState(level,pos);
 		if (!this.canFill.test(state))
 			return 0;
 
@@ -43,7 +43,7 @@ public record StateChangingBehavior(int amount, Predicate<Fluid> fluidTest, Pred
 	/**
 	 * Shortcut for {@link #setTo(int, Predicate, BlockState)} that uses the Block's default state.
 	 */
-	public static BlockSpoutingBehaviour setTo(int amount, Predicate<Fluid> fluidTest, Block block) {
+	public static BlockSpoutingBehaviour setTo(long amount, Predicate<Fluid> fluidTest, Block block) {
 		return setTo(amount, fluidTest, block.defaultBlockState());
 	}
 
@@ -51,7 +51,7 @@ public record StateChangingBehavior(int amount, Predicate<Fluid> fluidTest, Pred
 	 * Create a {@link BlockSpoutingBehaviour} that will simply convert the target block to the given state.
 	 * @param newState the state that will be set after filling
 	 */
-	public static BlockSpoutingBehaviour setTo(int amount, Predicate<Fluid> fluidTest, BlockState newState) {
+	public static BlockSpoutingBehaviour setTo(long amount, Predicate<Fluid> fluidTest, BlockState newState) {
 		return new StateChangingBehavior(amount, fluidTest, state -> true, state -> newState);
 	}
 
@@ -60,7 +60,7 @@ public record StateChangingBehavior(int amount, Predicate<Fluid> fluidTest, Pred
 	 * its maximum value, consuming {@code amount} each time fluid is filled.
 	 * @param property the property that will be incremented by one on each fill
 	 */
-	public static BlockSpoutingBehaviour incrementingState(int amount, Predicate<Fluid> fluidTest, IntegerProperty property) {
+	public static BlockSpoutingBehaviour incrementingState(long amount, Predicate<Fluid> fluidTest, IntegerProperty property) {
 		int max = property.getPossibleValues().stream().max(Integer::compareTo).orElseThrow();
 
 		Predicate<BlockState> canFill = state -> state.hasProperty(property) && state.getValue(property) < max;

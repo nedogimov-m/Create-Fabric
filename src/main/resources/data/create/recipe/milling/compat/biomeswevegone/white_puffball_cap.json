@@ -1,0 +1,21 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "biomeswevegone:white_puffball_cap"
+  ],
+  "processing_time": 150,
+  "results": [
+    {
+      "chance": 0.25,
+      "id": "biomeswevegone:white_puffball_spores"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "biomeswevegone"
+      ]
+    }
+  ]
+}

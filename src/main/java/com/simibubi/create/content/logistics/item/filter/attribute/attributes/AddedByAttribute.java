@@ -20,9 +20,6 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
-import net.neoforged.fml.ModContainer;
-import net.neoforged.fml.ModList;
-import net.neoforged.neoforgespi.language.IModInfo;
 
 public record AddedByAttribute(String modId) implements ItemAttribute {
 	public static final MapCodec<AddedByAttribute> CODEC = Codec.STRING
@@ -34,8 +31,7 @@ public record AddedByAttribute(String modId) implements ItemAttribute {
 
 	@Override
 	public boolean appliesTo(ItemStack stack, Level world) {
-		return modId.equals(stack.getItem()
-			.getCreatorModId(stack));
+		return modId.equals(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace());
 	}
 
 	@Override
@@ -45,11 +41,7 @@ public record AddedByAttribute(String modId) implements ItemAttribute {
 
 	@Override
 	public Object[] getTranslationParameters() {
-		Optional<? extends ModContainer> modContainerById = ModList.get()
-			.getModContainerById(modId);
-		String name = modContainerById.map(ModContainer::getModInfo)
-			.map(IModInfo::getDisplayName)
-			.orElse(StringUtils.capitalize(modId));
+		String name=net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer(modId).map(container->container.getMetadata().getName()).orElse(StringUtils.capitalize(modId));
 		return new Object[]{name};
 	}
 
@@ -66,8 +58,7 @@ public record AddedByAttribute(String modId) implements ItemAttribute {
 
 		@Override
 		public List<ItemAttribute> getAllAttributes(ItemStack stack, Level level) {
-			String id = stack.getItem()
-				.getCreatorModId(stack);
+			String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace();
 			return id == null ? Collections.emptyList() : List.of(new AddedByAttribute(id));
 		}
 

@@ -1,23 +1,12 @@
 package com.simibubi.create.content.equipment.toolbox;
 
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.items.wrapper.PlayerMainInvWrapper;
+import java.util.*;
+import net.fabricmc.fabric.api.transfer.v1.item.*;
+import net.fabricmc.fabric.api.transfer.v1.storage.base.*;
+import net.minecraft.world.entity.player.Player;
 
-/**
- * For inserting items into a players' inventory anywhere except the hotbar
- */
-public class ItemReturnInvWrapper extends PlayerMainInvWrapper {
-
-	public ItemReturnInvWrapper(Inventory inv) {
-		super(inv);
-	}
-
-	@Override
-	public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
-		if (slot >= 0 && slot < 9)
-			return stack;
-		return super.insertItem(slot, stack, simulate);
-	}
-
+/** Actual player main slots 9..35; incompatible equipped items never spill into another hotbar link. */
+public final class ItemReturnInvWrapper extends CombinedStorage<ItemVariant,SingleSlotStorage<ItemVariant>> {
+    public ItemReturnInvWrapper(Player player){super(mainSlots(player));}
+    private static List<SingleSlotStorage<ItemVariant>> mainSlots(Player player){var storage=PlayerInventoryStorage.of(player);var slots=new ArrayList<SingleSlotStorage<ItemVariant>>(27);for(int slot=9;slot<36;slot++)slots.add(storage.getSlot(slot));return List.copyOf(slots);}
 }

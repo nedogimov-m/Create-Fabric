@@ -1,70 +1,18 @@
 package com.simibubi.create.content.logistics.chute;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.logistics.chute.ChuteBlock.Shape;
-
+import java.util.*;
 import net.minecraft.core.Direction;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.shapes.BooleanOp;
-import net.minecraft.world.phys.shapes.Shapes;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.*;
+import static net.minecraft.world.level.block.Block.box;
 
-public class ChuteShapes {
-
-	static Map<BlockState, VoxelShape> cache = new HashMap<>();
-	static Map<BlockState, VoxelShape> collisionCache = new HashMap<>();
-
-	public static final VoxelShape INTERSECTION_MASK = Block.box(0, -16, 0, 16, 16, 16);
-	public static final VoxelShape COLLISION_MASK = Block.box(0, 0, 0, 16, 24, 16);
-
-	public static VoxelShape createShape(BlockState state) {
-		if (AllBlocks.SMART_CHUTE.has(state))
-			return Shapes.block();
-		
-		Direction direction = state.getValue(ChuteBlock.FACING);
-		Shape shape = state.getValue(ChuteBlock.SHAPE);
-
-		boolean intersection = shape == Shape.INTERSECTION || shape == Shape.ENCASED;
-		if (direction == Direction.DOWN)
-			return intersection ? Shapes.block() : AllShapes.CHUTE;
-
-		VoxelShape combineWith = intersection ? Shapes.block() : Shapes.empty();
-		VoxelShape result = Shapes.or(combineWith, AllShapes.CHUTE_SLOPE.get(direction));
-		if (intersection)
-			result = Shapes.joinUnoptimized(INTERSECTION_MASK, result, BooleanOp.AND);
-		return result;
-	}
-
-	public static VoxelShape getShape(BlockState state) {
-		if (cache.containsKey(state))
-			return cache.get(state);
-		VoxelShape createdShape = createShape(state);
-		cache.put(state, createdShape);
-		return createdShape;
-	}
-
-	public static VoxelShape getCollisionShape(BlockState state) {
-		if (collisionCache.containsKey(state))
-			return collisionCache.get(state);
-		VoxelShape createdShape = Shapes.joinUnoptimized(COLLISION_MASK, getShape(state), BooleanOp.AND);
-		collisionCache.put(state, createdShape);
-		return createdShape;
-	}
-
-	public static final VoxelShape PANEL = Block.box(1, -15, 0, 15, 4, 1);
-
-	public static VoxelShape createSlope() {
-		VoxelShape shape = Shapes.empty();
-		for (int i = 0; i < 16; i++) {
-			float offset = i / 16f;
-			shape = Shapes.join(shape, PANEL.move(0, offset, offset), BooleanOp.OR);
-		}
-		return shape;
-	}
-
+public final class ChuteShapes {
+    private static final Map<BlockState,VoxelShape> CACHE=new java.util.concurrent.ConcurrentHashMap<>(),COLLISIONS=new java.util.concurrent.ConcurrentHashMap<>();
+    private static final VoxelShape VERTICAL=Shapes.or(box(1,8,1,15,16,15),box(2,0,2,14,8,14)),INTERSECTION_MASK=box(0,-16,0,16,16,16),COLLISION_MASK=box(0,0,0,16,24,16);
+    private static final Map<Direction,VoxelShape> SLOPES=new EnumMap<>(Direction.class);
+    static {var base=Shapes.empty();for(int i=0;i<16;i++)base=Shapes.or(base,box(1,-15,0,15,4,1).move(0,i/16d,i/16d));SLOPES.put(Direction.SOUTH,base);for(var facing:new Direction[]{Direction.WEST,Direction.NORTH,Direction.EAST}){var boxes=new ArrayList<VoxelShape>();base.forAllBoxes((x0,y0,z0,x1,y1,z1)->boxes.add(Shapes.box(1-z1,y0,x0,1-z0,y1,x1)));base=Shapes.or(Shapes.empty(),boxes.toArray(VoxelShape[]::new));SLOPES.put(facing,base);}}
+    public static VoxelShape getShape(BlockState state){return CACHE.computeIfAbsent(state,ChuteShapes::create);}
+    private static VoxelShape create(BlockState state){if(state.getBlock() instanceof SmartChuteBlock)return Shapes.block();var shape=state.getValue(ChuteBlock.SHAPE);boolean full=shape==ChuteBlock.Shape.INTERSECTION||shape==ChuteBlock.Shape.ENCASED;var facing=state.getValue(ChuteBlock.FACING);if(facing==Direction.DOWN)return full?Shapes.block():VERTICAL;var slope=SLOPES.get(facing);return full?Shapes.joinUnoptimized(INTERSECTION_MASK,Shapes.or(Shapes.block(),slope),BooleanOp.AND):slope;}
+    public static VoxelShape getCollisionShape(BlockState state){return COLLISIONS.computeIfAbsent(state,key->Shapes.joinUnoptimized(COLLISION_MASK,getShape(key),BooleanOp.AND));}
+    private ChuteShapes(){}
 }

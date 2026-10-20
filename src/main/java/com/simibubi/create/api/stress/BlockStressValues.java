@@ -1,54 +1,59 @@
 package com.simibubi.create.api.stress;
 
-import java.util.function.DoubleSupplier;
-
 import com.simibubi.create.api.registry.SimpleRegistry;
-import com.tterrag.registrate.util.nullness.NonNullConsumer;
-
 import net.minecraft.world.level.block.Block;
 
-public class BlockStressValues {
-	/**
-	 * Registry for suppliers of stress impacts. Determine the base impact at 1 RPM.
-	 */
-	public static final SimpleRegistry<Block, DoubleSupplier> IMPACTS = SimpleRegistry.create();
-	/**
-	 * Registry for suppliers of stress capacities. Determine the base capacity at 1 RPM.
-	 */
-	public static final SimpleRegistry<Block, DoubleSupplier> CAPACITIES = SimpleRegistry.create();
-	/**
-	 * Registry for generator RPM values. This is only used for tooltips; actual functionality is determined by the block.
-	 */
-	public static final SimpleRegistry<Block, GeneratedRpm> RPM = SimpleRegistry.create();
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.function.DoubleSupplier;
 
-	public static double getImpact(Block block) {
-		DoubleSupplier supplier = IMPACTS.get(block);
-		return supplier == null ? 0 : supplier.getAsDouble();
-	}
+/** Stress units at one RPM. Values follow the upstream Create defaults. */
+public final class BlockStressValues {
+    /** Source tooltip metadata; never changes actual generator behavior or stress accounting. */
+    public record GeneratedRpm(int value, boolean mayGenerateLess) {}
+    public static final SimpleRegistry<Block, GeneratedRpm> RPM = SimpleRegistry.create();
+    /** Suppliers of the base stress impact at one RPM, including addon providers. */
+    public static final SimpleRegistry<Block, DoubleSupplier> IMPACTS = SimpleRegistry.create();
+    /** Suppliers of the base stress capacity at one RPM, including addon providers. */
+    public static final SimpleRegistry<Block, DoubleSupplier> CAPACITIES = SimpleRegistry.create();
 
-	public static double getCapacity(Block block) {
-		DoubleSupplier supplier = CAPACITIES.get(block);
-		return supplier == null ? 0 : supplier.getAsDouble();
-	}
+    // Native block bootstrap defaults are fallback providers. Direct addon registrations retain
+    // source priority, while the later CStress config providers override these defaults.
+    private static final Map<Block, DoubleSupplier> DEFAULT_IMPACTS = new IdentityHashMap<>();
+    private static final Map<Block, DoubleSupplier> DEFAULT_CAPACITIES = new IdentityHashMap<>();
+    static {
+        IMPACTS.registerProvider(DEFAULT_IMPACTS::get);
+        CAPACITIES.registerProvider(DEFAULT_CAPACITIES::get);
+    }
 
-	/**
-	 * Shortcut for when a generator always generates the same RPM.
-	 */
-	public static NonNullConsumer<Block> setGeneratorSpeed(int value) {
-		return block -> RPM.register(block, new GeneratedRpm(value, false));
-	}
+    public static java.util.function.Consumer<Block> setGeneratorSpeed(int value) {
+        return setGeneratorSpeed(value, false);
+    }
+    public static java.util.function.Consumer<Block> setGeneratorSpeed(int value, boolean mayGenerateLess) {
+        return block -> RPM.register(block, new GeneratedRpm(value, mayGenerateLess));
+    }
 
-	/**
-	 * Utility for Registrate. Registers the given RPM generation info to blocks passed to the returned consumer.
-	 */
-	public static NonNullConsumer<Block> setGeneratorSpeed(int value, boolean mayGenerateLess) {
-		return block -> RPM.register(block, new GeneratedRpm(value, mayGenerateLess));
-	}
+    /** Native bootstrap fallback; addons can register live suppliers through IMPACTS. */
+    public static void registerImpact(Block block, double impact) {
+        DEFAULT_IMPACTS.put(block, () -> impact);
+        IMPACTS.invalidate();
+    }
 
-	public record GeneratedRpm(int value, boolean mayGenerateLess) {
-	}
+    /** Native bootstrap fallback; addons can register live suppliers through CAPACITIES. */
+    public static void registerCapacity(Block block, double capacity) {
+        DEFAULT_CAPACITIES.put(block, () -> capacity);
+        CAPACITIES.invalidate();
+    }
 
-	private BlockStressValues() {
-		throw new AssertionError("This class should not be instantiated");
-	}
+    public static double getImpact(Block block) {
+        DoubleSupplier supplier = IMPACTS.get(block);
+        return supplier == null ? 0 : supplier.getAsDouble();
+    }
+
+    public static double getCapacity(Block block) {
+        DoubleSupplier supplier = CAPACITIES.get(block);
+        return supplier == null ? 0 : supplier.getAsDouble();
+    }
+
+    private BlockStressValues() {}
 }

@@ -1,6 +1,7 @@
 {
-	"parent": "create:block/toolbox/lid/brown",
-	"textures": {
-		"0": "create:block/toolbox/yellow"
-	}
+  "parent": "create:block/toolbox/lid/brown",
+  "textures": {
+    "0": "create:block/toolbox/yellow",
+    "particle": "create:block/toolbox/yellow"
+  }
 }

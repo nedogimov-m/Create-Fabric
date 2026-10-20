@@ -1,0 +1,7 @@
+{
+  "replace": false,
+  "values": [
+    "create:capacity",
+    "create:potato_recovery"
+  ]
+}

@@ -6,11 +6,11 @@ import org.jetbrains.annotations.Nullable;
 
 import com.mojang.serialization.Codec;
 import com.simibubi.create.content.equipment.zapper.ZapperItem;
-import com.simibubi.create.foundation.gui.AllIcons;
 
-import net.createmod.catnip.lang.Lang;
 
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
+
+
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -26,26 +26,26 @@ import io.netty.buffer.ByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 public enum TerrainTools implements StringRepresentable {
-	Fill(AllIcons.I_FILL),
-	Place(AllIcons.I_PLACE),
-	Replace(AllIcons.I_REPLACE),
-	Clear(AllIcons.I_CLEAR),
-	Overlay(AllIcons.I_OVERLAY),
-	Flatten(AllIcons.I_FLATTEN);
+	Fill("I_FILL"),
+	Place("I_PLACE"),
+	Replace("I_REPLACE"),
+	Clear("I_CLEAR"),
+	Overlay("I_OVERLAY"),
+	Flatten("I_FLATTEN");
 
 	public static final Codec<TerrainTools> CODEC = StringRepresentable.fromValues(TerrainTools::values);
-	public static final StreamCodec<ByteBuf, TerrainTools> STREAM_CODEC = CatnipStreamCodecBuilders.ofEnum(TerrainTools.class);
+	public static final StreamCodec<ByteBuf, TerrainTools> STREAM_CODEC = com.simibubi.create.content.equipment.zapper.ZapperCodecs.enumCodec(TerrainTools.class);
 	public String translationKey;
-	public AllIcons icon;
+	public final String iconKey;
 
-	TerrainTools(AllIcons icon) {
-		this.translationKey = Lang.asId(name());
-		this.icon = icon;
+	TerrainTools(String icon) {
+		this.translationKey = name().toLowerCase(java.util.Locale.ROOT);
+		this.iconKey = icon;
 	}
 
 	@Override
 	public @NotNull String getSerializedName() {
-		return Lang.asId(name());
+		return name().toLowerCase(java.util.Locale.ROOT);
 	}
 
 	public boolean requiresSelectedBlock() {
@@ -55,23 +55,23 @@ public enum TerrainTools implements StringRepresentable {
 	public void run(Level world, List<BlockPos> targetPositions, Direction facing, @Nullable BlockState paintedState, @Nullable CompoundTag data, Player player) {
 		switch (this) {
 		case Clear:
-			targetPositions.forEach(p -> world.setBlockAndUpdate(p, Blocks.AIR.defaultBlockState()));
+			targetPositions.forEach(p -> com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.write(world,player,p, Blocks.AIR.defaultBlockState()));
 			break;
 		case Fill:
 			targetPositions.forEach(p -> {
-				BlockState toReplace = world.getBlockState(p);
+				BlockState toReplace = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,p);
 				if (!isReplaceable(toReplace))
 					return;
-				world.setBlockAndUpdate(p, paintedState);
-				ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
+				if (com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.writeForPainting(world,player,p, paintedState))
+					ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
 			});
 			break;
 		case Flatten:
-			FlattenTool.apply(world, targetPositions, facing);
+			FlattenTool.apply(world, targetPositions, facing,player);
 			break;
 		case Overlay:
 			targetPositions.forEach(p -> {
-				BlockState toOverlay = world.getBlockState(p);
+				BlockState toOverlay = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,p);
 				if (isReplaceable(toOverlay))
 					return;
 				if (toOverlay == paintedState)
@@ -79,26 +79,26 @@ public enum TerrainTools implements StringRepresentable {
 
 				p = p.above();
 
-				BlockState toReplace = world.getBlockState(p);
+				BlockState toReplace = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,p);
 				if (!isReplaceable(toReplace))
 					return;
-				world.setBlockAndUpdate(p, paintedState);
-				ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
+				if (com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.writeForPainting(world,player,p, paintedState))
+					ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
 			});
 			break;
 		case Place:
 			targetPositions.forEach(p -> {
-				world.setBlockAndUpdate(p, paintedState);
-				ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
+				if (com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.writeForPainting(world,player,p, paintedState))
+					ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
 			});
 			break;
 		case Replace:
 			targetPositions.forEach(p -> {
-				BlockState toReplace = world.getBlockState(p);
+				BlockState toReplace = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,p);
 				if (isReplaceable(toReplace))
 					return;
-				world.setBlockAndUpdate(p, paintedState);
-				ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
+				if (com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.writeForPainting(world,player,p, paintedState))
+					ZapperItem.setBlockEntityData(world, p, paintedState, data, player);
 			});
 			break;
 		}

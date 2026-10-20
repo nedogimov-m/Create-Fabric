@@ -1,0 +1,11 @@
+{
+  "values": {
+    "create_test:burner_superheated": {
+      "burn_time": 4567
+    },
+    "create_test:burner_both": {
+      "value": 4567,
+      "replace": true
+    }
+  }
+}

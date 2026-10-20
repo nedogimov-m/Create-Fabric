@@ -1,38 +1,44 @@
 package com.simibubi.create.api.data.recipe;
 
-import java.util.concurrent.CompletableFuture;
-
 import com.simibubi.create.AllRecipeTypes;
-import com.simibubi.create.content.kinetics.mixer.MixingRecipe;
-
-import net.minecraft.core.HolderLookup;
-import net.minecraft.data.PackOutput;
+import com.simibubi.create.*;
+import com.simibubi.create.content.processing.recipe.ProcessingRecipeBuilder;
+import com.simibubi.create.foundation.data.recipe.*;
+import com.simibubi.create.content.decoration.palettes.AllPaletteStoneTypes;
+import com.simibubi.create.foundation.block.CopperBlockSet;
+import com.simibubi.create.foundation.block.CopperBlockSet.Variant;
+import java.util.*;
+import java.util.function.*;
+import net.createmod.catnip.lang.Lang;
+import net.fabricmc.fabric.api.resource.conditions.v1.ResourceConditions;
+import net.minecraft.core.registries.*;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.*;
+import net.minecraft.util.Mth;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.crafting.Ingredient;
+import net.minecraft.world.level.ItemLike;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.WeatheringCopper.WeatherState;
 import net.minecraft.world.level.material.Fluids;
 
-/**
- * The base class for Mixing recipe generation.
- * Addons should extend this and use the {@link ProcessingRecipeGen#create} methods
- * to make recipes.
- * For an example of how you might do this, see Create's implementation: {@link com.simibubi.create.foundation.data.recipe.CreateMixingRecipeGen}.
- * Needs to be added to a registered recipe provider to do anything, see {@link com.simibubi.create.foundation.data.recipe.CreateRecipeProvider}
- */
-public abstract class MixingRecipeGen extends StandardProcessingRecipeGen<MixingRecipe> {
+import com.simibubi.create.content.processing.basin.BasinRecipe;
+import java.util.concurrent.CompletableFuture;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.data.PackOutput;
+import net.minecraft.world.item.crafting.RecipeType;
 
+/** Source recipe-generator category backed by the native 26.3 serializer. */
+public abstract class MixingRecipeGen extends StandardProcessingRecipeGen<BasinRecipe> {
 	protected GeneratedRecipe moddedMud(DatagenMod mod, String name) {
 		String mud = name + "_mud";
-		return create(mod.recipeId(mud), b -> b.require(Fluids.WATER, 250)
+		return create(mod.recipeId(mud), b -> b.require(Fluids.WATER, 250L * 81)
 			.require(mod, name + "_dirt")
 			.output(mod, mud)
 			.whenModLoaded(mod.getId()));
 	}
 
-	public MixingRecipeGen(PackOutput output, CompletableFuture<HolderLookup.Provider> registries, String defaultNamespace) {
-		super(output, registries, defaultNamespace);
-	}
 
-	@Override
-	protected AllRecipeTypes getRecipeType() {
-		return AllRecipeTypes.MIXING;
-	}
-
+    public MixingRecipeGen(PackOutput output, CompletableFuture<HolderLookup.Provider> registries, String namespace) { super(output, registries, namespace); }
+    @Override protected RecipeType<BasinRecipe> getRecipeType() { return AllRecipeTypes.MIXING; }
 }

@@ -1,194 +1,98 @@
 package com.simibubi.create.content.kinetics.crusher;
 
-import static com.simibubi.create.content.kinetics.crusher.CrushingWheelControllerBlock.VALID;
-
 import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.kinetics.base.RotatedPillarKineticBlock;
-import com.simibubi.create.foundation.block.IBE;
+import com.simibubi.create.content.kinetics.base.KineticBlock;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.entity.*;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
 
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.RenderShape;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
-
-public class CrushingWheelBlock extends RotatedPillarKineticBlock implements IBE<CrushingWheelBlockEntity> {
-
-	public CrushingWheelBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return state.getValue(AXIS);
-	}
-
-	@Override
-	public RenderShape getRenderShape(BlockState state) {
-		return RenderShape.ENTITYBLOCK_ANIMATED;
-	}
-
-	@Override
-	public VoxelShape getCollisionShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		return AllShapes.CRUSHING_WHEEL_COLLISION_SHAPE;
-	}
-
-	@Override
-	public void onRemove(BlockState state, Level worldIn, BlockPos pos, BlockState newState, boolean isMoving) {
-		for (Direction d : Iterate.directions) {
-			if (d.getAxis() == state.getValue(AXIS))
-				continue;
-			if (AllBlocks.CRUSHING_WHEEL_CONTROLLER.has(worldIn.getBlockState(pos.relative(d))))
-				worldIn.removeBlock(pos.relative(d), isMoving);
-		}
-
-		super.onRemove(state, worldIn, pos, newState, isMoving);
-	}
-
-	public void updateControllers(BlockState state, Level world, BlockPos pos, Direction side) {
-		if (side.getAxis() == state.getValue(AXIS))
-			return;
-		if (world == null)
-			return;
-
-		BlockPos controllerPos = pos.relative(side);
-		BlockPos otherWheelPos = pos.relative(side, 2);
-
-		boolean controllerExists = AllBlocks.CRUSHING_WHEEL_CONTROLLER.has(world.getBlockState(controllerPos));
-		boolean controllerIsValid = controllerExists && world.getBlockState(controllerPos)
-			.getValue(VALID);
-		Direction controllerOldDirection = controllerExists ? world.getBlockState(controllerPos)
-			.getValue(CrushingWheelControllerBlock.FACING) : null;
-
-		boolean controllerShouldExist = false;
-		boolean controllerShouldBeValid = false;
-		Direction controllerNewDirection = Direction.DOWN;
-
-		BlockState otherState = world.getBlockState(otherWheelPos);
-		if (AllBlocks.CRUSHING_WHEEL.has(otherState)) {
-			controllerShouldExist = true;
-
-			CrushingWheelBlockEntity be = getBlockEntity(world, pos);
-			CrushingWheelBlockEntity otherBE = getBlockEntity(world, otherWheelPos);
-
-			if (be != null && otherBE != null && (be.getSpeed() > 0) != (otherBE.getSpeed() > 0)
-				&& be.getSpeed() != 0 && otherBE.getSpeed() != 0) {
-				Axis wheelAxis = state.getValue(AXIS);
-				Axis sideAxis = side.getAxis();
-				int controllerADO = Math.round(Math.signum(be.getSpeed())) * side.getAxisDirection()
-					.getStep();
-				Vec3 controllerDirVec = new Vec3(wheelAxis == Axis.X ? 1 : 0, wheelAxis == Axis.Y ? 1 : 0,
-					wheelAxis == Axis.Z ? 1 : 0).cross(
-						new Vec3(sideAxis == Axis.X ? 1 : 0, sideAxis == Axis.Y ? 1 : 0, sideAxis == Axis.Z ? 1 : 0));
-
-				controllerNewDirection = Direction.getNearest(controllerDirVec.x * controllerADO,
-					controllerDirVec.y * controllerADO, controllerDirVec.z * controllerADO);
-
-				controllerShouldBeValid = true;
-			}
-			if (otherState.getValue(AXIS) != state.getValue(AXIS))
-				controllerShouldExist = false;
-		}
-
-		if (!controllerShouldExist) {
-			if (controllerExists)
-				world.setBlockAndUpdate(controllerPos, Blocks.AIR.defaultBlockState());
-			return;
-		}
-
-		if (!controllerExists) {
-			if (!world.getBlockState(controllerPos)
-				.canBeReplaced())
-				return;
-			world.setBlockAndUpdate(controllerPos, AllBlocks.CRUSHING_WHEEL_CONTROLLER.getDefaultState()
-				.setValue(VALID, controllerShouldBeValid)
-				.setValue(CrushingWheelControllerBlock.FACING, controllerNewDirection));
-		} else if (controllerIsValid != controllerShouldBeValid || controllerOldDirection != controllerNewDirection) {
-			world.setBlockAndUpdate(controllerPos, world.getBlockState(controllerPos)
-				.setValue(VALID, controllerShouldBeValid)
-				.setValue(CrushingWheelControllerBlock.FACING, controllerNewDirection));
-		}
-
-		AllBlocks.CRUSHING_WHEEL_CONTROLLER.get()
-			.updateSpeed(world.getBlockState(controllerPos), world, controllerPos);
-
-	}
-
-	@Override
-	public void entityInside(BlockState state, Level worldIn, BlockPos pos, Entity entityIn) {
-		if (entityIn.getY() < pos.getY() + 1.25f || !entityIn.onGround())
-			return;
-
-		float speed = getBlockEntityOptional(worldIn, pos).map(CrushingWheelBlockEntity::getSpeed)
-			.orElse(0f);
-
-		double x = 0;
-		double z = 0;
-
-		if (state.getValue(AXIS) == Axis.X) {
-			z = speed / 20f;
-			x += (pos.getX() + .5f - entityIn.getX()) * .1f;
-		}
-		if (state.getValue(AXIS) == Axis.Z) {
-			x = speed / -20f;
-			z += (pos.getZ() + .5f - entityIn.getZ()) * .1f;
-		}
-		entityIn.setDeltaMovement(entityIn.getDeltaMovement()
-			.add(x, 0, z));
-	}
-
-	@Override
-	public boolean canSurvive(BlockState state, LevelReader worldIn, BlockPos pos) {
-		for (Direction direction : Iterate.directions) {
-			BlockPos neighbourPos = pos.relative(direction);
-			BlockState neighbourState = worldIn.getBlockState(neighbourPos);
-			Axis stateAxis = state.getValue(AXIS);
-			if (AllBlocks.CRUSHING_WHEEL_CONTROLLER.has(neighbourState) && direction.getAxis() != stateAxis)
-				return false;
-			if (!AllBlocks.CRUSHING_WHEEL.has(neighbourState))
-				continue;
-			if (neighbourState.getValue(AXIS) != stateAxis || stateAxis != direction.getAxis())
-				return false;
-		}
-
-		return true;
-	}
-
-	@Override
-	public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-		return face.getAxis() == state.getValue(AXIS);
-	}
-
-	@Override
-	public float getParticleTargetRadius() {
-		return 1.125f;
-	}
-
-	@Override
-	public float getParticleInitialRadius() {
-		return 1f;
-	}
-
-	@Override
-	public Class<CrushingWheelBlockEntity> getBlockEntityClass() {
-		return CrushingWheelBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends CrushingWheelBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.CRUSHING_WHEEL.get();
-	}
-
+public final class CrushingWheelBlock extends KineticBlock {
+    public static final EnumProperty<Direction.Axis> AXIS = BlockStateProperties.AXIS;
+    public CrushingWheelBlock(Properties properties) {
+        super(properties.strength(2).sound(SoundType.STONE));
+        registerDefaultState(stateDefinition.any().setValue(AXIS, Direction.Axis.Y));
+    }
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { builder.add(AXIS); }
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context) {
+        Direction.Axis preferred = null;
+        for (var side : Direction.values()) {
+            var next = context.getClickedPos().relative(side); var neighbor = context.getLevel().getBlockState(next);
+            if (neighbor.getBlock() instanceof com.simibubi.create.content.kinetics.base.IRotate rotate
+                    && rotate.hasShaftTowards(context.getLevel(), next, neighbor, side.getOpposite())) {
+                if (preferred != null && preferred != side.getAxis()) { preferred = null; break; }
+                preferred = side.getAxis();
+            }
+        }
+        boolean shifting = context.getPlayer() != null && context.getPlayer().isShiftKeyDown();
+        return defaultBlockState().setValue(AXIS, preferred != null && !shifting ? preferred
+                : preferred != null ? context.getClickedFace().getAxis() : context.getNearestLookingDirection().getAxis());
+    }
+    @Override public Direction.Axis getRotationAxis(BlockState state) { return state.getValue(AXIS); }
+    @Override public boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face) { return face.getAxis() == getRotationAxis(state); }
+    @Override protected RenderShape getRenderShape(BlockState state) { return RenderShape.INVISIBLE; }
+    @Override protected VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) { return Shapes.block(); }
+    @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new CrushingWheelBlockEntity(pos, state); }
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) { return createTickerHelper(type, AllBlockEntityTypes.CRUSHING_WHEEL, CrushingWheelBlockEntity::tick); }
+    @Override protected boolean canSurvive(BlockState state, LevelReader level, BlockPos pos) {
+        for (var side : Direction.values()) {
+            var next = pos.relative(side);
+            if (!level.hasChunkAt(next)) continue;
+            var neighbor = level.getBlockState(next);
+            if (neighbor.is(AllBlocks.CRUSHING_WHEEL_CONTROLLER) && side.getAxis() != state.getValue(AXIS)) return false;
+            if (neighbor.is(this) && (neighbor.getValue(AXIS) != state.getValue(AXIS) || side.getAxis() != state.getValue(AXIS))) return false;
+        }
+        return true;
+    }
+    public static void updateControllers(Level level, BlockPos pos, BlockState state) {
+        if (!(level instanceof ServerLevel)) return;
+        for (var side : Direction.values()) {
+            if (side.getAxis() == state.getValue(AXIS)) continue;
+            var center = pos.relative(side); var other = pos.relative(side, 2);
+            if (!level.isLoaded(center) || !level.isLoaded(other)) continue;
+            var neighbor = level.getBlockState(other); var current = level.getBlockState(center);
+            if (neighbor.is(AllBlocks.CRUSHING_WHEEL) && neighbor.getValue(AXIS) == state.getValue(AXIS)) {
+                if (current.canBeReplaced() && !current.is(AllBlocks.CRUSHING_WHEEL_CONTROLLER)) {
+                    level.setBlockAndUpdate(center, AllBlocks.CRUSHING_WHEEL_CONTROLLER.defaultBlockState());
+                }
+                if (level.getBlockEntity(center) instanceof CrushingWheelControllerBlockEntity controller) controller.refreshDrive();
+            } else if (current.is(AllBlocks.CRUSHING_WHEEL_CONTROLLER) && level.getBlockEntity(center) instanceof CrushingWheelControllerBlockEntity controller) controller.refreshDrive();
+        }
+    }
+    @Override public void onPlace(BlockState state, Level level, BlockPos pos, BlockState old, boolean moved) {
+        super.onPlace(state, level, pos, old, moved);
+        if (!level.isClientSide()) level.scheduleTick(pos, this, 1);
+    }
+    @Override protected void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) { updateControllers(level, pos, state); }
+    @Override protected BlockState updateShape(BlockState state, LevelReader level, ScheduledTickAccess ticks, BlockPos pos, Direction side, BlockPos next, BlockState neighbor, RandomSource random) {
+        ticks.scheduleTick(pos, this, 1); return state;
+    }
+    @Override protected void affectNeighborsAfterRemoval(BlockState state, ServerLevel level, BlockPos pos, boolean moved) {
+        super.affectNeighborsAfterRemoval(state, level, pos, moved);
+        for (var side : Direction.values()) {
+            var center = pos.relative(side);
+            if (side.getAxis() != state.getValue(AXIS) && level.isLoaded(center) && level.getBlockEntity(center) instanceof CrushingWheelControllerBlockEntity controller) controller.refreshDrive();
+        }
+    }
+    @Override protected void entityInside(BlockState state, Level level, BlockPos pos, Entity entity, InsideBlockEffectApplier effects, boolean wasInside) {
+        if (entity.getY() < pos.getY() + 1.25 || !entity.onGround() || !(level.getBlockEntity(pos) instanceof CrushingWheelBlockEntity wheel)) return;
+        double speed = wheel.getSpeed();
+        var axis = state.getValue(AXIS);
+        if (axis == Direction.Axis.X) entity.addDeltaMovement(new Vec3((pos.getX() + 0.5 - entity.getX()) * 0.1, 0, speed / 20));
+        if (axis == Direction.Axis.Z) entity.addDeltaMovement(new Vec3(speed / -20, 0, (pos.getZ() + 0.5 - entity.getZ()) * 0.1));
+    }
+    @Override protected BlockState rotate(BlockState state, Rotation rotation) {
+        if (rotation == Rotation.CLOCKWISE_90 || rotation == Rotation.COUNTERCLOCKWISE_90) return state.setValue(AXIS,
+                state.getValue(AXIS) == Direction.Axis.X ? Direction.Axis.Z : state.getValue(AXIS) == Direction.Axis.Z ? Direction.Axis.X : Direction.Axis.Y);
+        return state;
+    }
 }

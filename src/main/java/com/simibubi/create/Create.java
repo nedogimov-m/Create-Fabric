@@ -1,218 +1,320 @@
 package com.simibubi.create;
 
-import java.util.Random;
-
+import com.simibubi.create.content.kinetics.KineticNetworks;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLevelEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemStorage;
+import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.mojang.logging.LogUtils;
-import com.simibubi.create.api.registrate.CreateRegistrateRegistrationCallback;
-import com.simibubi.create.compat.Mods;
-import com.simibubi.create.compat.computercraft.ComputerCraftProxy;
-import com.simibubi.create.compat.curios.Curios;
-import com.simibubi.create.compat.inventorySorter.InventorySorterCompat;
-import com.simibubi.create.content.decoration.palettes.AllPaletteBlocks;
-import com.simibubi.create.content.equipment.armor.AllArmorMaterials;
-import com.simibubi.create.content.equipment.potatoCannon.AllPotatoProjectileBlockHitActions;
-import com.simibubi.create.content.equipment.potatoCannon.AllPotatoProjectileEntityHitActions;
-import com.simibubi.create.content.equipment.potatoCannon.AllPotatoProjectileRenderModes;
-import com.simibubi.create.content.fluids.tank.BoilerHeaters;
-import com.simibubi.create.content.kinetics.TorquePropagator;
-import com.simibubi.create.content.kinetics.fan.processing.AllFanProcessingTypes;
-import com.simibubi.create.content.kinetics.mechanicalArm.AllArmInteractionPointTypes;
-import com.simibubi.create.content.logistics.item.filter.attribute.AllItemAttributeTypes;
-import com.simibubi.create.content.logistics.packagePort.AllPackagePortTargetTypes;
-import com.simibubi.create.content.logistics.packager.AllInventoryIdentifiers;
-import com.simibubi.create.content.logistics.packager.AllUnpackingHandlers;
-import com.simibubi.create.content.logistics.packagerLink.GlobalLogisticsManager;
-import com.simibubi.create.content.redstone.link.RedstoneLinkNetworkHandler;
-import com.simibubi.create.content.schematics.ServerSchematicLoader;
-import com.simibubi.create.content.trains.GlobalRailwayManager;
-import com.simibubi.create.content.trains.bogey.BogeySizes;
-import com.simibubi.create.content.trains.track.AllPortalTracks;
-import com.simibubi.create.foundation.CreateNBTProcessors;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.advancement.AllTriggers;
-import com.simibubi.create.foundation.data.CreateRegistrate;
-import com.simibubi.create.foundation.item.ItemDescription;
-import com.simibubi.create.foundation.item.KineticStats;
-import com.simibubi.create.foundation.item.TooltipModifier;
-import com.simibubi.create.foundation.recipe.AllIngredients;
-import com.simibubi.create.infrastructure.command.ServerLagger;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-import com.simibubi.create.infrastructure.data.CreateDatagen;
-import com.simibubi.create.infrastructure.worldgen.AllFeatures;
-import com.simibubi.create.infrastructure.worldgen.AllPlacementModifiers;
+public final class Create implements ModInitializer {
+  public static final String ID = "create";
+  public static final String NAME = "Create";
+  public static final com.google.gson.Gson GSON =
+      new com.google.gson.GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
-import net.createmod.catnip.lang.FontHelper;
-import net.createmod.catnip.lang.LangBuilder;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.item.CreativeModeTab;
-import net.minecraft.world.level.Level;
+  /** Use the random source of a local level or entity for new gameplay code. */
+  @Deprecated
+  public static final java.util.Random RANDOM = new java.util.Random();
 
-import net.neoforged.bus.api.EventPriority;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.ModContainer;
-import net.neoforged.fml.ModLoadingContext;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.neoforged.neoforge.common.NeoForgeMod;
-import net.neoforged.neoforge.registries.RegisterEvent;
+  public static final com.simibubi.create.content.kinetics.TorquePropagator TORQUE_PROPAGATOR =
+      new com.simibubi.create.content.kinetics.TorquePropagator();
+  public static final com.simibubi.create.content.redstone.link.RedstoneLinkNetworkHandler
+      REDSTONE_LINK_NETWORK_HANDLER =
+          com.simibubi.create.content.redstone.link.RedstoneLinkNetworkHandler.INSTANCE;
+  public static final Logger LOGGER = LoggerFactory.getLogger(ID);
 
-@Mod(Create.ID)
-public class Create {
-	public static final String ID = "create";
-	public static final String NAME = "Create";
+  public static Identifier asResource(String path) {
+    return Identifier.fromNamespaceAndPath(ID, path);
+  }
 
-	public static final Logger LOGGER = LogUtils.getLogger();
+  public static net.createmod.catnip.lang.LangBuilder lang() {
+    return new net.createmod.catnip.lang.LangBuilder(ID);
+  }
 
-	private static final StackWalker STACK_WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+  private static <B extends net.minecraft.world.level.block.entity.BlockEntity>
+      void registerItemStorage(
+          java.util.function.BiFunction<
+                  B,
+                  net.minecraft.core.Direction,
+                  net.fabricmc.fabric.api.transfer.v1.storage.Storage<
+                      net.fabricmc.fabric.api.transfer.v1.item.ItemVariant>>
+              provider,
+          net.minecraft.world.level.block.entity.BlockEntityType<B> type) {
+    ItemStorage.SIDED.registerForBlockEntity(
+        (be, side) ->
+            com.simibubi.create.foundation.item.WorldBlockEntityStorage.of(
+                be,
+                provider.apply(be, side),
+                net.fabricmc.fabric.api.transfer.v1.item.ItemVariant.blank()),
+        type);
+  }
 
-	public static final Gson GSON = new GsonBuilder().setPrettyPrinting()
-		.disableHtmlEscaping()
-		.create();
+  private static <B extends net.minecraft.world.level.block.entity.BlockEntity>
+      void registerFluidStorage(
+          java.util.function.BiFunction<
+                  B,
+                  net.minecraft.core.Direction,
+                  net.fabricmc.fabric.api.transfer.v1.storage.Storage<
+                      net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant>>
+              provider,
+          net.minecraft.world.level.block.entity.BlockEntityType<B> type) {
+    net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage.SIDED.registerForBlockEntity(
+        (be, side) ->
+            com.simibubi.create.foundation.item.WorldBlockEntityStorage.of(
+                be,
+                provider.apply(be, side),
+                net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant.blank()),
+        type);
+  }
 
-	/**
-	 * Use the {@link Random} of a local {@link Level} or {@link Entity} or create one
-	 */
-	@Deprecated
-	public static final Random RANDOM = new Random();
-
-	/**
-	 * <b>Other mods should not use this field!</b> If you are an addon developer, create your own instance of
-	 * {@link CreateRegistrate}.
-	 * </br
-	 * If you were using this instance to register a callback listener use {@link CreateRegistrateRegistrationCallback#register} instead.
-	 */
-	private static final CreateRegistrate REGISTRATE = CreateRegistrate.create(ID)
-		.defaultCreativeTab((ResourceKey<CreativeModeTab>) null)
-		.setTooltipModifierFactory(item ->
-			new ItemDescription.Modifier(item, FontHelper.Palette.STANDARD_CREATE)
-				.andThen(TooltipModifier.mapNull(KineticStats.create(item)))
-		);
-
-	public static final ServerSchematicLoader SCHEMATIC_RECEIVER = new ServerSchematicLoader();
-	public static final RedstoneLinkNetworkHandler REDSTONE_LINK_NETWORK_HANDLER = new RedstoneLinkNetworkHandler();
-	public static final TorquePropagator TORQUE_PROPAGATOR = new TorquePropagator();
-	public static final GlobalRailwayManager RAILWAYS = new GlobalRailwayManager();
-	public static final GlobalLogisticsManager LOGISTICS = new GlobalLogisticsManager();
-	public static final ServerLagger LAGGER = new ServerLagger();
-
-	public Create(IEventBus eventBus, ModContainer modContainer) {
-		onCtor(eventBus, modContainer);
-	}
-
-	public static void onCtor(IEventBus modEventBus, ModContainer modContainer) {
-		LOGGER.info("{} {} initializing! Commit hash: {}", NAME, CreateBuildInfo.VERSION, CreateBuildInfo.GIT_COMMIT);
-		ModLoadingContext modLoadingContext = ModLoadingContext.get();
-
-		REGISTRATE.registerEventListeners(modEventBus);
-
-		AllSoundEvents.prepare();
-		AllCreativeModeTabs.register(modEventBus);
-		AllArmorMaterials.register(modEventBus);
-		AllDisplaySources.register();
-		AllDisplayTargets.register();
-		AllBlocks.register();
-		AllItems.register();
-		AllFluids.register();
-		AllPaletteBlocks.register();
-		AllMenuTypes.register();
-		AllEntityTypes.register();
-		AllBlockEntityTypes.register();
-		AllRecipeTypes.register(modEventBus);
-		AllParticleTypes.register(modEventBus);
-		AllStructureProcessorTypes.register(modEventBus);
-		AllEntityDataSerializers.register(modEventBus);
-		AllPackets.register();
-		AllFeatures.register(modEventBus);
-		AllPlacementModifiers.register(modEventBus);
-		AllIngredients.register(modEventBus);
-		AllAttachmentTypes.register(modEventBus);
-		AllDataComponents.register(modEventBus);
-		AllMapDecorationTypes.register(modEventBus);
-		AllMountedStorageTypes.register();
-
-		AllConfigs.register(modLoadingContext, modContainer);
-
-		// TODO - Make these use Registry.register and move them into the RegisterEvent
-		AllPackagePortTargetTypes.register(modEventBus);
-
-		AllSchematicStateFilters.registerDefaults();
-
-		// FIXME: some of these registrations are not thread-safe
-		BogeySizes.init();
-		AllBogeyStyles.init();
-		// ----
-
-		ComputerCraftProxy.register();
-
-		NeoForgeMod.enableMilkFluid();
-
-		modEventBus.addListener(Create::init);
-		modEventBus.addListener(Create::onRegister);
-		modEventBus.addListener(AllEntityTypes::registerEntityAttributes);
-		modEventBus.addListener(EventPriority.HIGHEST, CreateDatagen::gatherDataHighPriority);
-		modEventBus.addListener(EventPriority.LOWEST, CreateDatagen::gatherData);
-		modEventBus.addListener(AllSoundEvents::register);
-
-		// FIXME: this is not thread-safe
-		Mods.CURIOS.executeIfInstalled(() -> () -> Curios.init(modEventBus));
-		Mods.INVENTORYSORTER.executeIfInstalled(() -> () -> InventorySorterCompat.init(modEventBus));
-	}
-
-	public static void init(final FMLCommonSetupEvent event) {
-		AllFluids.registerFluidInteractions();
-		CreateNBTProcessors.register();
-
-		event.enqueueWork(() -> {
-			// TODO: custom registration should all happen in one place
-			// Most registration happens in the constructor.
-			// These registrations use Create's registered objects directly so they must run after registration has finished.
-			BoilerHeaters.registerDefaults();
-			AllPortalTracks.registerDefaults();
-			AllBlockSpoutingBehaviours.registerDefaults();
-			AllMovementBehaviours.registerDefaults();
-			AllInteractionBehaviours.registerDefaults();
-			AllContraptionMovementSettings.registerDefaults();
-			AllOpenPipeEffectHandlers.registerDefaults();
-			AllMountedDispenseItemBehaviors.registerDefaults();
-			AllUnpackingHandlers.registerDefaults();
-			AllInventoryIdentifiers.registerDefaults();
-			// --
-		});
-	}
-
-	public static void onRegister(final RegisterEvent event) {
-		AllArmInteractionPointTypes.init();
-		AllFanProcessingTypes.init();
-		AllItemAttributeTypes.init();
-		AllContraptionTypes.init();
-		AllPotatoProjectileRenderModes.init();
-		AllPotatoProjectileEntityHitActions.init();
-		AllPotatoProjectileBlockHitActions.init();
-
-		if (event.getRegistry() == BuiltInRegistries.TRIGGER_TYPES) {
-			AllAdvancements.register();
-			AllTriggers.register();
-		}
-	}
-
-	public static LangBuilder lang() {
-		return new LangBuilder(ID);
-	}
-
-	public static ResourceLocation asResource(String path) {
-		return ResourceLocation.fromNamespaceAndPath(ID, path);
-	}
-
-	public static CreateRegistrate registrate() {
-		if (!STACK_WALKER.getCallerClass().getPackageName().startsWith("com.simibubi.create"))
-			throw new UnsupportedOperationException("Other mods are not permitted to use create's registrate instance.");
-		return REGISTRATE;
-	}
+  @Override
+  public void onInitialize() {
+    com.simibubi.create.foundation.data.recipe.CreateResourceConditions.register();
+    com.simibubi.create.content.decoration.copycat.CopycatConfig.reload();
+    com.simibubi.create.content.decoration.copycat.CopycatMaterialHooks.register();
+    AllFluids.register();
+    AllMapDecorationTypes.register();
+    AllBlocks.register();
+    com.simibubi.create.content.trains.schedule.hat.ConductorHatState.register();
+    com.simibubi.create.foundation.advancement.AllAdvancements.register();
+    com.simibubi.create.foundation.advancement.AllTriggers.register();
+    com.simibubi.create.content.kinetics.clock.CuckooClockAdvancements.register();
+    com.simibubi.create.content.kinetics.gauge.GaugeObservationNetworking.register();
+    com.simibubi.create.foundation.advancement.PrerequisiteAdvancements.register();
+    com.simibubi.create.foundation.advancement.GameplayAdvancements.register();
+    com.simibubi.create.content.kinetics.NativeKinetics.register();
+    com.simibubi.create.content.trains.track.AllPortalTracks.registerDefaults();
+    net.fabricmc.fabric.api.registry.FlammableBlockRegistry.getDefaultInstance()
+        .add(AllBlocks.CARDBOARD_BLOCK, 100, 20);
+    net.fabricmc.fabric.api.registry.FlammableBlockRegistry.getDefaultInstance().add(AllBlocks.BOUND_CARDBOARD_BLOCK,100,20);
+    AllItems.register();
+    com.simibubi.create.impl.registry.CreateDataMapsImpl.register();
+    AllStructureProcessorTypes.register();
+    AllSchematicStateFilters.registerDefaults();
+    AllSchematicRequirements.registerDefaults();
+    com.simibubi.create.content.schematics.table.SchematicTableMenu.register();
+    com.simibubi.create.content.schematics.cannon.SchematicannonMenu.register();
+    com.simibubi.create.content.schematics.ServerSchematicLoader.register();
+    com.simibubi.create.content.schematics.SchematicWaterUpdates.register();
+    com.simibubi.create.content.schematics.packet.SchematicUploadPacket.register();
+    com.simibubi.create.content.schematics.packet.SchematicSyncPacket.register();
+    com.simibubi.create.content.schematics.packet.InstantSchematicPacket.register();
+    com.simibubi.create.content.schematics.packet.SchematicPlacePacket.register();
+    com.simibubi.create.content.equipment.clipboard.ClipboardEditPacket.register();
+    com.simibubi.create.content.equipment.clipboard.ClipboardValueSettingsHandler.register();
+    com.simibubi.create.content.equipment.Equipment.register();
+    AllContraptionMovementSettings.registerDefaults();
+    AllMovementBehaviours.register();
+    com.simibubi.create.content.kinetics.simpleRelays.CogwheelBlockItem.register();
+    com.simibubi.create.content.contraptions.behaviour.dispenser.MountedDispenseItemBehaviors
+        .registerDefaults();
+    com.simibubi.create.content.decoration.slidingDoor.DoorStatePacket.register();
+    com.simibubi.create.content.redstone.contact.ContactChunkRevalidation.register();
+    com.simibubi.create.content.equipment.bell.HauntedBellPulser.register();
+    AllContraptionTypes.init();
+    com.simibubi.create.content.contraptions.minecart.MinecartConfig.reload();
+    com.simibubi.create.content.contraptions.minecart.capability.CapabilityMinecartController.register();
+    // Source HIGH coupling/wrench removal runs before the cart pickup endpoint.
+    com.simibubi.create.content.contraptions.minecart.MinecartCouplingItem.register();
+    com.simibubi.create.content.contraptions.mounted.MinecartContraptionItem.register();
+    com.simibubi.create.content.contraptions.mounted.CartAssemblerSettings.register();
+    com.simibubi.create.infrastructure.command.CouplingCommand.register();
+    net.createmod.ponder.command.PonderCommands.register();
+    AllMountedStorageTypes.init();
+    com.simibubi.create.content.contraptions.glue.SuperGlueHandler.register();
+    com.simibubi.create.content.logistics.tableCloth.ShopStockPacket.register();
+    com.simibubi.create.content.logistics.stockTicker.StockTickerMenu.register();
+    com.simibubi.create.content.logistics.stockTicker.StockTickerPaymentInspection.register();
+    com.simibubi.create.content.logistics.stockTicker.StockTickerCraftingPackets.register();
+    com.simibubi.create.content.logistics.stockTicker.StockTickerInteractionHandler.register();
+    com.simibubi.create.content.logistics.redstoneRequester.RedstoneRequesterMenu.register();
+    com.simibubi.create.content.logistics.factoryBoard.FactoryPanelMenu.register();
+    com.simibubi.create.content.logistics.filter.FilterMenu.register();
+    com.simibubi.create.content.logistics.filter.AttributeFilterMenu.register();
+    com.simibubi.create.content.kinetics.motor.KineticSpeedSettings.register();
+    com.simibubi.create.content.contraptions.actors.roller.RollerSettings.register();
+    com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringSettings.register();
+    com.simibubi.create.content.logistics.itemHatch.ItemHatchHandler.register();
+    com.simibubi.create.content.equipment.tool.CardboardSwordItem.register();
+    com.simibubi.create.content.equipment.TreeFertilizerItem.register();
+    com.simibubi.create.content.equipment.blueprint.Blueprints.register();
+    com.simibubi.create.content.redstone.thresholdSwitch.ThresholdSwitchMenu.register();
+    com.simibubi.create.content.logistics.funnel.FunnelItem.register();
+    com.simibubi.create.content.logistics.tunnel.TunnelSettings.register();
+    AllDataComponents.register();
+    com.simibubi.create.content.legacy.LegacyMaterials.register();
+        com.simibubi.create.content.trains.schedule.ScheduleNetworking.register();
+    com.simibubi.create.content.trains.entity.CarriageSyncData.register();
+    AllEntityTypes.register();
+    com.simibubi.create.content.trains.entity.CarriagePlayerReferences.register();
+    com.simibubi.create.content.trains.TrainAdvancements.register();
+    com.simibubi.create.content.kinetics.mechanicalArm.AllArmInteractionPointTypes.init();
+    com.simibubi.create.content.kinetics.mechanicalArm.ArmAdvancements.register();
+    com.simibubi.create.content.kinetics.mechanicalArm.ArmNetworking.register();
+    com.simibubi.create.content.logistics.depot.EjectorNetworking.register();
+    com.simibubi.create.content.contraptions.actors.trainControls.ControlsServerHandler.register();
+    com.simibubi.create.content.contraptions.ContraptionNetworking.register();
+    com.simibubi.create.content.logistics.filter.PackageFilterMenu.register();
+    com.simibubi.create.content.logistics.item.filter.attribute.AllItemAttributeTypes.init();
+    AllFluids.registerStorage();
+    com.simibubi.create.content.fluids.tank.BoilerHeaters.registerDefaults();
+    AllBlockEntityTypes.register();
+    AllSchematicNbt.registerDefaults();
+    registerItemStorage((table,side)->table.inventory.storage,AllBlockEntityTypes.SCHEMATIC_TABLE);
+    registerItemStorage((cannon,side)->cannon.inventory.storage,AllBlockEntityTypes.SCHEMATICANNON);
+    com.simibubi.create.content.equipment.toolbox.ToolboxNetworking.register();
+    com.simibubi.create.content.contraptions.wrench.RadialWrenchMenuSubmitPacket.register();
+    com.simibubi.create.content.equipment.symmetryWand.SymmetryWandNetworking.register();
+    registerItemStorage((toolbox,side)->toolbox.inventory,AllBlockEntityTypes.TOOLBOX);
+    AllDisplaySources.register();
+    AllDisplayTargets.register();
+    com.simibubi.create.content.redstone.displayLink.DisplayLinkMenu.register();
+    ServerTickEvents.END_LEVEL_TICK.register(
+        com.simibubi.create.content.trains.track.TrackConnectionCleanup::tick);
+    com.simibubi.create.content.trains.track.CurvedTrackDestroyPacket.register();
+    com.simibubi.create.content.contraptions.piston.PistonSettings.register();
+    com.simibubi.create.content.redstone.diodes.BrassDiodeSettings.register();
+    com.simibubi.create.content.contraptions.gantry.GantryContraptionUpdatePacket.register();
+    com.simibubi.create.content.contraptions.elevator.ElevatorNetworking.register();
+    com.simibubi.create.content.trains.station.StationNetworking.register();
+    com.simibubi.create.content.trains.signal.SignalEdgePoints.register();
+    com.simibubi.create.content.trains.observer.ObserverEdgePoints.register();
+    com.simibubi.create.content.trains.TrainManager.register();
+    com.simibubi.create.content.trains.entity.TrainRelocationPacket.register();
+    com.simibubi.create.content.logistics.packagePort.postbox.PostboxPlacement.register();
+    com.simibubi.create.content.trains.signal.SignalMenu.register();
+    com.simibubi.create.content.trains.track.TrackPortalCleanup.register();
+    com.simibubi.create.content.trains.RailwayGraphManager.register();
+    com.simibubi.create.content.trains.graph.sync.RailwayGraphSync.register();
+    com.simibubi.create.content.trains.signal.SignalEdgeGroupSync.register();
+    ServerTickEvents.END_LEVEL_TICK.register(
+        com.simibubi.create.content.contraptions.pulley.PulleyMirrorRestoration::tick);
+    com.simibubi.create.content.kinetics.transmission.sequencer.SequencedGearshiftMenu.register();
+    ServerTickEvents.END_LEVEL_TICK.register(
+        com.simibubi.create.content.contraptions.DeferredContraptionRestoration::tick);
+    ServerTickEvents.END_LEVEL_TICK.register(
+        com.simibubi.create.content.contraptions.ContraptionPassengerHandoff::tick);
+    com.simibubi.create.content.contraptions.ContraptionPassengerHandoff.register();
+    com.simibubi.create.content.contraptions.chassis.ChassisSettings.register();
+    REDSTONE_LINK_NETWORK_HANDLER.register();
+    com.simibubi.create.content.redstone.link.LinkHandler.register();
+    com.simibubi.create.content.redstone.link.controller.LinkedControllerPackets.register();
+    com.simibubi.create.content.redstone.link.controller.LinkedControllerMenu.register();
+    registerItemStorage(
+        (endpoint, side) -> endpoint.storage(), AllBlockEntityTypes.PORTABLE_STORAGE_INTERFACE);
+    registerFluidStorage(
+        (endpoint, side) -> endpoint.storage(), AllBlockEntityTypes.PORTABLE_FLUID_INTERFACE);
+    com.simibubi.create.content.logistics.packagePort.AllPackagePortTargetTypes.register();
+    com.simibubi.create.content.logistics.packagePort.PackagePortMenu.register();
+    registerItemStorage((port, side) -> port.itemHandler, AllBlockEntityTypes.PACKAGE_FROGPORT);
+    registerItemStorage((port, side) -> port.itemHandler, AllBlockEntityTypes.PACKAGE_POSTBOX);
+    com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorInteraction.register();
+    com.simibubi.create.content.kinetics.chainConveyor.ServerChainConveyorHandler.register();
+    com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorConnectionHandler.register();
+    registerItemStorage(
+        (ticker, side) -> ticker.receivedPayments.automation, AllBlockEntityTypes.STOCK_TICKER);
+    com.simibubi.create.content.logistics.packager.AllInventoryIdentifiers.registerDefaults();
+    registerItemStorage((vault, side) -> vault.storage(), AllBlockEntityTypes.ITEM_VAULT);
+    registerItemStorage((crate, side) -> crate.inv, AllBlockEntityTypes.CREATIVE_CRATE);
+    com.simibubi.create.content.logistics.packager.AllUnpackingHandlers.registerDefaults();
+    registerItemStorage((packager, side) -> packager.inventory, AllBlockEntityTypes.PACKAGER);
+    registerItemStorage((packager, side) -> packager.inventory, AllBlockEntityTypes.REPACKAGER);
+    AllRecipeTypes.register();
+    com.simibubi.create.content.kinetics.deployer.ManualApplicationRecipe.register();
+    com.simibubi.create.content.fluids.potion.BrewingReagentIngredient.register();
+    com.simibubi.create.content.processing.recipe.BlockTagIngredient.register();
+    com.simibubi.create.content.kinetics.crusher.CrushingWheelControllerBlockEntity.registerAttachments();
+    com.simibubi.create.content.kinetics.fan.processing.AllFanProcessingTypes.init();
+    com.simibubi.create.content.kinetics.fan.processing.FanProcessing.register();
+    com.simibubi.create.content.kinetics.fan.processing.HauntingHorseConversion.register();
+    AllSoundEvents.register();
+    AllParticleTypes.register();
+    AllBlockSpoutingBehaviours.registerDefaults();
+    AllOpenPipeEffectHandlers.registerDefaults();
+    registerFluidStorage(
+        (spout, side) -> side == net.minecraft.core.Direction.DOWN ? null : spout.tank,
+        AllBlockEntityTypes.SPOUT);
+    registerFluidStorage(
+        (drain, side) -> side == net.minecraft.core.Direction.UP ? null : drain.fluidStorage,
+        AllBlockEntityTypes.ITEM_DRAIN);
+    registerItemStorage(
+        (drain, side) -> side != null && side.getAxis().isHorizontal() ? drain.storage(side) : null,
+        AllBlockEntityTypes.ITEM_DRAIN);
+    registerFluidStorage(
+        (pulley, side) ->
+            side == null
+                    || com.simibubi.create.content.fluids.hosePulley.HosePulleyBlock.hasPipeTowards(
+                        pulley.getBlockState(), side)
+                ? pulley.storage
+                : null,
+        AllBlockEntityTypes.HOSE_PULLEY);
+    com.simibubi.create.infrastructure.worldgen.AllPlacedFeatures.register();
+    registerItemStorage((chute, side) -> chute.itemHandler, AllBlockEntityTypes.CHUTE);
+    registerItemStorage((chute, side) -> chute.itemHandler, AllBlockEntityTypes.SMART_CHUTE);
+    registerItemStorage(
+        (tunnel, side) -> tunnel.storage(side), AllBlockEntityTypes.ANDESITE_TUNNEL);
+    registerItemStorage((tunnel, side) -> tunnel.storage(side), AllBlockEntityTypes.BRASS_TUNNEL);
+    registerItemStorage((funnel, side) -> funnel.directInput, AllBlockEntityTypes.FUNNEL);
+    registerItemStorage((mill, side) -> mill.inventory.automation, AllBlockEntityTypes.MILLSTONE);
+    registerItemStorage((depot, side) -> depot.inventory.automation, AllBlockEntityTypes.DEPOT);
+    registerItemStorage((station, side) -> station.depotBehaviour.itemHandler, AllBlockEntityTypes.TRACK_STATION);
+    registerItemStorage((ejector, side) -> ejector.depotBehaviour.itemHandler, AllBlockEntityTypes.WEIGHTED_EJECTOR);
+    registerItemStorage((deployer, side) -> deployer.inventory, AllBlockEntityTypes.DEPLOYER);
+    registerItemStorage((basin, side) -> basin.inventory.automation, AllBlockEntityTypes.BASIN);
+    registerItemStorage((belt, side) -> belt.storage(side), AllBlockEntityTypes.BELT);
+    registerItemStorage(
+        (crusher, side) -> crusher.inventory, AllBlockEntityTypes.CRUSHING_WHEEL_CONTROLLER);
+    registerItemStorage(
+        (crafter, side) -> crafter.storage(), AllBlockEntityTypes.MECHANICAL_CRAFTER);
+    registerItemStorage((saw, side) -> saw.storage(side), AllBlockEntityTypes.SAW);
+    registerFluidStorage((basin, side) -> basin.fluids.automation, AllBlockEntityTypes.BASIN);
+    registerFluidStorage((tank, side) -> tank.storage(), AllBlockEntityTypes.FLUID_TANK);
+    registerFluidStorage((tank, side) -> tank.storage(), AllBlockEntityTypes.CREATIVE_FLUID_TANK);
+    ServerTickEvents.END_LEVEL_TICK.register(KineticNetworks::tick);
+    ServerTickEvents.END_LEVEL_TICK.register(com.simibubi.create.content.kinetics.deployer.DeployerOutputRecovery::tick);
+    ServerTickEvents.END_LEVEL_TICK.register(com.simibubi.create.content.kinetics.press.PressingWorldOutputRecovery::tick);
+    ServerTickEvents.END_LEVEL_TICK.register(com.simibubi.create.content.processing.basin.BasinOverflowRecovery::tick);
+    ServerTickEvents.END_LEVEL_TICK.register(
+        com.simibubi.create.content.contraptions.ContraptionHandler::tick);
+    ServerTickEvents.END_SERVER_TICK.register(
+        server ->
+            com.simibubi
+                .create
+                .content
+                .logistics
+                .packagerLink
+                .GlobalLogisticsManager
+                .get(server)
+                .tick());
+    net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.FULL_CHUNK_STATUS_CHANGE.register(
+        (level, chunk, previous, next) -> {
+          boolean loaded = next.isOrAfter(net.minecraft.server.level.FullChunkStatus.FULL);
+          if (loaded == previous.isOrAfter(net.minecraft.server.level.FullChunkStatus.FULL)) return;
+          // FULL can be reported inside its own conversion future; defer reads until it has
+          // returned.
+          for (var entity : java.util.List.copyOf(chunk.getBlockEntities().values()))
+            if (entity
+                instanceof
+                com.simibubi.create.content.logistics.packagerLink.PackagerLinkBlockEntity link) {
+              var logistics =
+                  com.simibubi.create.content.logistics.packagerLink.GlobalLogisticsManager.get(
+                      level);
+              if (loaded) logistics.scheduleInitialization(link);
+              else {
+                logistics.cancelInitialization(link);
+                link.behaviour.unload();
+              }
+            }
+        });
+    net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPED.register(
+        com.simibubi.create.content.logistics.packagerLink.GlobalLogisticsManager::unload);
+    ServerLevelEvents.LOAD.register((server, level) -> TORQUE_PROPAGATOR.onLoadWorld(level));
+    ServerLevelEvents.UNLOAD.register((server, level) -> KineticNetworks.unload(level));
+    com.simibubi.create.infrastructure.config.AllConfigs.register();
+    com.simibubi.create.foundation.utility.ServerSpeedProvider.register();
+    LOGGER.info("Create Fabric 26.3 development port initialized");
+  }
 }

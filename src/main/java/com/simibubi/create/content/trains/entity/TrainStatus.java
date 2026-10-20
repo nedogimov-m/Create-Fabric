@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import com.google.common.collect.Streams;
-import com.simibubi.create.foundation.utility.CreateLang;
+
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
@@ -115,16 +115,16 @@ public class TrainStatus {
 		Component component =
 			Component.literal(" - ").withStyle(ChatFormatting.GRAY)
 			.append(
-				CreateLang.translateDirect("train.status.collision").withStyle(st -> st.withColor(0xFFD3B4))
+				Component.translatable("create.train.status.collision").withStyle(st -> st.withColor(0xFFD3B4))
 			);
 		List<ResourceKey<Level>> presentDimensions = train.getPresentDimensions();
 		Stream<Component> locationComponents = presentDimensions.stream().map(key ->
                 {
                     return Component.literal(" - ").withStyle(ChatFormatting.GRAY)
                         .append(
-                            CreateLang.translateDirect(
-                                "train.status.collision.where",
-								key.location().toString(),
+                            Component.translatable(
+                                "create.train.status.collision.where",
+								key.identifier().toString(),
                                     train.getPositionInDimension(key).get().toShortString()
                                 ).withStyle(style -> style.withColor(0xFFD3B4))
                         );
@@ -152,8 +152,8 @@ public class TrainStatus {
 		if (owner == null)
 			return;
 		if (owner instanceof Player player) {
-			player.displayClientMessage(CreateLang.translateDirect("train.status", train.name)
-				.withStyle(ChatFormatting.GOLD), false);
+			player.sendSystemMessage(Component.translatable("create.train.status", train.name)
+				.withStyle(ChatFormatting.GOLD));
 			queued.forEach(message -> message.displayToPlayer(player));
 		}
 		queued.clear();
@@ -161,7 +161,7 @@ public class TrainStatus {
 
 	public void displayInformation(String key, boolean itsAGoodThing, Object... args) {
         MutableComponent component = Component.literal(" - ").withStyle(ChatFormatting.GRAY)
-			.append(CreateLang.translateDirect("train.status." + key, args)
+			.append(Component.translatable("create.train.status." + key, args)
 				.withStyle(st -> st.withColor(itsAGoodThing ? 0xD5ECC2 : 0xFFD3B4)));
 		addMessage(new StatusMessage(component));
 	}
@@ -180,7 +180,7 @@ public class TrainStatus {
 
 	public record StatusMessage(Component... messages) {
 		public void displayToPlayer(Player player) {
-			Arrays.stream(messages).forEach(messages -> player.displayClientMessage(messages, false));
+			Arrays.stream(messages).forEach(messages -> player.sendSystemMessage(messages));
 		}
 
 	};

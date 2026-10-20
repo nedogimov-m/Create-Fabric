@@ -1,665 +1,388 @@
 package com.simibubi.create.content.logistics.depot;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour;
-import com.simibubi.create.content.kinetics.belt.transport.TransportedItemStack;
 import com.simibubi.create.content.logistics.box.PackageEntity;
 import com.simibubi.create.content.logistics.funnel.AbstractFunnelBlock;
 import com.simibubi.create.content.logistics.funnel.FunnelBlock;
+import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollValueBehaviour;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.createmod.catnip.platform.CatnipServices;
-import net.createmod.catnip.data.IntAttached;
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.createmod.catnip.data.Pair;
-import net.createmod.catnip.math.VecHelper;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import net.createmod.catnip.animation.LerpedFloat;
 import net.createmod.catnip.animation.LerpedFloat.Chaser;
-import net.createmod.catnip.math.AngleHelper;
+import net.createmod.catnip.data.IntAttached;
+import net.createmod.catnip.data.Pair;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
+import net.fabricmc.fabric.api.transfer.v1.transaction.base.SnapshotParticipant;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.nbt.Tag;
-import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ElytraItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.level.ClipContext.Block;
-import net.minecraft.world.level.ClipContext.Fluid;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.ObserverBlock;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.PushReaction;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult.Type;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
-import net.neoforged.neoforge.items.ItemStackHandler;
 
-public class EjectorBlockEntity extends KineticBlockEntity {
-
-	List<IntAttached<ItemStack>> launchedItems;
-	ScrollValueBehaviour maxStackSize;
-	DepotBehaviour depotBehaviour;
-	EntityLauncher launcher;
-	LerpedFloat lidProgress;
-	boolean powered;
-	boolean launch;
-	State state;
-
-	// item collision
-	@Nullable
-	Pair<Vec3, BlockPos> earlyTarget;
-	float earlyTargetTime;
-	// runtime stuff
-	int scanCooldown;
-	ItemStack trackedItem;
-
-	public enum State {
-		CHARGED, LAUNCHING, RETRACTING;
-	}
-
-	public EjectorBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
-		super(typeIn, pos, state);
-		launcher = new EntityLauncher(1, 0);
-		lidProgress = LerpedFloat.linear()
-			.startWithValue(1);
-		this.state = State.RETRACTING;
-		launchedItems = new ArrayList<>();
-		powered = false;
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		event.registerBlockEntity(
-				Capabilities.ItemHandler.BLOCK,
-				AllBlockEntityTypes.WEIGHTED_EJECTOR.get(),
-				(be, context) -> be.depotBehaviour.itemHandler
-		);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		behaviours.add(depotBehaviour = new DepotBehaviour(this));
-
-		maxStackSize =
-			new ScrollValueBehaviour(CreateLang.translateDirect("weighted_ejector.stack_size"), this, new EjectorSlot())
-				.between(0, 64)
-				.withFormatter(i -> i == 0 ? "*" : String.valueOf(i));
-		behaviours.add(maxStackSize);
-
-		depotBehaviour.maxStackSize = () -> maxStackSize.getValue();
-		depotBehaviour.canAcceptItems = () -> state == State.CHARGED;
-		depotBehaviour.canFunnelsPullFrom = side -> side != getFacing();
-		depotBehaviour.enableMerging();
-		depotBehaviour.addSubBehaviours(behaviours);
-	}
-
-	@Override
-	public void initialize() {
-		super.initialize();
-		updateSignal();
-	}
-
-	public void activate() {
-		launch = true;
-		nudgeEntities();
-	}
-
-	protected boolean cannotLaunch() {
-		return state != State.CHARGED && !(level.isClientSide && state == State.LAUNCHING);
-	}
-
-	public void activateDeferred() {
-		if (cannotLaunch())
-			return;
-		Direction facing = getFacing();
-		List<Entity> entities =
-			level.getEntitiesOfClass(Entity.class, new AABB(worldPosition).inflate(-1 / 16f, 0, -1 / 16f));
-
-		// Launch Items
-		boolean doLogic = !level.isClientSide || isVirtual();
-		if (doLogic)
-			launchItems();
-
-		// Launch Entities
-		for (Entity entity : entities) {
-			boolean isPlayerEntity = entity instanceof Player;
-			if (!entity.isAlive())
-				continue;
-			if (entity instanceof ItemEntity)
-				continue;
-			if (entity instanceof PackageEntity)
-				continue;
-			if (entity.getPistonPushReaction() == PushReaction.IGNORE)
-				continue;
-
-			entity.setOnGround(false);
-
-			if (isPlayerEntity != level.isClientSide)
-				continue;
-
-			entity.setPos(worldPosition.getX() + .5f, worldPosition.getY() + 1, worldPosition.getZ() + .5f);
-			launcher.applyMotion(entity, facing);
-
-			if (!isPlayerEntity)
-				continue;
-
-			Player playerEntity = (Player) entity;
-
-			if (launcher.getHorizontalDistance() * launcher.getHorizontalDistance()
-				+ launcher.getVerticalDistance() * launcher.getVerticalDistance() >= 25 * 25)
-				CatnipServices.NETWORK.sendToServer(new EjectorAwardPacket(worldPosition));
-
-			if (!(playerEntity.getItemBySlot(EquipmentSlot.CHEST)
-				.getItem() instanceof ElytraItem))
-				continue;
-
-			playerEntity.setXRot(-35);
-			playerEntity.setYRot(facing.toYRot());
-			playerEntity.setDeltaMovement(playerEntity.getDeltaMovement()
-				.scale(.75f));
-			deployElytra(playerEntity);
-			CatnipServices.NETWORK.sendToServer(new EjectorElytraPacket(worldPosition));
-		}
-
-		if (doLogic) {
-			lidProgress.chase(1, .8f, Chaser.EXP);
-			state = State.LAUNCHING;
-			if (!level.isClientSide) {
-				level.playSound(null, worldPosition, SoundEvents.WOODEN_TRAPDOOR_CLOSE, SoundSource.BLOCKS, .35f, 1f);
-				level.playSound(null, worldPosition, SoundEvents.CHEST_OPEN, SoundSource.BLOCKS, .1f, 1.4f);
-			}
-		}
-	}
-
-	public void deployElytra(Player playerEntity) {
-		EntityHack.setElytraFlying(playerEntity);
-	}
-
-	protected void launchItems() {
-		ItemStack heldItemStack = depotBehaviour.getHeldItemStack();
-		Direction funnelFacing = getFacing().getOpposite();
-
-		if (AbstractFunnelBlock.getFunnelFacing(level.getBlockState(worldPosition.above())) == funnelFacing) {
-			DirectBeltInputBehaviour directOutput = getBehaviour(DirectBeltInputBehaviour.TYPE);
-
-			if (depotBehaviour.heldItem != null) {
-				ItemStack remainder = directOutput.tryExportingToBeltFunnel(heldItemStack, funnelFacing, false);
-				if (remainder == null)
-					;
-				else if (remainder.isEmpty())
-					depotBehaviour.removeHeldItem();
-				else if (remainder.getCount() != heldItemStack.getCount())
-					depotBehaviour.heldItem.stack = remainder;
-			}
-
-			for (Iterator<TransportedItemStack> iterator = depotBehaviour.incoming.iterator(); iterator.hasNext();) {
-				TransportedItemStack transportedItemStack = iterator.next();
-				ItemStack stack = transportedItemStack.stack;
-				ItemStack remainder = directOutput.tryExportingToBeltFunnel(stack, funnelFacing, false);
-				if (remainder == null)
-					;
-				else if (remainder.isEmpty())
-					iterator.remove();
-				else if (!ItemStack.isSameItem(remainder, stack))
-					transportedItemStack.stack = remainder;
-			}
-
-			ItemStackHandler outputs = depotBehaviour.processingOutputBuffer;
-			for (int i = 0; i < outputs.getSlots(); i++) {
-				ItemStack remainder =
-					directOutput.tryExportingToBeltFunnel(outputs.getStackInSlot(i), funnelFacing, false);
-				if (remainder != null)
-					outputs.setStackInSlot(i, remainder);
-			}
-			return;
-		}
-
-		if (!level.isClientSide)
-			for (Direction d : Iterate.directions) {
-				BlockState blockState = level.getBlockState(worldPosition.relative(d));
-				if (!(blockState.getBlock() instanceof ObserverBlock))
-					continue;
-				if (blockState.getValue(ObserverBlock.FACING) != d.getOpposite())
-					continue;
-				blockState.updateShape(d.getOpposite(), blockState, level, worldPosition.relative(d), worldPosition);
-			}
-
-		if (depotBehaviour.heldItem != null) {
-			addToLaunchedItems(heldItemStack);
-			depotBehaviour.removeHeldItem();
-		}
-
-		for (TransportedItemStack transportedItemStack : depotBehaviour.incoming)
-			addToLaunchedItems(transportedItemStack.stack);
-		depotBehaviour.incoming.clear();
-
-		ItemStackHandler outputs = depotBehaviour.processingOutputBuffer;
-		for (int i = 0; i < outputs.getSlots(); i++) {
-			ItemStack extractItem = outputs.extractItem(i, 64, false);
-			if (!extractItem.isEmpty())
-				addToLaunchedItems(extractItem);
-		}
-	}
-
-	protected boolean addToLaunchedItems(ItemStack stack) {
-		if ((!level.isClientSide || isVirtual()) && trackedItem == null && scanCooldown == 0) {
-			scanCooldown = AllConfigs.server().kinetics.ejectorScanInterval.get();
-			trackedItem = stack;
-		}
-		return launchedItems.add(IntAttached.withZero(stack));
-	}
-
-	protected Direction getFacing() {
-		BlockState blockState = getBlockState();
-		if (!AllBlocks.WEIGHTED_EJECTOR.has(blockState))
-			return Direction.UP;
-		Direction facing = blockState.getValue(EjectorBlock.HORIZONTAL_FACING);
-		return facing;
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		boolean doLogic = !level.isClientSide || isVirtual();
-		State prevState = state;
-		float totalTime = Math.max(3, (float) launcher.getTotalFlyingTicks());
-
-		if (scanCooldown > 0)
-			scanCooldown--;
-
-		if (launch) {
-			launch = false;
-			activateDeferred();
-		}
-
-		for (Iterator<IntAttached<ItemStack>> iterator = launchedItems.iterator(); iterator.hasNext();) {
-			IntAttached<ItemStack> intAttached = iterator.next();
-			boolean hit = false;
-			if (intAttached.getSecond() == trackedItem)
-				hit = scanTrajectoryForObstacles(intAttached.getFirst());
-			float maxTime = earlyTarget != null ? Math.min(earlyTargetTime, totalTime) : totalTime;
-			if (hit || intAttached.exceeds((int) maxTime)) {
-				placeItemAtTarget(doLogic, maxTime, intAttached);
-				iterator.remove();
-			}
-			intAttached.increment();
-		}
-
-		if (state == State.LAUNCHING) {
-			lidProgress.chase(1, .8f, Chaser.EXP);
-			lidProgress.tickChaser();
-			if (lidProgress.getValue() > 1 - 1 / 16f && doLogic) {
-				state = State.RETRACTING;
-				lidProgress.setValue(1);
-			}
-		}
-
-		if (state == State.CHARGED) {
-			lidProgress.setValue(0);
-			lidProgress.updateChaseSpeed(0);
-			if (doLogic)
-				ejectIfTriggered();
-		}
-
-		if (state == State.RETRACTING) {
-			if (lidProgress.getChaseTarget() == 1 && !lidProgress.settled()) {
-				lidProgress.tickChaser();
-			} else {
-				lidProgress.updateChaseTarget(0);
-				lidProgress.updateChaseSpeed(0);
-				if (lidProgress.getValue() == 0 && doLogic) {
-					state = State.CHARGED;
-					lidProgress.setValue(0);
-					sendData();
-				}
-
-				float value = Mth.clamp(lidProgress.getValue() - getWindUpSpeed(), 0, 1);
-				lidProgress.setValue(value);
-
-				int soundRate = (int) (1 / (getWindUpSpeed() * 5)) + 1;
-				float volume = .125f;
-				float pitch = 1.5f - lidProgress.getValue();
-				if (((int) level.getGameTime()) % soundRate == 0 && doLogic)
-					level.playSound(null, worldPosition, SoundEvents.WOODEN_BUTTON_CLICK_OFF, SoundSource.BLOCKS,
-						volume, pitch);
-			}
-		}
-
-		if (state != prevState)
-			notifyUpdate();
-	}
-
-	private boolean scanTrajectoryForObstacles(int time) {
-		if (time <= 2)
-			return false;
-
-		Vec3 source = getLaunchedItemLocation(time);
-		Vec3 target = getLaunchedItemLocation(time + 1);
-
-		BlockHitResult rayTraceBlocks = level.clip(new ClipContext(source, target, Block.COLLIDER, Fluid.NONE, CollisionContext.empty()));
-		boolean miss = rayTraceBlocks.getType() == Type.MISS;
-
-		if (!miss && rayTraceBlocks.getType() == Type.BLOCK) {
-			BlockState blockState = level.getBlockState(rayTraceBlocks.getBlockPos());
-			if (FunnelBlock.isFunnel(blockState) && blockState.hasProperty(FunnelBlock.EXTRACTING)
-				&& blockState.getValue(FunnelBlock.EXTRACTING))
-				miss = true;
-		}
-
-		if (miss) {
-			if (earlyTarget != null && earlyTargetTime < time + 1) {
-				earlyTarget = null;
-				earlyTargetTime = 0;
-			}
-			return false;
-		}
-
-		Vec3 vec = rayTraceBlocks.getLocation();
-		earlyTarget = Pair.of(vec.add(Vec3.atLowerCornerOf(rayTraceBlocks.getDirection()
-			.getNormal())
-			.scale(.25f)), rayTraceBlocks.getBlockPos());
-		earlyTargetTime = (float) (time + (source.distanceTo(vec) / source.distanceTo(target)));
-		sendData();
-		return true;
-	}
-
-	protected void nudgeEntities() {
-		for (Entity entity : level.getEntitiesOfClass(Entity.class,
-			new AABB(worldPosition).inflate(-1 / 16f, 0, -1 / 16f))) {
-			if (!entity.isAlive())
-				continue;
-			if (entity.getPistonPushReaction() == PushReaction.IGNORE)
-				continue;
-			if (!(entity instanceof Player))
-				entity.setPos(entity.getX(), entity.getY() + .125f, entity.getZ());
-		}
-	}
-
-	protected void ejectIfTriggered() {
-		if (powered)
-			return;
-		int presentStackSize = depotBehaviour.getPresentStackSize();
-		if (presentStackSize == 0)
-			return;
-		if (presentStackSize < maxStackSize.getValue())
-			return;
-		if (depotBehaviour.heldItem != null && depotBehaviour.heldItem.beltPosition < .49f)
-			return;
-
-		Direction funnelFacing = getFacing().getOpposite();
-		ItemStack held = depotBehaviour.getHeldItemStack();
-		if (AbstractFunnelBlock.getFunnelFacing(level.getBlockState(worldPosition.above())) == funnelFacing) {
-			DirectBeltInputBehaviour directOutput = getBehaviour(DirectBeltInputBehaviour.TYPE);
-			if (depotBehaviour.heldItem != null) {
-				ItemStack tryFunnel = directOutput.tryExportingToBeltFunnel(held, funnelFacing, true);
-				if (tryFunnel == null || !tryFunnel.isEmpty())
-					return;
-			}
-		}
-
-		DirectBeltInputBehaviour targetOpenInv = getTargetOpenInv();
-
-		// Do not eject if target cannot accept held item
-		if (targetOpenInv != null && depotBehaviour.heldItem != null
-			&& targetOpenInv.handleInsertion(held, Direction.UP, true)
-				.getCount() == held.getCount())
-			return;
-
-		activate();
-		notifyUpdate();
-	}
-
-	protected void placeItemAtTarget(boolean doLogic, float maxTime, IntAttached<ItemStack> intAttached) {
-		if (!doLogic)
-			return;
-		if (intAttached.getSecond() == trackedItem)
-			trackedItem = null;
-
-		DirectBeltInputBehaviour targetOpenInv = getTargetOpenInv();
-		if (targetOpenInv != null) {
-			ItemStack remainder = targetOpenInv.handleInsertion(intAttached.getValue(), Direction.UP, false);
-			intAttached.setSecond(remainder);
-		}
-
-		if (intAttached.getValue()
-			.isEmpty())
-			return;
-
-		Vec3 ejectVec = earlyTarget != null ? earlyTarget.getFirst() : getLaunchedItemLocation(maxTime);
-		Vec3 ejectMotionVec = getLaunchedItemMotion(maxTime);
-		ItemEntity item = new ItemEntity(level, ejectVec.x, ejectVec.y, ejectVec.z, intAttached.getValue());
-		item.setDeltaMovement(ejectMotionVec);
-		item.setDefaultPickUpDelay();
-		level.addFreshEntity(item);
-	}
-
-	public DirectBeltInputBehaviour getTargetOpenInv() {
-		BlockPos targetPos = earlyTarget != null ? earlyTarget.getSecond()
-			: worldPosition.above(launcher.getVerticalDistance())
-				.relative(getFacing(), Math.max(1, launcher.getHorizontalDistance()));
-		return BlockEntityBehaviour.get(level, targetPos, DirectBeltInputBehaviour.TYPE);
-	}
-
-	public Vec3 getLaunchedItemLocation(float time) {
-		return launcher.getGlobalPos(time, getFacing().getOpposite(), worldPosition);
-	}
-
-	public Vec3 getLaunchedItemMotion(float time) {
-		return launcher.getGlobalVelocity(time, getFacing().getOpposite(), worldPosition)
-			.scale(.5f);
-	}
-
-	@Override
-	public void destroy() {
-		super.destroy();
-		dropFlyingItems();
-	}
-
-	public void dropFlyingItems() {
-		for (IntAttached<ItemStack> intAttached : launchedItems) {
-			Vec3 ejectVec = getLaunchedItemLocation(intAttached.getFirst());
-			Vec3 ejectMotionVec = getLaunchedItemMotion(intAttached.getFirst());
-			ItemEntity item = new ItemEntity(level, 0, 0, 0, intAttached.getValue());
-			item.setPosRaw(ejectVec.x, ejectVec.y, ejectVec.z);
-			item.setDeltaMovement(ejectMotionVec);
-			item.setDefaultPickUpDelay();
-			level.addFreshEntity(item);
-		}
-		launchedItems.clear();
-	}
-
-	public float getWindUpSpeed() {
-		int hd = launcher.getHorizontalDistance();
-		int vd = launcher.getVerticalDistance();
-
-		float speedFactor = Math.abs(getSpeed()) / 256f;
-		float distanceFactor;
-		if (hd == 0 && vd == 0)
-			distanceFactor = 1;
-		else
-			distanceFactor = 1 * Mth.sqrt(hd * hd + vd * vd);
-		return speedFactor / distanceFactor;
-	}
-
-	@Override
-	protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(compound, registries, clientPacket);
-		compound.putInt("HorizontalDistance", launcher.getHorizontalDistance());
-		compound.putInt("VerticalDistance", launcher.getVerticalDistance());
-		compound.putBoolean("Powered", powered);
-		NBTHelper.writeEnum(compound, "State", state);
-		compound.put("Lid", lidProgress.writeNBT());
-		compound.put("LaunchedItems",
-			NBTHelper.writeCompoundList(launchedItems, ia -> ia.serializeNBT(s -> (CompoundTag) s.saveOptional(registries))));
-
-		if (earlyTarget != null) {
-			compound.put("EarlyTarget", VecHelper.writeNBT(earlyTarget.getFirst()));
-			compound.put("EarlyTargetPos", NbtUtils.writeBlockPos(earlyTarget.getSecond()));
-			compound.putFloat("EarlyTargetTime", earlyTargetTime);
-		}
-	}
-
-	@Override
-	public void writeSafe(CompoundTag compound, HolderLookup.Provider registries) {
-		super.writeSafe(compound, registries);
-		compound.putInt("HorizontalDistance", launcher.getHorizontalDistance());
-		compound.putInt("VerticalDistance", launcher.getVerticalDistance());
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-		int horizontalDistance = compound.getInt("HorizontalDistance");
-		int verticalDistance = compound.getInt("VerticalDistance");
-
-		if (launcher.getHorizontalDistance() != horizontalDistance
-			|| launcher.getVerticalDistance() != verticalDistance) {
-			launcher.set(horizontalDistance, verticalDistance);
-			launcher.clamp(AllConfigs.server().kinetics.maxEjectorDistance.get());
-		}
-
-		powered = compound.getBoolean("Powered");
-		state = NBTHelper.readEnum(compound, "State", State.class);
-		lidProgress.readNBT(compound.getCompound("Lid"), false);
-		launchedItems = NBTHelper.readCompoundList(compound.getList("LaunchedItems", Tag.TAG_COMPOUND),
-			nbt -> IntAttached.read(nbt, t -> ItemStack.parseOptional(registries, t)));
-
-		earlyTarget = null;
-		earlyTargetTime = 0;
-		if (compound.contains("EarlyTarget")) {
-			earlyTarget = Pair.of(VecHelper.readNBT(compound.getList("EarlyTarget", Tag.TAG_DOUBLE)),
-					NBTHelper.readBlockPos(compound, "EarlyTargetPos"));
-			earlyTargetTime = compound.getFloat("EarlyTargetTime");
-		}
-
-		if (compound.contains("ForceAngle"))
-			lidProgress.startWithValue(compound.getFloat("ForceAngle"));
-	}
-
-	public void updateSignal() {
-		boolean shoudPower = level.hasNeighborSignal(worldPosition);
-		if (shoudPower == powered)
-			return;
-		powered = shoudPower;
-		sendData();
-	}
-
-	public void setTarget(int horizontalDistance, int verticalDistance) {
-		launcher.set(Math.max(1, horizontalDistance), verticalDistance);
-		sendData();
-	}
-
-	public BlockPos getTargetPosition() {
-		BlockState blockState = getBlockState();
-		if (!AllBlocks.WEIGHTED_EJECTOR.has(blockState))
-			return worldPosition;
-		Direction facing = blockState.getValue(EjectorBlock.HORIZONTAL_FACING);
-		return worldPosition.relative(facing, launcher.getHorizontalDistance())
-			.above(launcher.getVerticalDistance());
-	}
-
-	public float getLidProgress(float pt) {
-		return lidProgress.getValue(pt);
-	}
-
-	public State getState() {
-		return state;
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public AABB getRenderBoundingBox() {
-		return AABB.INFINITE;
-	}
-
-	private static abstract class EntityHack extends Entity {
-
-		public EntityHack(EntityType<?> p_i48580_1_, Level p_i48580_2_) {
-			super(p_i48580_1_, p_i48580_2_);
-		}
-
-		public static void setElytraFlying(Entity e) {
-			SynchedEntityData data = e.getEntityData();
-			data.set(DATA_SHARED_FLAGS_ID, (byte) (data.get(DATA_SHARED_FLAGS_ID) | 1 << 7));
-		}
-
-	}
-
-	private class EjectorSlot extends ValueBoxTransform.Sided {
-
-		@Override
-		public Vec3 getLocalOffset(LevelAccessor level, BlockPos pos, BlockState state) {
-			if (direction != Direction.UP)
-				return super.getLocalOffset(level, pos, state);
-			return new Vec3(.5, 10.5 / 16f, .5).add(VecHelper.rotate(VecHelper.voxelSpace(0, 0, -5), angle(state), Axis.Y));
-		}
-
-		@Override
-		public void rotate(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms) {
-			if (direction != Direction.UP) {
-				super.rotate(level, pos, state, ms);
-				return;
-			}
-			TransformStack.of(ms)
-				.rotateYDegrees(angle(state))
-				.rotateXDegrees(90);
-		}
-
-		protected float angle(BlockState state) {
-			float horizontalAngle = AllBlocks.WEIGHTED_EJECTOR.has(state)
-				? AngleHelper.horizontalAngle(state.getValue(EjectorBlock.HORIZONTAL_FACING))
-				: 0;
-			return horizontalAngle;
-		}
-
-		@Override
-		protected boolean isSideActive(BlockState state, Direction direction) {
-			return direction.getAxis() == state.getValue(EjectorBlock.HORIZONTAL_FACING)
-				.getAxis()
-				|| direction == Direction.UP && EjectorBlockEntity.this.state != EjectorBlockEntity.State.CHARGED;
-		}
-
-		@Override
-		protected Vec3 getSouthLocation() {
-			return direction == Direction.UP ? Vec3.ZERO : VecHelper.voxelSpace(8, 6, 15.5);
-		}
-
-	}
-
+/** Source weighted ejector with genuine kinetic charge and transactional depot/flight stock owners. */
+public final class EjectorBlockEntity extends KineticBlockEntity implements BlockEntityBehaviour.Provider {
+    public enum State { CHARGED, LAUNCHING, RETRACTING }
+    public final DepotBehaviour depotBehaviour = new DepotBehaviour(this);
+    private final EntityLauncher launcher = new EntityLauncher(1, 0);
+    private final LerpedFloat lidProgress = LerpedFloat.linear().startWithValue(1);
+    private final List<IntAttached<ItemStack>> launchedItems = new ArrayList<>();
+    private State state = State.RETRACTING;
+    private boolean powered, launch, initialized;
+    private int minimumStackSize, scanCooldown;
+    private ItemStack trackedItem;
+    private Pair<Vec3, BlockPos> earlyTarget;
+    private float earlyTargetTime;
+    private UUID placementOwner;
+    private long placementNonce, placementExpires;
+    private final Map<UUID, LaunchReceipt> launches = new HashMap<>();
+    private static final class LaunchReceipt {
+        final long nonce, expires;
+        boolean award, glider;
+        LaunchReceipt(long nonce, long expires, boolean award, boolean glider) {
+            this.nonce = nonce; this.expires = expires; this.award = award; this.glider = glider;
+        }
+    }
+    private record Flights(List<IntAttached<ItemStack>> items, int tracked, int cooldown) {}
+    private final SnapshotParticipant<Flights> flights = new SnapshotParticipant<>() {
+        @Override protected Flights createSnapshot() {
+            var copy = new ArrayList<IntAttached<ItemStack>>(); int tracked = -1;
+            for (var item : launchedItems) {
+                if (item.getValue() == trackedItem) tracked = copy.size();
+                copy.add(IntAttached.with(item.getFirst(), item.getValue().copy()));
+            }
+            return new Flights(copy, tracked, scanCooldown);
+        }
+        @Override protected void readSnapshot(Flights snapshot) {
+            launchedItems.clear(); launchedItems.addAll(snapshot.items);
+            trackedItem = snapshot.tracked < 0 ? null : launchedItems.get(snapshot.tracked).getValue();
+            scanCooldown = snapshot.cooldown;
+        }
+        @Override protected void onFinalCommit() { setChanged(); sync(); }
+    };
+    private static final Codec<IntAttached<ItemStack>> FLIGHT_CODEC = RecordCodecBuilder.create(i -> i.group(
+            Codec.INT.fieldOf("Location").forGetter(IntAttached::getFirst),
+            ItemStack.CODEC.fieldOf("Item").forGetter(IntAttached::getValue)
+    ).apply(i, IntAttached::with));
+
+    public EjectorBlockEntity(BlockPos pos, BlockState state) {
+        super(AllBlockEntityTypes.WEIGHTED_EJECTOR, pos, state);
+        depotBehaviour.enableMerging();
+        depotBehaviour.withMaxStackSize(() -> minimumStackSize).acceptingWhen(() -> this.state == State.CHARGED)
+                .pullingFrom(side -> side != getFacing());
+    }
+    @Override public void sync() { super.sync(); }
+    public EntityLauncher getLauncher() { return launcher; }
+    public State getState() { return state; }
+    public boolean isPowered() { return powered; }
+    public int getMinimumStackSize() { return minimumStackSize; }
+    public void setMinimumStackSize(int value) {
+        if (value < 0 || value > 64) throw new IllegalArgumentException("Source stack setting is0..64");
+        minimumStackSize = value; setChanged(); sync();
+    }
+    public List<IntAttached<ItemStack>> getLaunchedItems() {
+        return launchedItems.stream().map(item -> IntAttached.with(item.getFirst(), item.getValue().copy())).toList();
+    }
+    public Pair<Vec3, BlockPos> getEarlyTarget() { return earlyTarget; }
+    public float getEarlyTargetTime() { return earlyTargetTime; }
+    public Direction getFacing() { return getBlockState().getValue(EjectorBlock.HORIZONTAL_FACING); }
+    public float getLidProgress(float partial) { return lidProgress.getValue(partial); }
+    public AABB activationBounds() { return new AABB(worldPosition).inflate(-1 / 16f, 0, -1 / 16f); }
+
+    public void beginPlacement(ServerPlayer player) {
+        placementOwner = player.getUUID(); placementNonce = java.util.concurrent.ThreadLocalRandom.current().nextLong();
+        placementExpires = level.getGameTime() + 200;
+        ServerPlayNetworking.send(player, new EjectorPlacementPacket.ClientBoundRequest(worldPosition, placementNonce));
+    }
+    public boolean acceptPlacement(ServerPlayer player, long nonce, int horizontal, int vertical, Direction facing) {
+        if (!player.getUUID().equals(placementOwner) || nonce != placementNonce || level.getGameTime() > placementExpires
+                || !facing.getAxis().isHorizontal() || horizontal < 1 || horizontal > EjectorConfig.get(level).maxDistance()) return false;
+        var target = worldPosition.relative(facing, horizontal).above(vertical);
+        if (!level.isInValidBounds(target)) return false;
+        placementOwner = null; placementNonce = 0;
+        level.setBlockAndUpdate(worldPosition, getBlockState().setValue(EjectorBlock.HORIZONTAL_FACING, facing));
+        setTarget(horizontal, vertical); return true;
+    }
+    public void setTarget(int horizontal, int vertical) { launcher.set(Math.max(1, horizontal), vertical); setChanged(); sync(); }
+    public BlockPos getTargetPosition() { return worldPosition.relative(getFacing(), launcher.getHorizontalDistance()).above(launcher.getVerticalDistance()); }
+    public void updateSignal() {
+        if (level == null) return;
+        boolean value = LoadedLevelAccess.getBestNeighborSignal(level, worldPosition) > 0;
+        if (value == powered) return; powered = value; setChanged(); sync();
+    }
+    public void activate() { if(!depotBehaviour.isActiveWorldOwner())return;launch = true; nudgeEntities(); }
+    public boolean canPlayerTrigger(ServerPlayer player) {
+        return !isRemoved() && !powered && state == State.CHARGED && launcher.getHorizontalDistance() != 0
+                && player.isAlive() && !player.isSuppressingBounce() && activationBounds().intersects(player.getBoundingBox());
+    }
+    private void nudgeEntities() {
+        if (level == null) return;
+        for (var entity : level.getEntitiesOfClass(Entity.class, activationBounds()))
+            if (entity.isAlive() && entity.getPistonPushReaction() != PushReaction.IGNORE_ENTITY && !(entity instanceof Player))
+                entity.setPos(entity.getX(), entity.getY() + .125f, entity.getZ());
+    }
+    public void activateDeferred() {
+        if (!depotBehaviour.isActiveWorldOwner()) return;
+        if (state != State.CHARGED && !(level.isClientSide() && state == State.LAUNCHING)) return;
+        if (level.isClientSide() && !isVirtual()) return; // Native player prediction is delivered to the actual launched player below.
+        launchItems();
+        for (var entity : level.getEntitiesOfClass(Entity.class, activationBounds())) {
+            if (!entity.isAlive() || entity instanceof ItemEntity || entity instanceof PackageEntity
+                    || entity.getPistonPushReaction() == PushReaction.IGNORE_ENTITY) continue;
+            entity.setOnGround(false);
+            if (entity instanceof ServerPlayer player) launchPlayer(player);
+            else if (!(entity instanceof Player)) {
+                entity.setPos(worldPosition.getX() + .5f, worldPosition.getY() + 1, worldPosition.getZ() + .5f);
+                launcher.applyMotion(entity, getFacing());
+            }
+        }
+        lidProgress.chase(1, .8f, Chaser.EXP); state = State.LAUNCHING;
+        level.playSound(null, worldPosition, SoundEvents.WOODEN_TRAPDOOR_CLOSE, SoundSource.BLOCKS, .35f, 1f);
+        level.playSound(null, worldPosition, SoundEvents.CHEST_OPEN, SoundSource.BLOCKS, .1f, 1.4f);
+    }
+    private void launchPlayer(ServerPlayer player) {
+        player.teleportTo(worldPosition.getX() + .5f, worldPosition.getY() + 1, worldPosition.getZ() + .5f);
+        player.setOnGround(false); launcher.applyMotion(player, getFacing());
+        boolean glider = LivingEntity.canGlideUsing(player.getItemBySlot(EquipmentSlot.CHEST), EquipmentSlot.CHEST);
+        if (glider) {
+            player.setXRot(-35); player.setYRot(getFacing().toYRot());
+            player.setDeltaMovement(player.getDeltaMovement().scale(.75f)); deployElytra(player);
+        }
+        long nonce = java.util.concurrent.ThreadLocalRandom.current().nextLong();
+        boolean maxed = (long) launcher.getHorizontalDistance() * launcher.getHorizontalDistance()
+                + (long) launcher.getVerticalDistance() * launcher.getVerticalDistance() >= 625;
+        launches.put(player.getUUID(), new LaunchReceipt(nonce, level.getGameTime() + Math.max(40, (int) launcher.getTotalFlyingTicks() + 20), maxed, glider));
+        player.connection.send(new ClientboundSetEntityMotionPacket(player));
+        ServerPlayNetworking.send(player, new EjectorLaunchPacket(worldPosition, nonce, launcher.getHorizontalDistance(), launcher.getVerticalDistance(), getFacing(), glider));
+    }
+    public boolean deployElytra(Player player) {
+        return LivingEntity.canGlideUsing(player.getItemBySlot(EquipmentSlot.CHEST), EquipmentSlot.CHEST)
+                && (player.isFallFlying() || player.tryToStartFallFlying());
+    }
+    private LaunchReceipt recentLaunch(ServerPlayer player, long nonce) {
+        var receipt = launches.get(player.getUUID());
+        return receipt != null && receipt.nonce == nonce && level.getGameTime() <= receipt.expires ? receipt : null;
+    }
+    public boolean acceptAward(ServerPlayer player, long nonce) {
+        var receipt = recentLaunch(player, nonce); if (receipt == null || !receipt.award) return false;
+        receipt.award = false; EjectorAwardPacket.award(player); return true;
+    }
+    public boolean acceptElytra(ServerPlayer player, long nonce) {
+        var receipt = recentLaunch(player, nonce); if (receipt == null || !receipt.glider || !deployElytra(player)) return false;
+        receipt.glider = false; return true;
+    }
+
+    private void launchItems() {
+        Direction facing = getFacing().getOpposite();
+        if (AbstractFunnelBlock.getFunnelFacing(LoadedLevelAccess.blockState(level, worldPosition.above())) == facing) {
+            var target = depotBehaviour.directInput.exportingFunnel(facing);
+            if (target != null) try (var tx = Transaction.openOuter()) { depotBehaviour.exportTo(target, tx); tx.commit(); }
+            return;
+        }
+        try (var tx = Transaction.openOuter()) {
+            flights.updateSnapshots(tx);
+            for (var stack : depotBehaviour.takeAll(tx)) {
+                if (trackedItem == null && scanCooldown == 0) { scanCooldown = EjectorConfig.get(level).scanInterval(); trackedItem = stack; }
+                launchedItems.add(IntAttached.withZero(stack));
+            }
+            tx.commit();
+        }
+        if (!level.isClientSide())
+            for (var side : Direction.values()) {
+                var position = worldPosition.relative(side); var neighbor = LoadedLevelAccess.blockState(level, position);
+                if (neighbor.getBlock() instanceof ObserverBlock && neighbor.getValue(ObserverBlock.FACING) == side.getOpposite())
+                    level.neighborShapeChanged(side.getOpposite(), position, worldPosition, getBlockState(), 2, 512);
+            }
+    }
+    private void ejectIfTriggered() {
+        if (powered || depotBehaviour.getPresentStackSize() == 0 || depotBehaviour.getPresentStackSize() < minimumStackSize) return;
+        var held = depotBehaviour.getHeldItem(); if (held != null && held.beltPosition < .49f) return;
+        Direction facing = getFacing().getOpposite();
+        if (AbstractFunnelBlock.getFunnelFacing(LoadedLevelAccess.blockState(level, worldPosition.above())) == facing && held != null) {
+            var remainder = depotBehaviour.directInput.tryExportingToBeltFunnel(held.stack, facing, true);
+            if (remainder == null || !remainder.isEmpty()) return;
+        }
+        var target = getTargetOpenInv();
+        if (target != null && held != null && target.handleInsertion(held.stack, Direction.UP, true).getCount() == held.stack.getCount()) return;
+        activate(); setChanged(); sync();
+    }
+    public DirectBeltInputBehaviour getTargetOpenInv() {
+        var target = earlyTarget != null ? earlyTarget.getSecond()
+                : worldPosition.above(launcher.getVerticalDistance()).relative(getFacing(), Math.max(1, launcher.getHorizontalDistance()));
+        return BlockEntityBehaviour.get(level, target, DirectBeltInputBehaviour.TYPE);
+    }
+    public Vec3 getLaunchedItemLocation(float time) { return launcher.getGlobalPos(time, getFacing().getOpposite(), worldPosition); }
+    public Vec3 getLaunchedItemMotion(float time) { return launcher.getGlobalVelocity(time, getFacing().getOpposite(), worldPosition).scale(.5f); }
+    private boolean scanTrajectoryForObstacles(int time) {
+        if (time <= 2) return false;
+        var source = getLaunchedItemLocation(time); var target = getLaunchedItemLocation(time + 1);
+        if(!LoadedLevelAccess.isLoaded(level,BlockPos.containing(source))||!LoadedLevelAccess.isLoaded(level,BlockPos.containing(target)))return false;
+        var hit = level.clip(new ClipContext(source, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, CollisionContext.empty()));
+        boolean miss = hit.getType() == HitResult.Type.MISS;
+        if (!miss) {
+            var block = LoadedLevelAccess.blockState(level, hit.getBlockPos());
+            if (block.getBlock() instanceof FunnelBlock && block.hasProperty(FunnelBlock.EXTRACTING) && block.getValue(FunnelBlock.EXTRACTING)) miss = true;
+        }
+        if (miss) {
+            if (earlyTarget != null && earlyTargetTime < time + 1) { earlyTarget = null; earlyTargetTime = 0; }
+            return false;
+        }
+        var hitPosition = hit.getLocation();
+        earlyTarget = Pair.of(hitPosition.add(Vec3.atLowerCornerOf(hit.getDirection().getUnitVec3i()).scale(.25f)), hit.getBlockPos());
+        earlyTargetTime = (float) (time + source.distanceTo(hitPosition) / source.distanceTo(target)); setChanged(); sync(); return true;
+    }
+    private boolean placeItemAtTarget(IntAttached<ItemStack> flight, float maxTime) {
+        try (var tx = Transaction.openOuter()) {
+            flights.updateSnapshots(tx);
+            var target = getTargetOpenInv(); var stack = flight.getValue();
+            long inserted = target == null ? 0 : target.insert(stack, Direction.UP, tx);
+            if (stack == trackedItem) trackedItem = null;
+            flight.setSecond(stack.copyWithCount(stack.getCount() - (int) inserted)); tx.commit();
+        }
+        if (!flight.getValue().isEmpty()) {
+            var position = earlyTarget != null ? earlyTarget.getFirst() : getLaunchedItemLocation(maxTime);
+            var item = new ItemEntity(level, position.x, position.y, position.z, flight.getValue().copy());
+            item.setDeltaMovement(getLaunchedItemMotion(maxTime)); item.setDefaultPickUpDelay();
+            if (!level.addFreshEntity(item)) return false; // The flight remains the sole owner if a native spawn is refused.
+        }
+        if (trackedItem == flight.getValue()) trackedItem = null;
+        return true;
+    }
+    public float getWindUpSpeed() {
+        int horizontal = launcher.getHorizontalDistance(), vertical = launcher.getVerticalDistance();
+        float distance = horizontal == 0 && vertical == 0 ? 1 : Mth.sqrt(horizontal * horizontal + vertical * vertical);
+        return Math.abs(getSpeed()) / 256f / distance;
+    }
+    public static void tick(Level level, BlockPos pos, BlockState block, EjectorBlockEntity ejector) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, block, ejector)) {
+            if (!createTick.shouldTick()) return;
+
+        KineticBlockEntity.tick(level, pos, block, ejector); ejector.tick();
+    
+        }
+    }
+    public void tick() {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, worldPosition, getBlockState(), this)) {
+            if (!createTick.shouldTick()) return;
+
+        if (!initialized) { initialized = true; updateSignal(); }
+         State previous = state;
+        float totalTime = Math.max(3, (float) launcher.getTotalFlyingTicks());
+        if (scanCooldown > 0) scanCooldown--;
+        if (launch) { launch = false; activateDeferred(); }
+        for (int index = 0; index < launchedItems.size();) {
+            var flight = launchedItems.get(index);
+            boolean hit = (!level.isClientSide() || isVirtual()) && flight.getValue() == trackedItem && scanTrajectoryForObstacles(flight.getFirst());
+            float maxTime = earlyTarget == null ? totalTime : Math.min(earlyTargetTime, totalTime);
+            if ((hit || flight.exceeds((int) maxTime)) && (level.isClientSide() && !isVirtual() || placeItemAtTarget(flight, maxTime))) {
+                if (flight.getValue() == trackedItem) trackedItem = null;
+                launchedItems.remove(index); setChanged();
+            } else { flight.increment(); index++; }
+        }
+        if (state == State.LAUNCHING) {
+            lidProgress.chase(1, .8f, Chaser.EXP); lidProgress.tickChaser();
+            if (lidProgress.getValue() > 1 - 1 / 16f && (!level.isClientSide() || isVirtual())) { state = State.RETRACTING; lidProgress.setValue(1); }
+        }
+        if (state == State.CHARGED) {
+            lidProgress.setValue(0); lidProgress.updateChaseSpeed(0);
+            if (!level.isClientSide() || isVirtual()) ejectIfTriggered();
+        }
+        if (state == State.RETRACTING) {
+            if (lidProgress.getChaseTarget() == 1 && !lidProgress.settled()) lidProgress.tickChaser();
+            else {
+                lidProgress.updateChaseTarget(0); lidProgress.updateChaseSpeed(0);
+                if (lidProgress.getValue() == 0 && (!level.isClientSide() || isVirtual())) { state = State.CHARGED; lidProgress.setValue(0); sync(); }
+                lidProgress.setValue(Mth.clamp(lidProgress.getValue() - getWindUpSpeed(), 0, 1));
+                int rate = (int) (1 / (getWindUpSpeed() * 5)) + 1;
+                if ((int) level.getGameTime() % rate == 0 && !level.isClientSide())
+                    level.playSound(null, worldPosition, SoundEvents.WOODEN_BUTTON_CLICK_OFF, SoundSource.BLOCKS, .125f, 1.5f - lidProgress.getValue());
+            }
+        }
+        if (!level.isClientSide()) { setChanged(); launches.entrySet().removeIf(entry -> entry.getValue().expires < level.getGameTime()); }
+        if (state != previous) { setChanged(); sync(); }
+    
+        }
+    }
+    public void dropFlyingItems() {
+        if (!depotBehaviour.isActiveWorldOwner()) return;
+        dropOwnedFlyingItems();
+    }
+    private void dropOwnedFlyingItems() {
+        if (isRemoved() || level == null || level.isClientSide()) return;
+        for (int index = 0; index < launchedItems.size();) {
+            var flight = launchedItems.get(index); var position = getLaunchedItemLocation(flight.getFirst());
+            var item = new ItemEntity(level, position.x, position.y, position.z, flight.getValue().copy());
+            item.setDeltaMovement(getLaunchedItemMotion(flight.getFirst())); item.setDefaultPickUpDelay();
+            if (level.addFreshEntity(item)) launchedItems.remove(index); else index++;
+        }
+        trackedItem = null; setChanged();
+    }
+    @Override public void preRemoveSideEffects(BlockPos pos, BlockState block) {
+         dropOwnedFlyingItems(); super.preRemoveSideEffects(pos, block);
+    }
+    @Override public void invalidate() {  launches.clear(); super.invalidate(); }
+    @Override protected void write(ValueOutput out, boolean clientPacket) {
+        super.write(out, clientPacket); 
+        out.putInt("HorizontalDistance", launcher.getHorizontalDistance()); out.putInt("VerticalDistance", launcher.getVerticalDistance());
+        out.putBoolean("Powered", powered); out.putString("State", state.name()); out.putInt("MinimumStackSize", minimumStackSize);
+        out.store("Lid", CompoundTag.CODEC, lidProgress.writeNBT()); out.store("LaunchedItems", FLIGHT_CODEC.listOf(), launchedItems.stream().filter(item -> !item.getValue().isEmpty()).toList());
+        if (earlyTarget != null) {
+            out.store("EarlyTarget", Vec3.CODEC, earlyTarget.getFirst()); out.store("EarlyTargetPos", BlockPos.CODEC, earlyTarget.getSecond());
+            out.putFloat("EarlyTargetTime", earlyTargetTime);
+        }
+    }
+    @Override protected void read(ValueInput in, boolean clientPacket) {
+        super.read(in, clientPacket); 
+        launcher.set(in.getIntOr("HorizontalDistance", 1), in.getIntOr("VerticalDistance", 0)); launcher.clamp(EjectorConfig.server().maxDistance());
+        powered = in.getBooleanOr("Powered", false);
+        try { state = State.valueOf(in.getStringOr("State", "CHARGED")); } catch (IllegalArgumentException ignored) { state = State.RETRACTING; }
+        minimumStackSize = Math.clamp(in.getIntOr("MinimumStackSize", in.getIntOr("ScrollValue", 0)), 0, 64);
+        var lid = in.read("Lid", CompoundTag.CODEC).orElseGet(CompoundTag::new);
+        lidProgress.readNBT(lid, false); lidProgress.chase(lidProgress.getChaseTarget(), lid.getFloatOr("Speed", 0), Chaser.EXP);
+        launchedItems.clear(); launchedItems.addAll(in.read("LaunchedItems", FLIGHT_CODEC.listOf()).orElse(List.of()));
+        earlyTarget = null; earlyTargetTime = 0;
+        var early = in.read("EarlyTarget", Vec3.CODEC); var earlyPos = in.read("EarlyTargetPos", BlockPos.CODEC);
+        if(earlyPos.isEmpty())earlyPos=in.child("EarlyTargetPos").map(value->new BlockPos(value.getIntOr("X",0),value.getIntOr("Y",0),value.getIntOr("Z",0)));
+        if (early.isPresent() && earlyPos.isPresent()) { earlyTarget = Pair.of(early.get(), earlyPos.get()); earlyTargetTime = in.getFloatOr("EarlyTargetTime", 0); }
+        in.read("ForceAngle", Codec.FLOAT).ifPresent(value -> lidProgress.startWithValue(value));
+        launch = false; trackedItem = null; scanCooldown = 0; placementOwner = null; launches.clear();
+    }
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (depotBehaviour != null) {
+            behaviours.add(depotBehaviour);
+            behaviours.add(depotBehaviour.directInput);
+            behaviours.add(depotBehaviour.transportedHandler);
+        }
+    }
 }

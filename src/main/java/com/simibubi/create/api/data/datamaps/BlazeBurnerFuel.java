@@ -5,10 +5,8 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import net.minecraft.util.ExtraCodecs;
 
-import net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps;
-
 /**
- * Data map value for {@linkplain NeoForgeDataMaps#FURNACE_FUELS furnace fuels}.
+ * Data map value for regular and superheated blaze burner fuels.
  *
  * @param burnTime how long (in ticks) the item will burn for
  */

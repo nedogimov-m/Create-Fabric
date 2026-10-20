@@ -1,107 +1,33 @@
 package com.simibubi.create.content.decoration.girder;
 
-import java.util.List;
-import java.util.function.Predicate;
-
-import com.google.common.base.Predicates;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.content.equipment.extendoGrip.ExtendoGripItem;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import net.createmod.catnip.placement.IPlacementHelper;
-import net.createmod.catnip.placement.PlacementOffset;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.entity.ai.attributes.AttributeInstance;
-import net.minecraft.world.entity.ai.attributes.Attributes;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.minecraft.core.*;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.context.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.*;
 
-import net.neoforged.neoforge.common.NeoForgeMod;
-
-public class GirderPlacementHelper implements IPlacementHelper {
-
-	@Override
-	public Predicate<ItemStack> getItemPredicate() {
-		return AllBlocks.METAL_GIRDER::isIn;
-	}
-
-	@Override
-	public Predicate<BlockState> getStatePredicate() {
-		return Predicates.or(AllBlocks.METAL_GIRDER::has, AllBlocks.METAL_GIRDER_ENCASED_SHAFT::has);
-	}
-
-	private boolean canExtendToward(BlockState state, Direction side) {
-		Axis axis = side.getAxis();
-		if (state.getBlock() instanceof GirderBlock) {
-			boolean x = state.getValue(GirderBlock.X);
-			boolean z = state.getValue(GirderBlock.Z);
-			if (!x && !z)
-				return axis == Axis.Y;
-			if (x && z)
-				return true;
-			return axis == (x ? Axis.X : Axis.Z);
-		}
-
-		if (state.getBlock() instanceof GirderEncasedShaftBlock)
-			return axis != Axis.Y && axis != state.getValue(GirderEncasedShaftBlock.HORIZONTAL_AXIS);
-
-		return false;
-	}
-
-	private int attachedPoles(Level world, BlockPos pos, Direction direction) {
-		BlockPos checkPos = pos.relative(direction);
-		BlockState state = world.getBlockState(checkPos);
-		int count = 0;
-		while (canExtendToward(state, direction)) {
-			count++;
-			checkPos = checkPos.relative(direction);
-			state = world.getBlockState(checkPos);
-		}
-		return count;
-	}
-
-	private BlockState withAxis(BlockState state, Axis axis) {
-		if (state.getBlock() instanceof GirderBlock)
-			return state.setValue(GirderBlock.X, axis == Axis.X)
-				.setValue(GirderBlock.Z, axis == Axis.Z)
-				.setValue(GirderBlock.AXIS, axis);
-		if (state.getBlock() instanceof GirderEncasedShaftBlock && axis.isHorizontal())
-			return state.setValue(GirderEncasedShaftBlock.HORIZONTAL_AXIS, axis == Axis.X ? Axis.Z : Axis.X);
-		return state;
-	}
-
-	@Override
-	public PlacementOffset getOffset(Player player, Level world, BlockState state, BlockPos pos, BlockHitResult ray) {
-		List<Direction> directions =
-			IPlacementHelper.orderedByDistance(pos, ray.getLocation(), dir -> canExtendToward(state, dir));
-		for (Direction dir : directions) {
-			int range = AllConfigs.server().equipment.placementAssistRange.get();
-			if (player != null) {
-				AttributeInstance reach = player.getAttribute(Attributes.BLOCK_INTERACTION_RANGE);
-				if (reach != null && reach.hasModifier(ExtendoGripItem.singleRangeAttributeModifier.id()))
-					range += 4;
-			}
-			int poles = attachedPoles(world, pos, dir);
-			if (poles >= range)
-				continue;
-
-			BlockPos newPos = pos.relative(dir, poles + 1);
-			BlockState newState = world.getBlockState(newPos);
-
-			if (!newState.canBeReplaced())
-				continue;
-
-			return PlacementOffset.success(newPos,
-				bState -> Block.updateFromNeighbourShapes(withAxis(bState, dir.getAxis()), world, newPos));
-		}
-
-		return PlacementOffset.fail();
-	}
-
+/** Bounded source placement assistance, using native BlockItem placement/cost instead of a world-state injection. */
+public final class GirderPlacementHelper {
+    public static final int DEFAULT_RANGE=12;
+    public static boolean canExtendToward(BlockState state,Direction side){
+        if(state.getBlock()instanceof GirderBlock){boolean x=state.getValue(GirderBlock.X),z=state.getValue(GirderBlock.Z);return !x&&!z?side.getAxis()==Direction.Axis.Y:x&&z||side.getAxis()==(x?Direction.Axis.X:Direction.Axis.Z);}
+        return state.getBlock()instanceof GirderEncasedShaftBlock&&side.getAxis()!=Direction.Axis.Y&&side.getAxis()!=state.getValue(GirderEncasedShaftBlock.HORIZONTAL_AXIS);
+    }
+    public static BlockPos target(Level level,BlockState state,BlockPos pos,BlockHitResult hit){
+        var directions=new ArrayList<Direction>();for(var side:Direction.values())if(canExtendToward(state,side))directions.add(side);directions.sort(Comparator.comparingDouble(side->Vec3.atCenterOf(pos).relative(side,.5).distanceToSqr(hit.getLocation())));
+        for(var side:directions){int count=0;var next=pos.relative(side);while(count<DEFAULT_RANGE&&GirderBlock.available(level,next)&&canExtendToward(LoadedLevelAccess.blockState(level,next),side)){count++;next=next.relative(side);}if(count>=DEFAULT_RANGE||!GirderBlock.available(level,next)||!LoadedLevelAccess.blockState(level,next).canBeReplaced())continue;return next;}return null;
+    }
+    public static InteractionResult place(Player player,InteractionHand hand,Level level,BlockState state,BlockPos pos,BlockHitResult hit){
+        if(player.isSpectator()||!player.mayBuild()||player.isShiftKeyDown()||!level.mayInteract(player,pos)||!(player.getItemInHand(hand).getItem()instanceof BlockItem item))return InteractionResult.PASS;
+        var target=target(level,state,pos,hit);if(target==null)return InteractionResult.PASS;var delta=target.subtract(pos);var direction=Direction.getNearest(delta.getX(),delta.getY(),delta.getZ(),Direction.UP);var support=target.relative(direction.getOpposite());
+        if(!level.mayInteract(player,target))return InteractionResult.FAIL;
+        var placementHit=new BlockHitResult(Vec3.atCenterOf(support).relative(direction,.5),direction,support,false);
+        return item.place(new BlockPlaceContext(new UseOnContext(player,hand,placementHit)));
+    }
+    private GirderPlacementHelper(){}
 }

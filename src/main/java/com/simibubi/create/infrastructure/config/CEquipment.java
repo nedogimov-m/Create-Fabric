@@ -1,9 +1,8 @@
 package com.simibubi.create.infrastructure.config;
 
 
-import net.createmod.catnip.config.ConfigBase;
 
-public class CEquipment extends ConfigBase {
+public class CEquipment extends NativeConfigBase {
 
 	public final ConfigInt maxSymmetryWandRange = i(50, 10, "maxSymmetryWandRange", Comments.symmetryRange);
 	public final ConfigInt placementAssistRange = i(12, 3, "placementAssistRange", Comments.placementRange);

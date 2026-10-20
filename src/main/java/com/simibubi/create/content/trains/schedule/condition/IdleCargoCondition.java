@@ -3,12 +3,12 @@ package com.simibubi.create.content.trains.schedule.condition;
 import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.trains.schedule.ScheduleText;
 
 import net.createmod.catnip.data.Pair;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
@@ -16,11 +16,11 @@ public class IdleCargoCondition extends TimedWaitCondition {
 
 	@Override
 	public Pair<ItemStack, Component> getSummary() {
-		return Pair.of(ItemStack.EMPTY, CreateLang.translateDirect("schedule.condition.idle_short", formatTime(true)));
+		return Pair.of(ItemStack.EMPTY, ScheduleText.translate("schedule.condition.idle_short", formatTime(true)));
 	}
 
 	@Override
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return Create.asResource("idle");
 	}
 

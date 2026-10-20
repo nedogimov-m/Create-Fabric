@@ -1,0 +1,87 @@
+{
+  "replace": false,
+  "fabric:load_conditions": {
+    "condition": "fabric:all_mods_loaded",
+    "values": [
+      "create_test"
+    ]
+  },
+  "values": {
+    "create_test:burner_plain": 1234,
+    "create_test:burner_both": {
+      "burn_time": 987
+    },
+    "#create_test:burner_native_group": {
+      "value": {
+        "burn_time": 2400
+      },
+      "replace": true
+    },
+    "create_test:burner_removed": 777,
+    "#create_test:burner_removed_group": 2700,
+    "create_test:burner_conditioned": {
+      "neoforge:conditions": [
+        {
+          "type": "neoforge:and",
+          "values": [
+            {
+              "type": "neoforge:mod_loaded",
+              "modid": "create_test"
+            },
+            {
+              "type": "neoforge:item_exists",
+              "item": "create_test:burner_plain"
+            },
+            {
+              "type": "neoforge:not",
+              "value": {
+                "type": "neoforge:tag_empty",
+                "tag": "create_test:burner_native_group"
+              }
+            },
+            {
+              "type": "neoforge:or",
+              "values": [
+                {
+                  "type": "neoforge:false"
+                },
+                {
+                  "type": "neoforge:true"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "neoforge:value": {
+        "value": 3456,
+        "replace": true
+      }
+    },
+    "create_test:burner_fabric_conditioned": {
+      "fabric:load_conditions": {
+        "condition": "create:item_tag_empty",
+        "tag": "create_test:burner_empty_group"
+      },
+      "burn_time": 5678
+    },
+    "create_test:burner_false_conditioned": {
+      "neoforge:conditions": [
+        {
+          "type": "neoforge:false"
+        }
+      ],
+      "neoforge:value": {
+        "burn_time": 0
+      }
+    },
+    "create_test:burner_long_regular": 2000000,
+    "create_test:burner_max_regular": {
+      "burn_time": 2147483647
+    }
+  },
+  "remove": [
+    "create_test:burner_removed",
+    "#create_test:burner_removed_group"
+  ]
+}

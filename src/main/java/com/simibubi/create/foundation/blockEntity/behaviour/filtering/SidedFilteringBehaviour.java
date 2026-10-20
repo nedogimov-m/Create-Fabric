@@ -1,149 +1,25 @@
 package com.simibubi.create.foundation.blockEntity.behaviour.filtering;
 
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.BiFunction;
+import java.util.*;
 import java.util.function.Predicate;
-
-import com.simibubi.create.content.schematics.requirement.ItemRequirement;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform.Sided;
-
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.storage.*;
 
-public class SidedFilteringBehaviour extends FilteringBehaviour {
-
-	Map<Direction, FilteringBehaviour> sidedFilters;
-	private BiFunction<Direction, FilteringBehaviour, FilteringBehaviour> filterFactory;
-	private Predicate<Direction> validDirections;
-
-	public SidedFilteringBehaviour(SmartBlockEntity be, ValueBoxTransform.Sided sidedSlot,
-		BiFunction<Direction, FilteringBehaviour, FilteringBehaviour> filterFactory,
-		Predicate<Direction> validDirections) {
-		super(be, sidedSlot);
-		this.filterFactory = filterFactory;
-		this.validDirections = validDirections;
-		sidedFilters = new IdentityHashMap<>();
-		updateFilterPresence();
-	}
-
-	@Override
-	public void initialize() {
-		super.initialize();
-	}
-
-	public FilteringBehaviour get(Direction side) {
-		return sidedFilters.get(side);
-	}
-
-	public void updateFilterPresence() {
-		Set<Direction> valid = new HashSet<>();
-		for (Direction d : Iterate.directions)
-			if (validDirections.test(d))
-				valid.add(d);
-		for (Direction d : Iterate.directions)
-			if (valid.contains(d)) {
-				if (!sidedFilters.containsKey(d))
-					sidedFilters.put(d, filterFactory.apply(d, new FilteringBehaviour(blockEntity, slotPositioning)));
-			} else if (sidedFilters.containsKey(d))
-				removeFilter(d);
-	}
-
-	@Override
-	public void write(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		nbt.put("Filters", NBTHelper.writeCompoundList(sidedFilters.entrySet(), entry -> {
-			CompoundTag compound = new CompoundTag();
-			compound.putInt("Side", entry.getKey()
-				.get3DDataValue());
-			entry.getValue()
-				.write(compound, registries, clientPacket);
-			return compound;
-		}));
-		super.write(nbt, registries, clientPacket);
-	}
-
-	@Override
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		NBTHelper.iterateCompoundList(nbt.getList("Filters", Tag.TAG_COMPOUND), compound -> {
-			Direction face = Direction.from3DDataValue(compound.getInt("Side"));
-			if (sidedFilters.containsKey(face))
-				sidedFilters.get(face)
-					.read(compound, registries, clientPacket);
-		});
-		super.read(nbt, registries, clientPacket);
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		sidedFilters.values()
-			.forEach(FilteringBehaviour::tick);
-	}
-
-	@Override
-	public boolean setFilter(Direction side, ItemStack stack) {
-		if (!sidedFilters.containsKey(side))
-			return true;
-		sidedFilters.get(side)
-			.setFilter(stack);
-		return true;
-	}
-
-	@Override
-	public ItemStack getFilter(Direction side) {
-		if (!sidedFilters.containsKey(side))
-			return ItemStack.EMPTY;
-		return sidedFilters.get(side)
-			.getFilter();
-	}
-
-	public boolean test(Direction side, ItemStack stack) {
-		if (!sidedFilters.containsKey(side))
-			return true;
-		return sidedFilters.get(side)
-			.test(stack);
-	}
-
-	@Override
-	public void destroy() {
-		sidedFilters.values()
-			.forEach(FilteringBehaviour::destroy);
-		super.destroy();
-	}
-
-	@Override
-	public ItemRequirement getRequiredItems() {
-		return sidedFilters.values()
-			.stream()
-			.reduce(ItemRequirement.NONE, (a, b) -> a.union(b.getRequiredItems()), (a, b) -> a.union(b));
-	}
-
-	public void removeFilter(Direction side) {
-		if (!sidedFilters.containsKey(side))
-			return;
-		sidedFilters.remove(side)
-			.destroy();
-	}
-
-	public boolean testHit(LevelAccessor level, BlockPos pos, Direction direction, Vec3 hit) {
-		ValueBoxTransform.Sided sidedPositioning = (Sided) slotPositioning;
-		BlockState state = blockEntity.getBlockState();
-		Vec3 localHit = hit.subtract(Vec3.atLowerCornerOf(blockEntity.getBlockPos()));
-		return sidedPositioning.fromSide(direction)
-			.testHit(level, pos, state, localHit);
-	}
-
+/** Independent installed filters retain their original per-face persistence keys. */
+public final class SidedFilteringBehaviour extends FilteringBehaviour {
+    @Override public com.simibubi.create.content.schematics.requirement.ItemRequirement getRequiredItems(){var requirement=com.simibubi.create.content.schematics.requirement.ItemRequirement.NONE;for(var filter:filters.values())requirement=requirement.union(filter.getRequiredItems());return requirement;}
+    private final Map<Direction,FilteringBehaviour> filters=new EnumMap<>(Direction.class);
+    private final Predicate<Direction> valid;
+    public SidedFilteringBehaviour(BlockEntity entity,Predicate<Direction> valid){super(entity);this.valid=valid;}
+    public FilteringBehaviour get(Direction side){return filters.get(side);}
+    public void updateFilterPresence(){for(var side:Direction.values())if(valid.test(side))filters.computeIfAbsent(side,key->new FilteringBehaviour(blockEntity));else removeFilter(side);}
+    public void removeFilter(Direction side){var removed=filters.remove(side);if(removed!=null)removed.destroy();}
+    @Override public boolean setFilter(Direction side,ItemStack stack){var filter=get(side);return filter==null||filter.setFilter(stack);}
+    @Override public ItemStack getFilter(Direction side){var filter=get(side);return filter==null?ItemStack.EMPTY:filter.getFilter();}
+    public boolean test(Direction side,ItemStack stack){var filter=get(side);return filter==null||filter.test(stack);}
+    @Override public void destroy(){filters.values().forEach(FilteringBehaviour::destroy);filters.clear();super.destroy();}
+    @Override public void write(ValueOutput out){var list=out.childrenList("Filters");for(var entry:filters.entrySet()){var child=list.addChild();child.putInt("Side",entry.getKey().ordinal());entry.getValue().write(child);}super.write(out);}
+    @Override public void read(ValueInput in){super.read(in);filters.clear();for(var child:in.childrenListOrEmpty("Filters")){int side=child.getIntOr("Side",-1);if(side<0||side>=6)continue;var filter=new FilteringBehaviour(blockEntity);filter.read(child);filters.put(Direction.values()[side],filter);}}
 }

@@ -1,0 +1,908 @@
+{
+  "createCommit": "ac0c444d9828da3453ae8cc65338e8de063286fb",
+  "ponderArtifact": "net.createmod.ponder:ponder-neoforge:1.0.82+mc1.21.1:sources",
+  "ponderSourceSHA256": "4a89eeddecc9488be50831d51a5dafbe6000ca39d0a369a7cc94ad701f8b3af0",
+  "license": "MIT; licenses/Ponder-LICENSE (Ponder) and project Create license (Create scenes)",
+  "resources": {
+    "assets/create/ponder/analog_lever.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "f19aa50cd727b296958c239ce4e7b49095b52447613fa132d5491d287d265920"
+    },
+    "assets/create/ponder/basin.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "c1a5b8e461aa1d32021bf1b2a7af61945870c2724655df2c5dedbdd8a214765b"
+    },
+    "assets/create/ponder/belt/connect.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "e3a65b5a22232f3ec135bcdd4566b614651b3cad52559841a3caa2696058dd6f"
+    },
+    "assets/create/ponder/belt/directions.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "93a9051dd8130fde9669cf7ba275131d7f9fd8844d46f9ac55870919ba398d56"
+    },
+    "assets/create/ponder/belt/encasing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "2bfd941ffa24b7c028882c19e3bdf1fbe567c0c167796ca9c22cdec24f7223ec"
+    },
+    "assets/create/ponder/belt/transport.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "9c1c7ef128c62cdcba9aa27174ecb0c2b3abce3d68746ab20e11455151117812"
+    },
+    "assets/create/ponder/blaze_burner.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "aca68cfb980ff60b2e4214e7a95f5680ca27c9a423696c0a2c956577c64d1a12"
+    },
+    "assets/create/ponder/cart_assembler/anchor.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "4c4670c5ace57dc32a8598600393a036227f8cbeb12dceb51a7e437192adeaef"
+    },
+    "assets/create/ponder/cart_assembler/dual.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "f3a1279cecf0cc683ce6e944233193472ab839bbc3373ff2aef434c0fef80a4b"
+    },
+    "assets/create/ponder/cart_assembler/modes.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "586db219e63dff01218987c42dd95cc3cccbac24fad4211c0303e0e58ecbbb35"
+    },
+    "assets/create/ponder/cart_assembler/rails.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "b4c733546f1bb21e96bcf389c2dfa3ed4d58ea59c1fcbc00d1a6aab416a905d0"
+    },
+    "assets/create/ponder/chain_drive/gearshift.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "4ba4f41d0fd422d1d6bc8367c6ab2f72c480fa306c215253546b6fc23959ba9d"
+    },
+    "assets/create/ponder/chain_drive/relay.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "19082cd3f7119605f5921e7ea804131eee714af9e8e931fdf8ecc7e58a9a0a83"
+    },
+    "assets/create/ponder/chassis/linear_attachment.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "9d91be864a5e671aae7125843e0baf8cc54b37ad7be5eb92995919cb1e87ad2f"
+    },
+    "assets/create/ponder/chassis/linear_group.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "a29d3764d3d34d6b56bb13222dca99ecc4a3981ca1996a473744254311b2e3f1"
+    },
+    "assets/create/ponder/chassis/radial.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "cc883d63578d03460caaabd104f737a18b963d588021303b59d45e46e58f881f"
+    },
+    "assets/create/ponder/chute/downward.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "2175928d75ff375f883884ac1cf827c7cce2d3fc64937f20a01357cf05de9ff8"
+    },
+    "assets/create/ponder/chute/smart.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "321c09a22009bd0b41d842e1ff4854afe19ed8c5242d9fad01d497bb194edff8"
+    },
+    "assets/create/ponder/chute/upward.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "05e4ae1300fb532e19e8dbfeeb9343b95ca87bda8ef5411cda6009749100bc53"
+    },
+    "assets/create/ponder/clockwork_bearing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "9c5103a5728e2e1841a2250c68ef19ff16370381de59514aecc32201184061c8"
+    },
+    "assets/create/ponder/clutch.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "71dba6624b2b332faa5e74f6a0d31690f556e5a25de4592f9858ac1b98fd56dc"
+    },
+    "assets/create/ponder/cog/encasing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "66c1d3c940c9ba0aa9eb506224a36421c764b2dd7d4fdbefd0f26fab38315e68"
+    },
+    "assets/create/ponder/cog/large.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "962ceb324af2ee6057c7aae4a6c8a1856f66480fe3ab0fe9f2c150d8a04b410a"
+    },
+    "assets/create/ponder/cog/small.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "0dcd67fa0185c55ba448120fda535209a4cec35436897ac98a7b3f7f2e58cf7d"
+    },
+    "assets/create/ponder/cog/speedup.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "f8d9a9ccfe004b22cccb6fc754b7903346a8482ba25cafdef1148b291323e348"
+    },
+    "assets/create/ponder/contraption_controls.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "4f85278e8429ee78fc86200de210ce9fd4f11d116373f3197fbcf06f5cf67ef2"
+    },
+    "assets/create/ponder/creative_motor.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "00cf981270c75be5d93a3f0d718420b2499f5d4855f73fc587cea5c40290758d"
+    },
+    "assets/create/ponder/creative_motor_mojang.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "e539bb34f7369483a9845cf27561ae966dedc8f71fa6cbe7506a22488d30119d"
+    },
+    "assets/create/ponder/crushing_wheel.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "f93ee63a0f57788dadeef56298468f9e224e015e9f80a074430f3bedf880dbed"
+    },
+    "assets/create/ponder/debug/scene_1.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "1ac700be88ddc99bf1c72207022d078739f054b715ceb9ef02deb83649c8bcda"
+    },
+    "assets/create/ponder/debug/scene_10.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "1ed41460b5427a03f7c1aaa329d0fee402590aa0fc12894916951f4d7cbb81ca"
+    },
+    "assets/create/ponder/debug/scene_2.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "85f9d5cfe436ac3d2d9604f746efea65e4643af740aac5372e8e5315b0eb98bf"
+    },
+    "assets/create/ponder/debug/scene_3.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "b8f0665e7e1130c594263c7e5ba5d2a7895afe5750e87fcc5ca6014bb7d0f2ca"
+    },
+    "assets/create/ponder/debug/scene_4.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "529d20edfea2e71ba89a54dd8774572219cbd4c989be76e55b1d12ca2c2f004f"
+    },
+    "assets/create/ponder/debug/scene_5.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "7ea97d17e1d99ea3dbd02852784fa8d826d333840d4f4d3f9788632c0fa73e1b"
+    },
+    "assets/create/ponder/debug/scene_6.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "241864950b685e505c9b7f409168514be020f1f60a1afd3a1538ddff6e988e29"
+    },
+    "assets/create/ponder/debug/scene_7.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "14bd570cbdd9816fb2ceb81e48ec9d1a91033c712c0f824e68bc7d4e52af9728"
+    },
+    "assets/create/ponder/debug/scene_8.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "4ac0693a6083385c88a360c0cbfe354a8c1741f21a87e8dc10d8b0cdff783adb"
+    },
+    "assets/create/ponder/debug/scene_9.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "e6c2de11cf9cbb5d945ce0d321a2babc4701dd0bb043bb9ee7f5c6be4061326b"
+    },
+    "assets/create/ponder/deployer/contraption.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "3b5097c9fb2c1dad290122f6a1e34388b4dfd8517e5d40d0e5a5d0e3e8c22195"
+    },
+    "assets/create/ponder/deployer/filter.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "61a867ebab89269c638870805e251d39ab33011d8175eed6e57dc116b9660c90"
+    },
+    "assets/create/ponder/deployer/modes.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "bac7310905b36cf79078712c3838c6a1f4c7aa957e270c08d6203f553c19c645"
+    },
+    "assets/create/ponder/deployer/processing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "56d36d25026051185629852590cef7f46326f935f43d8e31bb4a2486d5d6a082"
+    },
+    "assets/create/ponder/deployer/redstone.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "ff7dce58046c0f9b1d2adba473f657f8b0e5237f59b12e528d0495f35a05073c"
+    },
+    "assets/create/ponder/depot.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "6e81e7edfc83b9151217ce697d1d7092939b9819485bccf743f5b27c30b739ab"
+    },
+    "assets/create/ponder/display_board.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "df544383c9866a85b465187281ece8fce14048b8228e89ff0091b69da61bde25"
+    },
+    "assets/create/ponder/display_link.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "bdf0d067f6e7925226bc9c785ffa17478f4473e0002713da12d1757dc7b00b6c"
+    },
+    "assets/create/ponder/display_link_redstone.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "7350900bd6d7bd3be2464eb94f60faeaa4bb6dd57395dfe7d12a96a7008a9e69"
+    },
+    "assets/create/ponder/elevator_pulley/elevator.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "c5bb8c1038bf724a8bce2fa82d65b18453a6c814662c5d7b70a869fb2005dc28"
+    },
+    "assets/create/ponder/elevator_pulley/multi_rope.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "858480ef03f2bac32e9d7e1c1bd17505d66ce4ba2e2b5a36636b8104dd5ccb70"
+    },
+    "assets/create/ponder/empty_blaze_burner.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "972214e590ed25e47fca3ca9ad070dda93fa3a48ec531d5e3e31b9698690d866"
+    },
+    "assets/create/ponder/fan/direction.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "b3a9c595f1799ae94ab53338bf12d7aa94aa05ffa14220e6da8de57cf7c92f4b"
+    },
+    "assets/create/ponder/fan/processing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "f48d2c37f86610f2ef52ee5dd3b491fdd80d219010af6a2a93c73e52f513857b"
+    },
+    "assets/create/ponder/fan/source.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "57c3d06a3c39c8abe16e8063bfa7b24e62b8f2fb6ce601e4f5661e13576f9725"
+    },
+    "assets/create/ponder/fluid_pipe/encasing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "e83770ceedb3636e2fdf67ce22a2e3b46d0ef14aba43108b9660c466d0f6c77b"
+    },
+    "assets/create/ponder/fluid_pipe/flow.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "f810b759e804547bc78de81f02b2c64997c8bb964035ac491366dbebb28f70ce"
+    },
+    "assets/create/ponder/fluid_pipe/interaction.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "0d46d15fff68b3ea72e86c5471956b8456ba42a9c605e5cb8910b008520eca08"
+    },
+    "assets/create/ponder/fluid_tank/sizes.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "b74f0568d2be98d83f326f0c5f97b0eca2b81c62dcff88bb10c717619bb7a783"
+    },
+    "assets/create/ponder/fluid_tank/sizes_creative.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "64fea3cb36d383adb430ee40470c3a64fc275ca7183f0a76e240391938e9215d"
+    },
+    "assets/create/ponder/fluid_tank/storage.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "c91027266a9878d92b9e8a4eb5adc834cb96a73881513a24550a9ab79552d512"
+    },
+    "assets/create/ponder/fluid_tank/storage_creative.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "02140d2e51d794640a9b3679876701777dde13e482db14ee0baa292537fa3b05"
+    },
+    "assets/create/ponder/fluid_valve.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "902ff6e1bbe2ad832b8878dd5e141a3fc2ed3a72ae53a60c9100a709a238a6bd"
+    },
+    "assets/create/ponder/funnels/brass.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "21a4f2df3a30cb33118bd587c0f72de0652d72aa6121d915944057bc23305c41"
+    },
+    "assets/create/ponder/funnels/compat.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "9750be601ad47f61cde7bad20d9ffe856d418deaf497d412447b9684a1d42b64"
+    },
+    "assets/create/ponder/funnels/direction.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "4789043b1b82ee652d9fa06a491b76362abdb475649fc6d0006bf2b2670396db"
+    },
+    "assets/create/ponder/funnels/intro.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "750424083ac85fad7a19f4704bed42b0f488b5fbc15cc8e1ba61cd91ecc24cec"
+    },
+    "assets/create/ponder/funnels/redstone.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "509db6dcfc58a0d79b3fbb2d5ca7b8cad07d5e6709e9f08569c7fd90136a49b6"
+    },
+    "assets/create/ponder/funnels/transposer.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "7c735ed19e9f970388018103f28dd0d7d59180fcd827e83c0689900283d8ce21"
+    },
+    "assets/create/ponder/furnace_engine.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "49a9e6d41e8c5b99a3a2fb3ad07dc4431fd7de7d1a5f264f4413239a21697acc"
+    },
+    "assets/create/ponder/gantry/direction.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "398f4976c9d6236e235f095b7aab98c4f3820fc84b1e97b2e14db9d48dc615c6"
+    },
+    "assets/create/ponder/gantry/intro.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "857e784f8069dff0d11f84f63f91ceb9eef6823d5c4ea04be7cbde0de5c16751"
+    },
+    "assets/create/ponder/gantry/redstone.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "638e9d696f8f149b8f7f79a337e5e4b0aba5bb50a27b35c420263b3b0cb2247d"
+    },
+    "assets/create/ponder/gantry/subgantry.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "a7ecd7f0194f7f91558cf806c503da01ddea36ee8def01cf7183a1b2db6a33be"
+    },
+    "assets/create/ponder/gauges.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "ead8adc2192a87c9b8703120a5ddfc2ac474a0a49ef4b9d94f6ec32a850594fd"
+    },
+    "assets/create/ponder/gearbox.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "872aa163226c825e368bebed7a469f7441260e7f6f0ca6570ed597b1d788909c"
+    },
+    "assets/create/ponder/gearshift.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "35cdaa1820452f303a1ba036a0d11fc257f791eaefe635ccdf662cdb0f186929"
+    },
+    "assets/create/ponder/hand_crank.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "af2dc5a36a0613236c4ba8c151620473015082948a9301c3cc96fc9271e7e07d"
+    },
+    "assets/create/ponder/harvester.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "0303c5e42a12e0d802a6bb799121c63d25c19668fa1463dba35240522c6dc293"
+    },
+    "assets/create/ponder/high_logistics/chain_conveyor.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "058c36366fe236f348a2a701dfbd6f857eea32a7dfb229e1c255ab90df532799"
+    },
+    "assets/create/ponder/high_logistics/factory_gauge_crafting.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "2cbe10cb4d4de3a5614dcd5ef5a07eb70b826ac19819963b7baa342f991c3de6"
+    },
+    "assets/create/ponder/high_logistics/factory_gauge_links.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "9f32689df05b349fb95a3136212808540c6e865721b38640cd4a7c8248f22206"
+    },
+    "assets/create/ponder/high_logistics/factory_gauge_recipe.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "12e3f3f8b9e5c7877d4a22b7dcb307ed1926eb00d74d09c8cdd59378e92b31a6"
+    },
+    "assets/create/ponder/high_logistics/factory_gauge_restocker.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "d0259e8163dd01c8ef9f041c01dd89ffe97969724c3cc6fd6d135b3a19fd609d"
+    },
+    "assets/create/ponder/high_logistics/package_frogport.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "3ae9cbced14bfbd8741955c4e88addfb117fa740f782ec9c339fcdf5f2e1249d"
+    },
+    "assets/create/ponder/high_logistics/package_postbox.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "5d591bfe4e128c09490e30b007b3553f05d09afb3a109c23e17df5ad84244f34"
+    },
+    "assets/create/ponder/high_logistics/packager.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "a4f84ec0309ad4b86bc7488723848c1d38f6f28bb20578c8c0a0ac38c5f144af"
+    },
+    "assets/create/ponder/high_logistics/packager_address.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "308a71084dea91944465edffbb6e993d25721f3582dc8910fa42d197fa2a50b2"
+    },
+    "assets/create/ponder/high_logistics/redstone_requester.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "52b0202231ce817864cef8b754e8afb8814ed406230e75ed298f69616ecee607"
+    },
+    "assets/create/ponder/high_logistics/repackager.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "6ffc6cea906935d9940b0da7483cb022b8f6c4cebbe6f482abb0febb9bb472cf"
+    },
+    "assets/create/ponder/high_logistics/stock_link.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "eefdef7a8061c1b871c01b75aafef47050ce161a641be4d1c5be9fe42f66c550"
+    },
+    "assets/create/ponder/high_logistics/stock_ticker.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "582f0277ba29d4a15c37347dcff3402897a1c78c969062d602c5257e82d8446e"
+    },
+    "assets/create/ponder/high_logistics/stock_ticker_address.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "964b6515a81c741638cb4d571f7d194719532342312c6b307d6234ef1a8f6623"
+    },
+    "assets/create/ponder/high_logistics/table_cloth.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "28b2ddf2a26dfdbadc0b181c3f7d1024e448c6ad1f9385b7538a8e75bb463e92"
+    },
+    "assets/create/ponder/hose_pulley/infinite.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "816141a4ce6bc87650c2bb2eed790c5233c58e74826725c6be1eb924ac87b456"
+    },
+    "assets/create/ponder/hose_pulley/intro.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "f79076faa334cbef589e15547e673d95ad7f20f4436c5a8c6e006accb0ede312"
+    },
+    "assets/create/ponder/hose_pulley/level.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "ed6850ca023bb89a8352621695df1c708ed87b92092398a33c920a90e9b47c8d"
+    },
+    "assets/create/ponder/item_drain.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "eb92e2f9f65a82c6baf667a32fa887a1249930dc805217fd8baa7716188082f1"
+    },
+    "assets/create/ponder/item_vault/sizes.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "142049d256a58cfd04820758110dfb55b6b93db9131e912f209862fbf63cad3f"
+    },
+    "assets/create/ponder/item_vault/storage.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "6b49323dd6733661142d26031791832898eeb3d2e00458070b17c40bd62bb117"
+    },
+    "assets/create/ponder/large_water_wheel.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "2a8a241a2e78b5aeb7523f8a60f9dd9865fadad22182b3c6c9858078da1e4de6"
+    },
+    "assets/create/ponder/mechanical_arm/filter.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "4f4925337b1bb3680566a6d6dfe6ca9486fc8cc83ebc4bffd7568a4a2cbd7d07"
+    },
+    "assets/create/ponder/mechanical_arm/modes.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "d6412c9511a9f70d3cbd9174c7ae242c3d80789579bc22783def88b5488df47c"
+    },
+    "assets/create/ponder/mechanical_arm/redstone.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "469b45dc43ab4592675ac6fae73c9839e630cc48bc60b6f8d95cf1c66dfe07bb"
+    },
+    "assets/create/ponder/mechanical_arm/setup.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "6c331473d110ee7e4d11768973511ddab53da347915386b8697d568e63cef91d"
+    },
+    "assets/create/ponder/mechanical_bearing/anchor.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "3dd010166e44d8fed2a4b0a5609c97c31b7e1dc1e1296e76bb088b181373407c"
+    },
+    "assets/create/ponder/mechanical_bearing/modes.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "22fe268721d6207c8d68754fd2928b96e535ab2e38cfaf2f164e4883e3f54e46"
+    },
+    "assets/create/ponder/mechanical_bearing/stabilized.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "c4070dd004ef541e2ce5e44b05406c2e3042be4856bf22f1eca92521b31331bb"
+    },
+    "assets/create/ponder/mechanical_crafter/connect.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "ae1102938a9f8182c021faaeb1d0bf6b5d22d8c81a20daf893880f6a4d88fe4c"
+    },
+    "assets/create/ponder/mechanical_crafter/covers.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "0824399dc990b969627ec4351260ce1e60df3fce35d955635c2df3cf8e80209b"
+    },
+    "assets/create/ponder/mechanical_crafter/setup.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "8ec5503d2da885b32e8f19e03543b9b8c1a893a3f9a096623f63a53c13852aa6"
+    },
+    "assets/create/ponder/mechanical_drill/breaker.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "cf5a4384905009dcc5efb2552108bcec316585dba181ef86a13dc6696660dcea"
+    },
+    "assets/create/ponder/mechanical_drill/contraption.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "5bb7c3284420060422ee3f982573d510a4c789622fc97fdd19242020158736ac"
+    },
+    "assets/create/ponder/mechanical_mixer/mixing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "c35a4e6efaea5fb5af8710068f0d3ad3f103e5b95f8133b217012d6f9978a673"
+    },
+    "assets/create/ponder/mechanical_piston/anchor.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "6b0b5117346be032be9b2b40387cb9e61dd55c8fd8f41e323c4e6bf88fe0443f"
+    },
+    "assets/create/ponder/mechanical_piston/modes.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "7ba2f88e895ec2a5452534d192bb4497ac8021250d80cd586c2f228932c076d6"
+    },
+    "assets/create/ponder/mechanical_piston/piston_pole.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "0d0fecaf87b9d9588f174f5f5ddcd4a94a3ae36cd61ae11b60be690cbb0be0df"
+    },
+    "assets/create/ponder/mechanical_press/compacting.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "83082d3abc3bd2be5f862b224c87ab13eecde004960ea88be65c919f4a5850f4"
+    },
+    "assets/create/ponder/mechanical_press/pressing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "21b8ff837fbcf0a21ad199d0999af193a35f2c8aeae954f0cd199bb6a26bec48"
+    },
+    "assets/create/ponder/mechanical_pump/flow.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "0e0b74af0cbc2e71e05b37aefb22597ce8b8bbb3cc1f99bad3fad07f4e2d9a9a"
+    },
+    "assets/create/ponder/mechanical_pump/speed.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "b0fc0f89e5a2a746287e314e50912eb65d51d633b3f4c0fbb0f363896731e6ba"
+    },
+    "assets/create/ponder/mechanical_roller/clear_and_pave.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "42c67348014b5851ede484e4ca2f2bbfc9b635878fde898b886fd2e84106d33a"
+    },
+    "assets/create/ponder/mechanical_roller/fill.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "1dd263a8364ab92a705ff59a1b3697f338632583e05c08b1039c24a9e3e7377a"
+    },
+    "assets/create/ponder/mechanical_saw/breaker.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "e7d09184f51ef6ccaa54cfc36c8d8c428bda9496b6bcdd6b60f2e22f177e0f9c"
+    },
+    "assets/create/ponder/mechanical_saw/contraption.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "3b3a1c68d19beef69449e9d1f1218739db0f2ad73a12cbd26fa363730de59fe6"
+    },
+    "assets/create/ponder/mechanical_saw/processing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "a4e5893ae351b74d2c654ebfaae118a4d4f49b0966efce3fe4f6c40ebadccffc"
+    },
+    "assets/create/ponder/millstone.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "076787449842e773e048424cb743ecf77ad93bed7a1ded897dd6ded51ca640b2"
+    },
+    "assets/create/ponder/nixie_tube.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "84fa5c5ede7f8bf956961d62353cc3131ecc2fe6ad18507d771a9ed2165a1471"
+    },
+    "assets/create/ponder/plough.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "39f90523696cc1259e7d535e9a1149c07442b1a7f77d5beacbeb36f618f5ee14"
+    },
+    "assets/create/ponder/portable_interface/redstone.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "1a62b1bda3d5c3e2cae389539be174face0fdcc3a60de4e169bbe9e2bfef5d7d"
+    },
+    "assets/create/ponder/portable_interface/redstone_fluid.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "92b7a4b8f5ba62b64f1a8cfb1afa710609c5db6bf76346f3663a93993129b929"
+    },
+    "assets/create/ponder/portable_interface/transfer.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "4a216c10db0600458c63fc93dcbdd3db0e1e699ceb229478f2cf9fa995e2ceb0"
+    },
+    "assets/create/ponder/portable_interface/transfer_fluid.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "e02a5e99df5e16a512797ec6febf17c62b5c9e083eb61b88ac73af3cca698c92"
+    },
+    "assets/create/ponder/powered_latch.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "3ae3adb9f751ad5a5353c92f03aa40b2f0e5ad0b351c0c5235f6b1b0cdb5c262"
+    },
+    "assets/create/ponder/powered_toggle_latch.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "1dead4ddc6d6d96fb0a7906a50311f40b98801d05a4a5abeff57bccf4955e9d7"
+    },
+    "assets/create/ponder/pulse_extender.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "143fca31e0f2fc0eb2ee554043d49af4538ee6af31917af5139fea57f421ce41"
+    },
+    "assets/create/ponder/pulse_repeater.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "377baa3b86d97075c18ec73450660e0c3f567753431c2fa2b18c5d2d46976264"
+    },
+    "assets/create/ponder/pulse_timer.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "8275ef424783fb8b0cbb6356c1109414bdc8212a2dfe974241bb0bfc966e9c70"
+    },
+    "assets/create/ponder/redstone_contact.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "b5b95e2e42553f115fcc4ccbfb643bac9fd6280a61bf8ef576035c205386db32"
+    },
+    "assets/create/ponder/redstone_link.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "b941eebb60cff988c1cb8485d907f26a3cec26e24bf780dbf353f852b9d4f33d"
+    },
+    "assets/create/ponder/rope_pulley/anchor.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "d870f7427c04903ede548f0c55d5508d0dcf35c50f9d902552c62c387e7af168"
+    },
+    "assets/create/ponder/rope_pulley/attachment.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "b6965ec458769a2bed827ab71277a7ccb433593d36ea9c395ebc847f450b4df4"
+    },
+    "assets/create/ponder/rope_pulley/modes.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "4b50515b123b319a430ae56f01055d0cef726e91c42a012054c0abc0f0716eb9"
+    },
+    "assets/create/ponder/rope_pulley/multi_rope.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "662a68ae7300874250149e86ca79be5096c1946dd222dfea6721f673726059b1"
+    },
+    "assets/create/ponder/rose_quartz_lamp.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "3d8b72eb6704ba9ee0140e6e9cab40ca3db72b569e5369363800feff04f10871"
+    },
+    "assets/create/ponder/sail.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "33b6b4232964a190dfccc1070164bd173be03d8039ff062465be84c5ba105663"
+    },
+    "assets/create/ponder/sequenced_gearshift.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "526675bbd5696d067de94b86cd2facce991ead5275fe64d5ca8df25bd85a3cd6"
+    },
+    "assets/create/ponder/shaft/encasing.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "1f81095724c813f093250c2fbf516f6360207dbbf9be2b0659e81573fd70d04c"
+    },
+    "assets/create/ponder/shaft/relay.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "9cc8dcbc571b746c6dfccfe9e343621ec1fc6d5fd0aad55f36e6df37aeb89ff6"
+    },
+    "assets/create/ponder/smart_observer.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "e9dd8bb680c464fad2ee39703de2be5c6a4153f7df735d7cabfdf4ba892bd4cb"
+    },
+    "assets/create/ponder/smart_pipe.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "1d3479dd1ecda2d3b298c9f569e13a2832928654630324b7f5e1bccac1a272f2"
+    },
+    "assets/create/ponder/speed_controller.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "982fcffa0bcc89c92d25b177c245a1872aa61d9524093e3f9ba9d09c9be46d83"
+    },
+    "assets/create/ponder/spout.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "65233b9448d5c42ad169606f12e643c6858d1c16ac46e9921d537932fc254058"
+    },
+    "assets/create/ponder/steam_engine.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "2db43d684acf0250fc2f0f90d8b2adad22bef2d0d6a5b836b0f593d8b8bc02d8"
+    },
+    "assets/create/ponder/steam_whistle.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "60fc440481f80698a5cd41418838a227a90421cc3d911faedf7a91848adbf39e"
+    },
+    "assets/create/ponder/sticker.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "5246ff61a69fd307d6791b706936472dfeeecf7259c50361763234b66511e2b2"
+    },
+    "assets/create/ponder/super_glue.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "e3e320fa3c839931c3f5d6c3d182ba6e7148b816e53fad27df25c0d2a5a14989"
+    },
+    "assets/create/ponder/threshold_switch.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "39246da257bc539333599010e850452a4b67c863e9a8f6190993dacd3f1f49eb"
+    },
+    "assets/create/ponder/train_controls.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "a1bd1f12b34ceb85a8eb880ef385d144b8f592d15c775412b0707ea61f2c9fdc"
+    },
+    "assets/create/ponder/train_observer.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "746e77d8b945ced42c33ffda98d8a39d0ac6185e85781720909d7bf6b7711c12"
+    },
+    "assets/create/ponder/train_schedule.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "ec867f920ce5b1f8018719b8c6e88292d7916282f0aa1bd07e3fee174e82fe47"
+    },
+    "assets/create/ponder/train_signal/placement.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "ec8c85833eace4e234c74c57962e938e7be9d55c3a36d2e7c00262600b1d9036"
+    },
+    "assets/create/ponder/train_signal/redstone.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "5955f89dd96b433f1b8570995ae8706400e640f01937bec9967fcf2093131f7b"
+    },
+    "assets/create/ponder/train_signal/signaling.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "6d7e8fb74f1920b1afa7ccc5fb8eaffe0f2fc5f87991eac428c755430dcf4bb2"
+    },
+    "assets/create/ponder/train_station/assembly.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "4d9ffee5113a6461770c9872c17e62620f3d14384e140fd36d7008b6638dde8d"
+    },
+    "assets/create/ponder/train_station/schedule.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "d93e1b53fa66b6f3e0479a921156595956e2ef93301e72378da579559bf4751d"
+    },
+    "assets/create/ponder/train_track/chunks.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "3734a2d532ed99d04c1721318ad5e2ef15fe0cc4912fe933bdece16ec68a3538"
+    },
+    "assets/create/ponder/train_track/placement.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "dddd903a5c049097d23b854b69921c21244a272c156c5f55d250a6bc276dffd4"
+    },
+    "assets/create/ponder/train_track/portal.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "bda8c25175a45da5bcca701d7275eabbeadbca794fb5a75a7a45bd0b70aab4ec"
+    },
+    "assets/create/ponder/tunnels/andesite.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "f2a52df19a8974bc5af23fb02bd926239235486a88c2627832d61c7e0cb7702a"
+    },
+    "assets/create/ponder/tunnels/brass.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "118b96021eb9cee46fd9d0e6ca7f8d445d88abff2e4e24997b57df026725ee5f"
+    },
+    "assets/create/ponder/tunnels/brass_modes.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "eccc29886249f46f575ae1454b056e63f70add750ab588d1d8f0fff448f4ce2c"
+    },
+    "assets/create/ponder/valve_handle.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "60e417df7a995ab11bf03234baddd3e014f051c2a32f4f18836da9c789ce6efe"
+    },
+    "assets/create/ponder/water_wheel.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "01dfedfb544f94fc4dc45ea08e1bd751f850fbcf0b202bf38780ca6952675b88"
+    },
+    "assets/create/ponder/weighted_ejector/eject.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "14deadd3e98ea537f2bf9614053b66b2376dde47488bb29dc2cd03ef6f4a9eab"
+    },
+    "assets/create/ponder/weighted_ejector/redstone.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "2e5bbde616fcec2f5d2a9b0f69d399a51183b694f926535684aaa6f3d9f6c1f4"
+    },
+    "assets/create/ponder/weighted_ejector/split.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "6d95cb231b2f5a06c02b068380a9da12c0965fcf86b8afaa049199ab10bbdd69"
+    },
+    "assets/create/ponder/windmill_bearing/source.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "7ac1e25807cd384e806515a327d306ee87252de27025fd4f6cc74914938ebc4a"
+    },
+    "assets/create/ponder/windmill_bearing/structure.nbt": {
+      "source": "Create ac0c444d9828da3453ae8cc65338e8de063286fb",
+      "sha256": "0dd0c2d84323231aacc44805c3a3a2243041fa96f772eb7bca48c8a85b2c655c"
+    },
+    "assets/ponder/lang/be_by.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "901e330ff419745bd290d3bdbdbe5f7fa46aebe8a8a30b0814b1568a31700f3c"
+    },
+    "assets/ponder/lang/bel_tr.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "fd3219d0d9ad0eaf483efed7fb7cabd22fdddc94b88cdc40d3b8f8d83813359b"
+    },
+    "assets/ponder/lang/cs_cz.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "a76fabeb2f518a61ca36c29c659758c9cf21e427eb5bb1487a7ad858c04773cd"
+    },
+    "assets/ponder/lang/da_dk.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "905bafabadc41fed661c59ee7c2f08f0d78a1b81a2721d35ae48d3dc93c1e510"
+    },
+    "assets/ponder/lang/de_de.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "6dad0e0894a5ae5e37c6968907dc99575b1e8f6f4d0d6bb6c275721b2bfce4be"
+    },
+    "assets/ponder/lang/en_us.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "372ac14b879db77e96954f68c2843d615bd585b5fa04fe10a57e1add478bf4cb"
+    },
+    "assets/ponder/lang/eo_uy.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "935c240b31977125e52ccd12faa90854906d29999ea6b4124df5754036848584"
+    },
+    "assets/ponder/lang/es_cl.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "31c1d394d2af1fda7d7daea00560eb5d77d6fce9232f34ab6d17ae5fb55a2339"
+    },
+    "assets/ponder/lang/es_es.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "304a0801c30ca0cd3b804422105efade33668d69872770ba74111f8d6a384db5"
+    },
+    "assets/ponder/lang/es_mx.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "f62960dc7e367a0a9a21db4c5b508fd60597f59ebcb9e856a1b69b264b14c3a0"
+    },
+    "assets/ponder/lang/fi_fi.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "7f8021f75439181754ad9eced115225caa75de0955c263e0d689e21553c43c90"
+    },
+    "assets/ponder/lang/fr_fr.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "f01a3f75ca04975bca6a15b5718270a8185befef327e817068d7655c1c495a22"
+    },
+    "assets/ponder/lang/hu_hu.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "a251e92ca6abc242faff98d8be950585578b81f5cd7f03218b8c51f35ea72c93"
+    },
+    "assets/ponder/lang/id_id.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "01537e78b2ac7e6bcf3ce8ccc70cc9f6134778d0fb6701c860c0f16fd290f940"
+    },
+    "assets/ponder/lang/it_it.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "313a0b2eb8d02a6a3906f5be00a7d59dbcc5d7147b6e0ca135e9cee498271885"
+    },
+    "assets/ponder/lang/ja_jp.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "af279b16caaebb1899dabd9f53919c5d0fd90b276a6ea4715ddea4386879a0bc"
+    },
+    "assets/ponder/lang/kk_kz.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "2f6bd7d0da2271828be5a108cf66dc605506a0b768096658d06327da8e2dc4f8"
+    },
+    "assets/ponder/lang/ko_kr.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "6ead5cb2090efcc75288c11f2bfb53f600313c01d7873576a72ffa1397fcb93c"
+    },
+    "assets/ponder/lang/lol_us.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "5a39e16b56e08af5ba28347033226e7510962cdbb2c87962bda407fd3f85598c"
+    },
+    "assets/ponder/lang/lzh.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "5b64701801fb51ebfab7fd84afa2dbc61cd1a3ae3cc0169d25a8d0b838246ec4"
+    },
+    "assets/ponder/lang/nl_nl.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "0787139752c3ae9c734be45c95ed2d2202d0a4bf43b0f1790f0c21cbb3b0e33c"
+    },
+    "assets/ponder/lang/no_no.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "4bef287610457c6c22d2b63e28dcc1f6073a5acfa3f0e1d3cdc29d472ca2b405"
+    },
+    "assets/ponder/lang/pl_pl.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "efa4a35618a1e25919a29cf6605772c3ff7a203bb449282be7f50b38f8b0c343"
+    },
+    "assets/ponder/lang/pt_br.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "a9c032c616b7d9b3038244ee3bd04d2fb2467696575c9308d00ad7f04abf4cc3"
+    },
+    "assets/ponder/lang/ro_ro.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "49769c7ed49f0595e6ae4cb314e672df9dc10637476c253a257c00e229a1509b"
+    },
+    "assets/ponder/lang/ru_ru.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "c26294582b192435eef9fe629c5339a1519094161f1c0aa6bd90c034ee129c58"
+    },
+    "assets/ponder/lang/sv_se.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "8ac570ee30ca9caf65f5ea88aed34cbc27dfdfc2af7b88b328c3159807e655a2"
+    },
+    "assets/ponder/lang/th_th.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "afb5e434f66b2763b12970d5ec5cb8e864674e2dad33898dfe66e2f4e0e3d61d"
+    },
+    "assets/ponder/lang/tok.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "929089b0f7febc9372af1bff5de3c3743714f724af94750666792acc5b035773"
+    },
+    "assets/ponder/lang/tr_tr.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "ac64a84dd8c1bee1581ba079ac35ce6135e1a1fef116e21904d607ca77929cf0"
+    },
+    "assets/ponder/lang/uk_ua.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "cf99366ca40dcdb1be83fbd20e240732d746db9405cea6d5a209818e4addfd3d"
+    },
+    "assets/ponder/lang/vi_vn.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "af590230a28db3065db179a399232e03d8ab9705b8299ceb6ea104059ef69595"
+    },
+    "assets/ponder/lang/zh_cn.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "7e55bf9e7ee49248c036f96f250aae7e329bf79c2644ff48ff826239b2279bfc"
+    },
+    "assets/ponder/lang/zh_tw.json": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "f7e43864e88ff7c814ef174bc8342a2b477ec1ff2e03582f15d6a2774555af99"
+    },
+    "assets/ponder/ponder/debug/scene_1.nbt": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "1ac700be88ddc99bf1c72207022d078739f054b715ceb9ef02deb83649c8bcda"
+    },
+    "assets/ponder/ponder/debug/scene_2.nbt": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "85f9d5cfe436ac3d2d9604f746efea65e4643af740aac5372e8e5315b0eb98bf"
+    },
+    "assets/ponder/ponder/debug/scene_3.nbt": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "b8f0665e7e1130c594263c7e5ba5d2a7895afe5750e87fcc5ca6014bb7d0f2ca"
+    },
+    "assets/ponder/ponder/debug/scene_4.nbt": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "529d20edfea2e71ba89a54dd8774572219cbd4c989be76e55b1d12ca2c2f004f"
+    },
+    "assets/ponder/ponder/debug/scene_5.nbt": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "7ea97d17e1d99ea3dbd02852784fa8d826d333840d4f4d3f9788632c0fa73e1b"
+    },
+    "assets/ponder/ponder/debug/scene_6.nbt": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "241864950b685e505c9b7f409168514be020f1f60a1afd3a1538ddff6e988e29"
+    },
+    "assets/ponder/ponder/debug/scene_7.nbt": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "14bd570cbdd9816fb2ceb81e48ec9d1a91033c712c0f824e68bc7d4e52af9728"
+    },
+    "assets/ponder/ponder/debug/scene_8.nbt": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "4ac0693a6083385c88a360c0cbfe354a8c1741f21a87e8dc10d8b0cdff783adb"
+    },
+    "assets/ponder/ponder/debug/scene_9.nbt": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "e6c2de11cf9cbb5d945ce0d321a2babc4701dd0bb043bb9ee7f5c6be4061326b"
+    },
+    "assets/ponder/textures/gui/logo.png": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "32c37cc727af940573164f06a5f8935c36f71d3470b0cd43b07a2292f90a8454"
+    },
+    "assets/ponder/textures/gui/placement_indicator.png": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "317cfab039d32aca3576b200b1cf35696d023502fcdca17c333f8acf94871974"
+    },
+    "assets/ponder/textures/gui/widgets.png": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "42b242de09749be7358c48b9a0ee25f5248bad732d2177eb859a63cc7db02fe8"
+    },
+    "assets/ponder/textures/special/blank.png": {
+      "source": "Ponder 1.0.82+mc1.21.1 sources",
+      "sha256": "8c6b0e152f49cb2d3ac29028fd752d869f6fad2585c2364534525c8cb612e9e7"
+    }
+  }
+}

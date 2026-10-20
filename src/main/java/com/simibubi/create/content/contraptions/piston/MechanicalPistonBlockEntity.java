@@ -1,179 +1,85 @@
 package com.simibubi.create.content.contraptions.piston;
 
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.contraptions.AssemblyException;
-import com.simibubi.create.content.contraptions.ContraptionCollider;
-import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
-import com.simibubi.create.content.contraptions.DirectionalExtenderScrollOptionSlot;
-import com.simibubi.create.content.contraptions.piston.MechanicalPistonBlock.PistonState;
-import com.simibubi.create.content.kinetics.base.IRotate;
+import com.simibubi.create.*;
 import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.utility.ServerSpeedProvider;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.Direction.AxisDirection;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.util.Mth;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import com.simibubi.create.content.contraptions.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.Vec3;
+import static com.simibubi.create.content.contraptions.piston.MechanicalPistonBlock.*;
 
+/** A reservation is accepted by the native level before the first source pole or cargo is removed. */
 public class MechanicalPistonBlockEntity extends LinearActuatorBlockEntity {
-	protected int extensionLength;
-
-	public MechanicalPistonBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		extensionLength = compound.getInt("ExtensionLength");
-		super.read(compound, registries, clientPacket);
-	}
-
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		tag.putInt("ExtensionLength", extensionLength);
-		super.write(tag, registries, clientPacket);
-	}
-
-	@Override
-	public void assemble() throws AssemblyException {
-		if (!(level.getBlockState(worldPosition)
-			.getBlock() instanceof MechanicalPistonBlock))
-			return;
-
-		Direction direction = getBlockState().getValue(BlockStateProperties.FACING);
-
-		// Collect Construct
-		PistonContraption contraption = new PistonContraption(direction, getMovementSpeed() < 0);
-		if (!contraption.assemble(level, worldPosition))
-			return;
-
-		Direction positive = Direction.get(AxisDirection.POSITIVE, direction.getAxis());
-		Direction movementDirection =
-			getSpeed() > 0 ^ direction.getAxis() != Axis.Z ? positive : positive.getOpposite();
-
-		BlockPos anchor = contraption.anchor.relative(direction, contraption.initialExtensionProgress);
-		if (ContraptionCollider.isCollidingWithWorld(level, contraption, anchor.relative(movementDirection),
-			movementDirection))
-			return;
-
-		// Check if not at limit already
-		extensionLength = contraption.extensionLength;
-		float resultingOffset = contraption.initialExtensionProgress + Math.signum(getMovementSpeed()) * .5f;
-		if (resultingOffset <= 0 || resultingOffset >= extensionLength) {
-			return;
-		}
-
-		// Run
-		running = true;
-		offset = contraption.initialExtensionProgress;
-		sendData();
-		clientOffsetDiff = 0;
-
-		BlockPos startPos = BlockPos.ZERO.relative(direction, contraption.initialExtensionProgress);
-		contraption.removeBlocksFromWorld(level, startPos);
-		movedContraption = ControlledContraptionEntity.create(getLevel(), this, contraption);
-		resetContraptionToOffset();
-		forceMove = true;
-		level.addFreshEntity(movedContraption);
-
-		AllSoundEvents.CONTRAPTION_ASSEMBLE.playOnServer(level, worldPosition);
-
-		if (contraption.containsBlockBreakers())
-			award(AllAdvancements.CONTRAPTION_ACTORS);
-	}
-
-	@Override
-	public void disassemble() {
-		if (!running && movedContraption == null)
-			return;
-		if (!remove)
-			getLevel().setBlock(worldPosition, getBlockState().setValue(MechanicalPistonBlock.STATE, PistonState.EXTENDED),
-				3 | 16);
-		if (movedContraption != null) {
-			resetContraptionToOffset();
-			movedContraption.disassemble();
-			AllSoundEvents.CONTRAPTION_DISASSEMBLE.playOnServer(level, worldPosition);
-		}
-		running = false;
-		movedContraption = null;
-		sendData();
-
-		if (remove)
-			AllBlocks.MECHANICAL_PISTON.get()
-				.playerWillDestroy(level, worldPosition, getBlockState(), null);
-	}
-
-	@Override
-	protected void collided() {
-		super.collided();
-		if (!running && getMovementSpeed() > 0)
-			assembleNextTick = true;
-	}
-
-	@Override
-	public float getMovementSpeed() {
-		float movementSpeed = Mth.clamp(convertToLinear(getSpeed()), -.49f, .49f);
-		if (level.isClientSide)
-			movementSpeed *= ServerSpeedProvider.get();
-		Direction pistonDirection = getBlockState().getValue(BlockStateProperties.FACING);
-		int movementModifier = pistonDirection.getAxisDirection()
-			.getStep() * (pistonDirection.getAxis() == Axis.Z ? -1 : 1);
-		movementSpeed = movementSpeed * -movementModifier + clientOffsetDiff / 2f;
-
-		int extensionRange = getExtensionRange();
-		movementSpeed = Mth.clamp(movementSpeed, 0 - offset, extensionRange - offset);
-		if (sequencedOffsetLimit >= 0)
-			movementSpeed = (float) Mth.clamp(movementSpeed, -sequencedOffsetLimit, sequencedOffsetLimit);
-		return movementSpeed;
-	}
-
-	@Override
-	protected int getExtensionRange() {
-		return extensionLength;
-	}
-
-	@Override
-	protected void visitNewPosition() {
-	}
-
-	@Override
-	protected Vec3 toMotionVector(float speed) {
-		Direction pistonDirection = getBlockState().getValue(BlockStateProperties.FACING);
-		return Vec3.atLowerCornerOf(pistonDirection.getNormal())
-			.scale(speed);
-	}
-
-	@Override
-	protected Vec3 toPosition(float offset) {
-		Vec3 position = Vec3.atLowerCornerOf(getBlockState().getValue(BlockStateProperties.FACING)
-				.getNormal())
-			.scale(offset);
-		return position.add(Vec3.atLowerCornerOf(movedContraption.getContraption().anchor));
-	}
-
-	@Override
-	protected ValueBoxTransform getMovementModeSlot() {
-		return new DirectionalExtenderScrollOptionSlot((state, d) -> {
-			Axis axis = d.getAxis();
-			Axis extensionAxis = state.getValue(MechanicalPistonBlock.FACING)
-				.getAxis();
-			Axis shaftAxis = ((IRotate) state.getBlock()).getRotationAxis(state);
-			return extensionAxis != axis && shaftAxis != axis;
-		});
-	}
-
-	@Override
-	protected int getInitialOffset() {
-		return movedContraption == null ? 0
-			: ((PistonContraption) movedContraption.getContraption()).initialExtensionProgress;
-	}
+    protected int extensionLength;
+    public MechanicalPistonBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.MECHANICAL_PISTON,pos,state);}
+    protected LinearContraptionEntity createReservation(ServerLevel level){return new LinearContraptionEntity(AllEntityTypes.LINEAR_CONTRAPTION,level);}
+    @Override protected boolean matches(LinearContraptionEntity owner){return owner.getContraption() instanceof PistonContraption piston&&piston.getControllerPos().equals(worldPosition)&&worldPosition.equals(owner.getControllerPos())&&piston.getOrientation()==getBlockState().getValue(FACING);}
+    private float rawSpeed(){var face=getBlockState().getValue(FACING);int sign=face.getAxisDirection().getStep()*(face.getAxis()==Direction.Axis.Z?-1:1);return Math.clamp(getSpeed()/512f,-.49f,.49f)*-sign;}
+    @Override public float getMovementSpeed(){float value=rawSpeed();if(level!=null&&level.isClientSide())value*=com.simibubi.create.foundation.utility.ServerSpeedProvider.get();if(running)value=Math.clamp(value,-offset,extensionLength-offset);return sequencedOffsetLimit<0?value:(float)Math.clamp(value,-sequencedOffsetLimit,sequencedOffsetLimit);}
+    @Override protected int getExtensionRange(){return extensionLength;}
+    @Override protected int getInitialOffset(){return getMovedContraption()!=null&&getMovedContraption().getContraption() instanceof PistonContraption piston?piston.initialExtensionProgress:0;}
+    @Override protected Vec3 toMotionVector(float amount){return getBlockState().getValue(FACING).getUnitVec3().scale(amount);}
+    @Override protected Vec3 toPosition(float amount){return Vec3.atLowerCornerOf(worldPosition.relative(getBlockState().getValue(FACING))).add(toMotionVector(amount));}
+    private void bind(LinearContraptionEntity owner,PistonContraption structure){
+        if(owner.getContraption()!=structure)owner.setContraption(structure);movedContraption=owner;movedUuid=owner.getUUID();running=true;owner.setProgress(offset);
+        ContraptionHandler.addSpawnedContraptionsToCollisionList(owner);
+    }
+    @Override public boolean assemble()throws AssemblyException{
+        if(!(level instanceof ServerLevel server)||running||movedUuid!=null||transferring)return false;
+        transferring=true;LinearContraptionEntity reserved=null;PistonContraption structure=null;
+        try{
+            structure=new PistonContraption(getBlockState().getValue(FACING),rawSpeed()<0);if(!structure.assemble(server,worldPosition))return false;
+            float initial=structure.initialExtensionProgress;float trial=initial+Math.signum(rawSpeed())*.5f;
+            if(rawSpeed()==0||trial<=0||trial>=structure.extensionLength)return false;
+            var direction=Direction.getApproximateNearest(toMotionVector(rawSpeed()));var start=structure.anchor.relative(structure.getOrientation(),structure.initialExtensionProgress);
+            if(ContraptionTerrainCollision.isCollidingWithWorld(server,structure,start.relative(direction),direction))return false;
+            structure.validateSourceBlocks(server,structure.removalOffset());ContraptionDataPacket.split(0,java.util.UUID.randomUUID(),true,structure.writeNBT(server.registryAccess(),true));
+            reserved=createReservation(server);reserved.setControllerPos(worldPosition);reserved.setProgress(initial);reserved.setPos(Vec3.atLowerCornerOf(start));
+            if(!server.addFreshEntity(reserved)||reserved.isRemoved()||server.getEntity(reserved.getUUID())!=reserved)throw AssemblyException.structureChanged(worldPosition);
+            var accepted=reserved;var captured=structure;
+            var result=ContraptionAssemblyGraph.assemble(server,java.util.List.of(new ContraptionAssemblyGraph.Root(accepted,captured,captured.removalOffset())),complete->{
+                extensionLength=captured.extensionLength;offset=initial;bind(accepted,captured);lastException=null;retryTicks=0;recoveringAssembly=!complete;pendingDisassembly=false;
+            });
+            if(!result.complete())throw result.failure();
+            if(captured.containsBlockBreakers())award(AllAdvancements.CONTRAPTION_ACTORS);
+            server.playSound(null,worldPosition,AllSoundEvents.CONTRAPTION_ASSEMBLE,SoundSource.BLOCKS,1,1);setChanged();sync();return true;
+        }catch(AssemblyException failure){
+            if(structure!=null&&structure.phase()==Contraption.Phase.REMOVED&&reserved!=null){
+                extensionLength=structure.extensionLength;offset=structure.initialExtensionProgress;
+                bind(reserved,structure);recoveringAssembly=true;failure(failure,false);
+            }throw failure;
+        }finally{if(reserved!=null&&reserved.getContraption()==null)reserved.discard();transferring=false;}
+    }
+    @Override public boolean canDisassembleNow(){
+        if(transferring)return false;var owner=getMovedContraption();if(owner==null)return movedUuid==null;
+        try{ContraptionAssemblyGraph.preflightTree(owner);return true;}
+        catch(AssemblyException unavailable){return false;}
+    }
+    @Override public boolean disassemble(){
+        if(!(level instanceof ServerLevel server)||transferring)return false;
+        var owner=getMovedContraption();if(owner==null){pendingDisassembly=movedUuid!=null;setChanged();return movedUuid==null&&!running;}
+        pendingDisassembly=true;setChanged();
+        if(!canDisassembleNow())return false;
+        transferring=true;
+        try{
+            offset=getGridOffset(offset);owner.setProgress(offset);owner.setDeltaMovement(Vec3.ZERO);
+            var state=LoadedLevelAccess.blockState(server,worldPosition);
+            if(isPiston(state))LoadedLevelAccess.setBlockQuiet(server,worldPosition,state.setValue(STATE,PistonState.EXTENDED));
+            if(!owner.disassemble()){
+                if(isPiston(LoadedLevelAccess.blockState(server,worldPosition)))LoadedLevelAccess.setBlockQuiet(server,worldPosition,state.setValue(STATE,PistonState.MOVING));
+                return false;
+            }
+            movedContraption=null;movedUuid=null;running=waitingForSpeedChange=assembleNextTick=pendingDisassembly=false;retryTicks=0;clearSequenceLimit();
+            server.playSound(null,worldPosition,AllSoundEvents.CONTRAPTION_DISASSEMBLE,SoundSource.BLOCKS,1,1);setChanged();sync();return true;
+        }finally{transferring=false;}
+    }
+    public void onLengthBroken(){offset=0;setChanged();sync();}
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);out.putInt("ExtensionLength",extensionLength);}
+    @Override protected void read(ValueInput in, boolean clientPacket){extensionLength=Math.max(0,in.getIntOr("ExtensionLength",0));super.read(in,clientPacket);offset=Math.clamp(offset,0,extensionLength);
+        
+    }
 }

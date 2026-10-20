@@ -1,6 +1,7 @@
 {
-	"parent": "create:block/sequenced_gearshift/idle",
-	"textures": {
-		"4": "create:block/sequenced_gearshift_3"
-	}
+  "parent": "create:block/sequenced_gearshift/idle",
+  "textures": {
+    "4": "create:block/sequenced_gearshift_3",
+    "particle": "create:block/sequenced_gearshift_3"
+  }
 }

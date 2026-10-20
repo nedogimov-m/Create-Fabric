@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/package_filter",
+    "particle": "create:item/package_filter"
+  }
+}

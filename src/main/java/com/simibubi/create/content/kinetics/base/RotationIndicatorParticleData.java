@@ -1,13 +1,11 @@
+// Genuine Create6.0.10 payload; native26.3 codec/registration adaptation.
 package com.simibubi.create.content.kinetics.base;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.AllParticleTypes;
-import com.simibubi.create.foundation.particle.ICustomParticleDataWithSprite;
 
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecs;
-import net.minecraft.client.particle.ParticleEngine.SpriteParticleRegistration;
 import net.minecraft.core.Direction.Axis;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleType;
@@ -15,11 +13,9 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 
 import net.minecraft.network.codec.StreamCodec;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 public class RotationIndicatorParticleData
-	implements ParticleOptions, ICustomParticleDataWithSprite<RotationIndicatorParticleData> {
+	implements ParticleOptions {
 
 	public static final MapCodec<RotationIndicatorParticleData> CODEC = RecordCodecBuilder.mapCodec(i -> i
 		.group(Codec.INT.fieldOf("color")
@@ -42,7 +38,7 @@ public class RotationIndicatorParticleData
 			ByteBufCodecs.FLOAT, p -> p.radius1,
 			ByteBufCodecs.FLOAT, p -> p.radius2,
 			ByteBufCodecs.INT, p -> p.lifeSpan,
-			CatnipStreamCodecs.AXIS, p -> p.axis,
+			ByteBufCodecs.VAR_INT.map(value -> Axis.values()[value], Axis::ordinal), p -> p.axis,
 			RotationIndicatorParticleData::new
 	);
 
@@ -69,27 +65,19 @@ public class RotationIndicatorParticleData
 
 	@Override
 	public ParticleType<?> getType() {
-		return AllParticleTypes.ROTATION_INDICATOR.get();
+		return AllParticleTypes.ROTATION_INDICATOR;
 	}
 
 	public Axis getAxis() {
 		return axis;
 	}
 
-	@Override
-	public StreamCodec<? super RegistryFriendlyByteBuf, RotationIndicatorParticleData> getStreamCodec() {
-		return STREAM_CODEC;
-	}
+    public StreamCodec<? super RegistryFriendlyByteBuf,RotationIndicatorParticleData> getStreamCodec() {
+        return STREAM_CODEC;
+    }
 
-	@Override
-	public MapCodec<RotationIndicatorParticleData> getCodec(ParticleType<RotationIndicatorParticleData> type) {
-		return CODEC;
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public SpriteParticleRegistration<RotationIndicatorParticleData> getMetaFactory() {
-		return RotationIndicatorParticle.Factory::new;
-	}
+    public MapCodec<RotationIndicatorParticleData> getCodec(ParticleType<RotationIndicatorParticleData> type) {
+        return CODEC;
+    }
 
 }

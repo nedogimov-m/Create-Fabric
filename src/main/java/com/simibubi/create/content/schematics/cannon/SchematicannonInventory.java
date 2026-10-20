@@ -1,42 +1,14 @@
 package com.simibubi.create.content.schematics.cannon;
 
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllItems;
+import com.simibubi.create.*;
+import com.simibubi.create.content.schematics.SchematicInventory;
+import net.minecraft.world.item.*;
 
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.neoforged.neoforge.items.ItemStackHandler;
-
-public class SchematicannonInventory extends ItemStackHandler {
-	private final SchematicannonBlockEntity blockEntity;
-
-	public SchematicannonInventory(SchematicannonBlockEntity blockEntity) {
-		super(5);
-		this.blockEntity = blockEntity;
-	}
-
-	@Override
-	protected void onContentsChanged(int slot) {
-		super.onContentsChanged(slot);
-		blockEntity.setChanged();
-	}
-
-	@Override
-	public boolean isItemValid(int slot, ItemStack stack) {
-		switch (slot) {
-		case 0: // Blueprint Slot
-			return AllItems.SCHEMATIC.isIn(stack);
-		case 1: // Blueprint output
-			return false;
-		case 2: // Book input
-			return AllBlocks.CLIPBOARD.isIn(stack) || stack.is(Items.BOOK)
-				|| stack.is(Items.WRITTEN_BOOK);
-		case 3: // Material List output
-			return false;
-		case 4: // Gunpowder
-			return stack.is(Items.GUNPOWDER);
-		default:
-			return super.isItemValid(slot, stack);
-		}
-	}
+/** The original five native slots, shared with actual Fabric item storage and the menu. */
+public final class SchematicannonInventory extends SchematicInventory {
+    public SchematicannonInventory(SchematicannonBlockEntity owner){super(5,(slot,item)->switch(slot){case 0->item.is(AllItems.SCHEMATIC);case 2->item.is(AllBlocks.CLIPBOARD.asItem())||item.is(Items.BOOK)||item.is(Items.WRITTEN_BOOK);case 4->item.is(Items.GUNPOWDER);default->false;},slot->slot==0?1:64,owner::notifyUpdate,owner::canPlayerUse);}
+    public ItemStack getStackInSlot(int slot){return getItem(slot);}
+    public void setStackInSlot(int slot,ItemStack item){setItem(slot,item);}
+    public boolean isItemValid(int slot,ItemStack item){return canPlaceItem(slot,item);}
+    public int getSlotLimit(int slot){return slotLimit(slot);}
 }

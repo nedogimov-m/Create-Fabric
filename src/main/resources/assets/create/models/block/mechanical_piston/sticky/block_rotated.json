@@ -1,6 +1,7 @@
 {
-	"parent": "create:block/mechanical_piston/normal/block_rotated",
-    "textures": {
-        "5": "block/piston_top_sticky"
-    }
+  "parent": "create:block/mechanical_piston/normal/block_rotated",
+  "textures": {
+    "5": "block/piston_top_sticky",
+    "particle": "block/piston_top_sticky"
+  }
 }

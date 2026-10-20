@@ -1,162 +1,59 @@
 package com.simibubi.create.content.processing.burner;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
-import javax.annotation.ParametersAreNonnullByDefault;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllTags.AllEntityTags;
-
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.registry.RegisteredObjectsHelper;
-import net.minecraft.MethodsReturnNonnullByDefault;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.random.WeightedEntry.Wrapper;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.EntityType;
+import com.simibubi.create.AllItems;
+import com.simibubi.create.Create;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.tags.TagKey;
+import net.minecraft.util.Prediction;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.BaseSpawner;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.SpawnData;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.SpawnerBlockEntity;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.nbt.CompoundTag;
+import java.util.Map;
 
-@MethodsReturnNonnullByDefault
-@ParametersAreNonnullByDefault
-public class BlazeBurnerBlockItem extends BlockItem {
-
-	private final boolean capturedBlaze;
-
-	public static BlazeBurnerBlockItem empty(Properties properties) {
-		return new BlazeBurnerBlockItem(AllBlocks.BLAZE_BURNER.get(), properties, false);
-	}
-
-	public static BlazeBurnerBlockItem withBlaze(Block block, Properties properties) {
-		return new BlazeBurnerBlockItem(block, properties, true);
-	}
-
-	@Override
-	public void registerBlocks(Map<Block, Item> p_195946_1_, Item p_195946_2_) {
-		if (!hasCapturedBlaze())
-			return;
-		super.registerBlocks(p_195946_1_, p_195946_2_);
-	}
-
-	private BlazeBurnerBlockItem(Block block, Properties properties, boolean capturedBlaze) {
-		super(block, properties);
-		this.capturedBlaze = capturedBlaze;
-	}
-
-	@Override
-	public String getDescriptionId() {
-		return hasCapturedBlaze() ? super.getDescriptionId() : "item.create." + RegisteredObjectsHelper.getKeyOrThrow(this).getPath();
-	}
-
-	@Override
-	public InteractionResult useOn(UseOnContext context) {
-		if (hasCapturedBlaze())
-			return super.useOn(context);
-
-		Level world = context.getLevel();
-		BlockPos pos = context.getClickedPos();
-		BlockEntity be = world.getBlockEntity(pos);
-		Player player = context.getPlayer();
-
-		if (!(be instanceof SpawnerBlockEntity))
-			return super.useOn(context);
-
-		BaseSpawner spawner = ((SpawnerBlockEntity) be).getSpawner();
-
-		List<SpawnData> possibleSpawns = spawner.spawnPotentials.unwrap()
-			.stream()
-			.map(Wrapper::data)
-			.toList();
-
-		if (possibleSpawns.isEmpty()) {
-			possibleSpawns = new ArrayList<>();
-			possibleSpawns.add(spawner.nextSpawnData);
-		}
-
-		for (SpawnData e : possibleSpawns) {
-			Optional<EntityType<?>> optionalEntity = EntityType.by(e.entityToSpawn());
-			if (optionalEntity.isEmpty() || !AllEntityTags.BLAZE_BURNER_CAPTURABLE.matches(optionalEntity.get()))
-				continue;
-
-			spawnCaptureEffects(world, VecHelper.getCenterOf(pos));
-			if (world.isClientSide || player == null)
-				return InteractionResult.SUCCESS;
-
-			giveBurnerItemTo(player, context.getItemInHand(), context.getHand());
-			return InteractionResult.SUCCESS;
-		}
-
-		return super.useOn(context);
-	}
-
-	@Override
-	public InteractionResult interactLivingEntity(ItemStack heldItem, Player player, LivingEntity entity,
-		InteractionHand hand) {
-		if (hasCapturedBlaze())
-			return InteractionResult.PASS;
-		if (!AllEntityTags.BLAZE_BURNER_CAPTURABLE.matches(entity))
-			return InteractionResult.PASS;
-
-		Level world = player.level();
-		spawnCaptureEffects(world, entity.position());
-		if (world.isClientSide)
-			return InteractionResult.FAIL;
-
-		giveBurnerItemTo(player, heldItem, hand);
-		entity.discard();
-		return InteractionResult.FAIL;
-	}
-
-	protected void giveBurnerItemTo(Player player, ItemStack heldItem, InteractionHand hand) {
-		ItemStack filled = AllBlocks.BLAZE_BURNER.asStack();
-		if (!player.isCreative())
-			heldItem.shrink(1);
-		if (heldItem.isEmpty()) {
-			player.setItemInHand(hand, filled);
-			return;
-		}
-		player.getInventory()
-			.placeItemBackInInventory(filled);
-	}
-
-	private void spawnCaptureEffects(Level world, Vec3 vec) {
-		if (world.isClientSide) {
-			for (int i = 0; i < 40; i++) {
-				Vec3 motion = VecHelper.offsetRandomly(Vec3.ZERO, world.random, .125f);
-				world.addParticle(ParticleTypes.FLAME, vec.x, vec.y, vec.z, motion.x, motion.y, motion.z);
-				Vec3 circle = motion.multiply(1, 0, 1)
-					.normalize()
-					.scale(.5f);
-				world.addParticle(ParticleTypes.SMOKE, circle.x, vec.y, circle.z, 0, -0.125, 0);
-			}
-			return;
-		}
-
-		BlockPos soundPos = BlockPos.containing(vec);
-		world.playSound(null, soundPos, SoundEvents.BLAZE_HURT, SoundSource.HOSTILE, .25f, .75f);
-		world.playSound(null, soundPos, SoundEvents.FIRE_EXTINGUISH, SoundSource.HOSTILE, .5f, .75f);
-	}
-
-	public boolean hasCapturedBlaze() {
-		return capturedBlaze;
-	}
-
+public final class BlazeBurnerBlockItem extends BlockItem {
+    private static final TagKey<EntityType<?>> CAPTURABLE = TagKey.create(Registries.ENTITY_TYPE, Create.asResource("blaze_burner_capturable"));
+    private final boolean captured;
+    public BlazeBurnerBlockItem(Block block, Properties properties, boolean captured) { super(block, properties); this.captured = captured; }
+    public boolean hasCapturedBlaze() { return captured; }
+    @Override public void registerBlocks(Map<Block, Item> blocks, Item item) { if (captured) super.registerBlocks(blocks, item); }
+    private boolean capturable(CompoundTag spawnData) {
+        var entity = spawnData.getCompoundOrEmpty("entity");
+        var id = net.minecraft.resources.Identifier.tryParse(entity.getStringOr("id", ""));
+        return id != null && BuiltInRegistries.ENTITY_TYPE.getOptional(id).map(type -> type.builtInRegistryHolder().is(CAPTURABLE)).orElse(false);
+    }
+    @Override public InteractionResult useOn(UseOnContext context) {
+        var player = context.getPlayer();
+        if (captured || player == null || !player.mayBuild()) return super.useOn(context);
+        if (context.getLevel().getBlockEntity(context.getClickedPos()) instanceof SpawnerBlockEntity spawner) {
+            var tag = spawner.saveWithoutMetadata(context.getLevel().registryAccess());
+            boolean valid = capturable(tag.getCompoundOrEmpty("SpawnData"));
+            for (var potential : tag.getListOrEmpty("SpawnPotentials")) {
+                if (potential instanceof CompoundTag compound) valid |= capturable(compound.getCompoundOrEmpty("data"));
+            }
+            if (valid) {
+                if (!context.getLevel().isClientSide()) give(player, context.getItemInHand(), context.getHand());
+                return InteractionResult.SUCCESS;
+            }
+        }
+        return super.useOn(context);
+    }
+    @Override public InteractionResult interactLivingEntity(ItemStack stack, Player player, LivingEntity entity, InteractionHand hand) {
+        if (captured || !player.mayBuild() || !entity.getType().builtInRegistryHolder().is(CAPTURABLE)) return InteractionResult.PASS;
+        if (!player.level().isClientSide()) { give(player, stack, hand); entity.discard(); }
+        return InteractionResult.SUCCESS;
+    }
+    private void give(Player player, ItemStack stack, InteractionHand hand) {
+        var filled = new ItemStack(AllItems.BLAZE_BURNER);
+        stack.consume(1, player);
+        if (stack.isEmpty()) player.setItemInHand(hand, filled);
+        else player.getInventory().placeItemBackInInventory(filled, Prediction.SERVER_ONLY);
+        player.level().playSound(null, player.blockPosition(), net.minecraft.sounds.SoundEvents.BLAZE_HURT, net.minecraft.sounds.SoundSource.BLOCKS, 0.25f, 0.75f);
+    }
 }

@@ -5,10 +5,10 @@ import java.util.List;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
-import net.minecraft.world.level.levelgen.feature.configurations.FeatureConfiguration;
 
-public class LayeredOreConfiguration implements FeatureConfiguration {
-	public static final Codec<LayeredOreConfiguration> CODEC = RecordCodecBuilder.create(instance -> {
+
+public class LayeredOreConfiguration {
+	public static final com.mojang.serialization.MapCodec<LayeredOreConfiguration> MAP_CODEC = RecordCodecBuilder.mapCodec(instance -> {
 		return instance.group(
 			Codec.list(LayerPattern.CODEC)
 				.fieldOf("layer_patterns")
@@ -22,6 +22,7 @@ public class LayeredOreConfiguration implements FeatureConfiguration {
 		).apply(instance, LayeredOreConfiguration::new);
 	});
 
+	public static final Codec<LayeredOreConfiguration> CODEC=MAP_CODEC.codec();
 	public final List<LayerPattern> layerPatterns;
 	public final int size;
 	public final float discardChanceOnAirExposure;

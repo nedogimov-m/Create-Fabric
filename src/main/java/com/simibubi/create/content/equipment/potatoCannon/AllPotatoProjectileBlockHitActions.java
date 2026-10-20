@@ -19,17 +19,17 @@ import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.BlockHitResult;
 
-import net.neoforged.neoforge.common.SpecialPlantable;
+
 
 public class AllPotatoProjectileBlockHitActions {
 
-	static {
+	private static boolean registered;
+	public static void init() {
+        if(registered)return;registered=true;
 		register("plant_crop", PlantCrop.CODEC);
 		register("place_block_on_ground", PlaceBlockOnGround.CODEC);
 	}
 
-	public static void init() {
-	}
 
 	private static void register(String name, MapCodec<? extends PotatoProjectileBlockHitAction> codec) {
 		Registry.register(CreateBuiltInRegistries.POTATO_PROJECTILE_BLOCK_HIT_ACTION, Create.asResource(name), codec);
@@ -50,7 +50,7 @@ public class AllPotatoProjectileBlockHitActions {
 				return true;
 
 			BlockPos hitPos = ray.getBlockPos();
-			if (level instanceof Level l && !l.isLoaded(hitPos))
+			if (level instanceof Level l && (!com.simibubi.create.foundation.utility.LoadedLevelAccess.isLoaded(l,hitPos)||!com.simibubi.create.foundation.utility.LoadedLevelAccess.isLoaded(l,hitPos.relative(ray.getDirection()))))
 				return true;
 			Direction face = ray.getDirection();
 			if (face != Direction.UP)
@@ -59,10 +59,9 @@ public class AllPotatoProjectileBlockHitActions {
 			if (!level.getBlockState(placePos)
 				.canBeReplaced())
 				return false;
-			if (!(cropBlock.value() instanceof SpecialPlantable specialPlantable))
-				return false;
-			if (specialPlantable.canPlacePlantAtPosition(projectile, level, placePos, null))
-				specialPlantable.spawnPlantAtPosition(projectile, level, placePos, null);
+            var plant=com.simibubi.create.api.equipment.potatoCannon.PotatoProjectilePlantable.get(cropBlock.value());
+            if(plant==null)return false;
+            if(plant.canPlace(projectile,level,placePos))plant.plant(projectile,level,placePos);
 			return true;
 		}
 
@@ -87,7 +86,7 @@ public class AllPotatoProjectileBlockHitActions {
 				return true;
 
 			BlockPos hitPos = ray.getBlockPos();
-			if (levelAccessor instanceof Level l && !l.isLoaded(hitPos))
+			if (levelAccessor instanceof Level l && (!com.simibubi.create.foundation.utility.LoadedLevelAccess.isLoaded(l,hitPos)||!com.simibubi.create.foundation.utility.LoadedLevelAccess.isLoaded(l,hitPos.relative(ray.getDirection()))))
 				return true;
 			Direction face = ray.getDirection();
 			BlockPos placePos = hitPos.relative(face);

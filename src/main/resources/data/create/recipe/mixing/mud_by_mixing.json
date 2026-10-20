@@ -1,0 +1,18 @@
+{
+  "type": "create:mixing",
+  "ingredients": [
+    {
+      "fabric:type": "create:block_tag",
+      "tag": "minecraft:convertible_to_mud"
+    },
+    {
+      "fluid": "minecraft:water",
+      "amount": 20250
+    }
+  ],
+  "results": [
+    {
+      "id": "minecraft:mud"
+    }
+  ]
+}

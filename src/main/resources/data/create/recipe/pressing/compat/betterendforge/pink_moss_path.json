@@ -1,0 +1,19 @@
+{
+  "type": "create:pressing",
+  "ingredients": [
+    "betterendforge:pink_moss"
+  ],
+  "results": [
+    {
+      "id": "betterendforge:pink_moss_path"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "betterendforge"
+      ]
+    }
+  ]
+}

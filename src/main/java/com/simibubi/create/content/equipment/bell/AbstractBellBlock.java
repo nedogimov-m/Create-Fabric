@@ -1,116 +1,45 @@
 package com.simibubi.create.content.equipment.bell;
 
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import com.simibubi.create.*;
+import com.simibubi.create.foundation.utility.*;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.stats.Stats;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.BellBlock;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityTicker;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BellAttachType;
+import net.minecraft.world.level.redstone.Orientation;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.*;
 
-public abstract class AbstractBellBlock<BE extends AbstractBellBlockEntity> extends BellBlock implements IBE<BE> {
-
-	public AbstractBellBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter reader, BlockPos pos, CollisionContext selection) {
-		Direction facing = state.getValue(FACING);
-		return switch (state.getValue(ATTACHMENT)) {
-			case CEILING -> AllShapes.BELL_CEILING.get(facing);
-			case DOUBLE_WALL -> AllShapes.BELL_DOUBLE_WALL.get(facing);
-			case FLOOR -> AllShapes.BELL_FLOOR.get(facing);
-			case SINGLE_WALL -> AllShapes.BELL_WALL.get(facing);
-		};
-	}
-
-	@Override
-	public void neighborChanged(BlockState pState, Level pLevel, BlockPos pPos, Block pBlock, BlockPos pFromPos,
-		boolean pIsMoving) {
-		if (pLevel.isClientSide)
-			return;
-		boolean shouldPower = pLevel.hasNeighborSignal(pPos);
-		if (shouldPower == pState.getValue(POWERED))
-			return;
-		pLevel.setBlock(pPos, pState.setValue(POWERED, shouldPower), Block.UPDATE_ALL);
-		if (!shouldPower)
-			return;
-		Direction facing = pState.getValue(FACING);
-		BellAttachType type = pState.getValue(ATTACHMENT);
-		ring(pLevel, pPos,
-			type == BellAttachType.CEILING || type == BellAttachType.FLOOR ? facing : facing.getClockWise(), null);
-	}
-
-	@Override
-	public boolean onHit(Level world, BlockState state, BlockHitResult hit, @Nullable Player player, boolean flag) {
-		BlockPos pos = hit.getBlockPos();
-		Direction direction = hit.getDirection();
-		if (direction == null)
-			direction = world.getBlockState(pos)
-				.getValue(FACING);
-		if (!this.canRingFrom(state, direction, hit.getLocation().y - pos.getY()))
-			return false;
-		return ring(world, pos, direction, player);
-	}
-
-	protected boolean ring(Level world, BlockPos pos, Direction direction, Player player) {
-		BE be = getBlockEntity(world, pos);
-		if (world.isClientSide)
-			return true;
-		if (be == null || !be.ring(world, pos, direction))
-			return false;
-		playSound(world, pos);
-		if (player != null)
-			player.awardStat(Stats.BELL_RING);
-		return true;
-	}
-
-	public boolean canRingFrom(BlockState state, Direction hitDir, double heightChange) {
-		if (hitDir.getAxis() == Direction.Axis.Y)
-			return false;
-		if (heightChange > 0.8124)
-			return false;
-
-		Direction direction = state.getValue(FACING);
-		BellAttachType bellAttachment = state.getValue(ATTACHMENT);
-		switch (bellAttachment) {
-		case FLOOR:
-		case CEILING:
-			return direction.getAxis() == hitDir.getAxis();
-		case SINGLE_WALL:
-		case DOUBLE_WALL:
-			return direction.getAxis() != hitDir.getAxis();
-		default:
-			return false;
-		}
-	}
-
-	@Nullable
-	public BlockEntity newBlockEntity(BlockPos p_152198_, BlockState p_152199_) {
-		return IBE.super.newBlockEntity(p_152198_, p_152199_);
-	}
-
-	@Nullable
-	public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level p_152194_, BlockState p_152195_,
-		BlockEntityType<T> p_152196_) {
-		return IBE.super.getTicker(p_152194_, p_152195_, p_152196_);
-	}
-
-	public abstract void playSound(Level world, BlockPos pos);
-
+public abstract class AbstractBellBlock extends BellBlock {
+    protected AbstractBellBlock(Properties properties) { super(properties); }
+    @Override protected RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context) { return BellShapes.bell(state.getValue(ATTACHMENT),state.getValue(FACING)); }
+    @Override protected boolean canSurvive(BlockState state,LevelReader level,BlockPos pos) { return super.canSurvive(state,level instanceof Level world?new LoadedLevelReader(world):level,pos); }
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block neighbor,Orientation orientation,boolean moved) {
+        if(!(level instanceof ServerLevel))return;boolean powered=LoadedLevelAccess.getBestNeighborSignal(level,pos)>0;if(powered==state.getValue(POWERED))return;
+        LoadedLevelAccess.setBlockQuiet(level,pos,state.setValue(POWERED,powered));
+        if(powered){var type=state.getValue(ATTACHMENT);var facing=state.getValue(FACING);ring(level,pos,type==BellAttachType.CEILING||type==BellAttachType.FLOOR?facing:facing.getClockWise(),null);}
+    }
+    @Override public boolean onHit(Level level,BlockState state,BlockHitResult hit,Player player,boolean flag) {
+        return canRingFrom(state,hit.getDirection(),hit.getLocation().y-hit.getBlockPos().getY())&&ring(level,hit.getBlockPos(),hit.getDirection(),player);
+    }
+    public boolean canRingFrom(BlockState state,Direction hit,double height) { if(hit.getAxis().isVertical()||height>.8124)return false;var type=state.getValue(ATTACHMENT);boolean wall=type==BellAttachType.SINGLE_WALL||type==BellAttachType.DOUBLE_WALL;return wall?state.getValue(FACING).getAxis()!=hit.getAxis():state.getValue(FACING).getAxis()==hit.getAxis(); }
+    protected boolean ring(Level level,BlockPos pos,Direction direction,Player player) {
+        if(level.isClientSide())return true;
+        if(!(LoadedLevelAccess.blockEntity(level,pos) instanceof AbstractBellBlockEntity bell)||!bell.ring(level,pos,direction))return false;
+        playSound(level,pos);if(player!=null)player.awardStat(Stats.BELL_RING);return true;
+    }
+    @Override public boolean attemptToRing(Level level,BlockPos pos,Direction direction) { return attemptToRing(null,level,pos,direction); }
+    @Override public boolean attemptToRing(Entity entity,Level level,BlockPos pos,Direction direction) { return ring(level,pos,direction==null?LoadedLevelAccess.blockState(level,pos).getValue(FACING):direction,entity instanceof Player player?player:null); }
+    public abstract void playSound(Level level,BlockPos pos);
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type) {
+        if(this instanceof HauntedBellBlock)return createTickerHelper(type,AllBlockEntityTypes.HAUNTED_BELL,AbstractBellBlockEntity::tick);
+        return createTickerHelper(type,AllBlockEntityTypes.PECULIAR_BELL,AbstractBellBlockEntity::tick);
+    }
 }

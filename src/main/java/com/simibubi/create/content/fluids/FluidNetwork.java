@@ -1,35 +1,17 @@
 package com.simibubi.create.content.fluids;
-
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.IdentityHashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Supplier;
-
 import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.content.contraptions.actors.psi.PortableFluidInterfaceBlockEntity.InterfaceFluidHandler;
-import com.simibubi.create.content.fluids.PipeConnection.Flow;
-import com.simibubi.create.foundation.ICapabilityProvider;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.fluid.FluidHelper;
-
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.data.Pair;
 import net.createmod.catnip.math.BlockFace;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import net.createmod.catnip.data.Pair;
+import com.simibubi.create.foundation.fluid.FluidStack;
+import com.simibubi.create.content.fluids.PipeConnection.Flow;
+import net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant;
+import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
+import net.minecraft.core.*;
 import net.minecraft.world.level.Level;
-
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler.FluidAction;
-
 public class FluidNetwork {
 
 	private static final int CYCLES_PER_TICK = 16;
@@ -37,9 +19,9 @@ public class FluidNetwork {
 	Level world;
 	BlockFace start;
 
-	Supplier<@Nullable ICapabilityProvider<IFluidHandler>> sourceSupplier;
-	@Nullable ICapabilityProvider<IFluidHandler> source = null;
-	int transferSpeed;
+	Supplier<Storage<FluidVariant>> sourceSupplier;
+	Storage<FluidVariant> source = null;
+	long transferSpeed;
 
 	int pauseBeforePropagation;
 	List<BlockFace> queued;
@@ -49,7 +31,7 @@ public class FluidNetwork {
 	List<Pair<BlockFace, FlowSource>> targets;
 	Map<BlockPos, WeakReference<FluidTransportBehaviour>> cache;
 
-	public FluidNetwork(Level world, BlockFace location, Supplier<@Nullable ICapabilityProvider<IFluidHandler>> sourceSupplier) {
+	public FluidNetwork(Level world, BlockFace location, Supplier<Storage<FluidVariant>> sourceSupplier) {
 		this.world = world;
 		this.start = location;
 		this.sourceSupplier = sourceSupplier;
@@ -77,7 +59,7 @@ public class FluidNetwork {
 				PipeConnection pipeConnection = get(blockFace);
 				if (pipeConnection != null) {
 					if (blockFace.equals(start))
-						transferSpeed = (int) Math.max(1, pipeConnection.pressure.get(true) / 2f);
+						transferSpeed = 81L * (int) Math.max(1, pipeConnection.pressure.get(true) / 2f);
 					frontier.add(Pair.of(blockFace, pipeConnection));
 				}
 				iterator.remove();
@@ -110,7 +92,7 @@ public class FluidNetwork {
 					fluid = flow.fluid;
 
 				boolean canRemove = true;
-				for (Direction side : Iterate.directions) {
+				for (Direction side : Direction.values()) {
 					if (side == blockFace.getFace())
 						continue;
 					BlockFace adjacentLocation = new BlockFace(blockFace.getPos(), side);
@@ -160,134 +142,51 @@ public class FluidNetwork {
 
 //		drawDebugOutlines();
 
-		if (source == null)
-			source = sourceSupplier.get();
-		if (source == null)
-			return;
+        source=sourceSupplier.get();if(source==null||targets.isEmpty()||fluid.isEmpty())return;
+        for(var target:targets)target.getSecond().manageSource(world,null);
+        var reachable=activeEndpoints();
+        var validTargets=targets.stream().filter(target->reachable.contains(target.getFirst())).toList();
+        if(validTargets.isEmpty())return;
+        var variant=fluid.variant();long available;
+        try(var probe=Transaction.openOuter()){available=source.extract(variant,transferSpeed,probe);}
+        if(available==0)return;
+        try(var tx=Transaction.openOuter()){
+            long remaining=available;
+            var outputs=new ArrayList<>(validTargets);
+            while(!outputs.isEmpty()&&remaining>0){
+                long divided=remaining/outputs.size(),remainder=remaining%outputs.size();
+                for(var iterator=outputs.iterator();iterator.hasNext();){
+                    var output=iterator.next();long requested=divided+(remainder-->0?1:0);var target=output.getSecond().provideHandler();
+                    if(target==null){iterator.remove();continue;}
+                    long moved=target.insert(variant,requested,tx);remaining-=moved;
+                    if(moved<requested)iterator.remove();
+                }
 
-		keepPortableFluidInterfaceEngaged();
 
-		if (targets.isEmpty())
-			return;
-		for (Pair<BlockFace, FlowSource> pair : targets) {
-			if (pair.getSecond() != null && world.getGameTime() % 40 != 0)
-				continue;
-			PipeConnection pipeConnection = get(pair.getFirst());
-			if (pipeConnection == null)
-				continue;
-			pipeConnection.source.ifPresent(fs -> {
-				if (fs.isEndpoint())
-					pair.setSecond(fs);
-			});
-		}
+            }
+            long moved=available-remaining;
+            if(moved>0&&source.extract(variant,moved,tx)==moved)tx.commit();
+        }
 
-		int flowSpeed = transferSpeed;
-		Map<IFluidHandler, Integer> accumulatedFill = new IdentityHashMap<>();
-
-		for (boolean simulate : Iterate.trueAndFalse) {
-			FluidAction action = simulate ? FluidAction.SIMULATE : FluidAction.EXECUTE;
-
-			if (source == null)
-				return;
-			IFluidHandler sourceCap = source.getCapability();
-			if (sourceCap == null)
-				return;
-
-			FluidStack transfer = FluidStack.EMPTY;
-			for (int i = 0; i < sourceCap.getTanks(); i++) {
-				FluidStack contained = sourceCap.getFluidInTank(i);
-				if (contained.isEmpty())
-					continue;
-				if (!FluidStack.isSameFluidSameComponents(contained, fluid))
-					continue;
-				FluidStack toExtract = FluidHelper.copyStackWithAmount(contained, flowSpeed);
-				transfer = sourceCap.drain(toExtract, action);
-				break;
-			}
-
-			if (transfer.isEmpty()) {
-				FluidStack genericExtract = sourceCap.drain(flowSpeed, action);
-				if (!genericExtract.isEmpty() && FluidStack.isSameFluidSameComponents(genericExtract, fluid))
-					transfer = genericExtract;
-			}
-
-			if (transfer.isEmpty())
-				return;
-			if (simulate)
-				flowSpeed = transfer.getAmount();
-
-			List<Pair<BlockFace, FlowSource>> availableOutputs = new ArrayList<>(targets);
-			while (!availableOutputs.isEmpty() && transfer.getAmount() > 0) {
-				int dividedTransfer = transfer.getAmount() / availableOutputs.size();
-				int remainder = transfer.getAmount() % availableOutputs.size();
-
-				for (Iterator<Pair<BlockFace, FlowSource>> iterator = availableOutputs.iterator(); iterator.hasNext();) {
-					Pair<BlockFace, FlowSource> pair = iterator.next();
-					int toTransfer = dividedTransfer;
-					if (remainder > 0) {
-						toTransfer++;
-						remainder--;
-					}
-
-					if (transfer.isEmpty())
-						break;
-					@Nullable ICapabilityProvider<IFluidHandler> targetHandlerProvider = pair.getSecond().provideHandler();
-					if (targetHandlerProvider == null) {
-						iterator.remove();
-						continue;
-					}
-					IFluidHandler targetHandler = targetHandlerProvider.getCapability();
-					if (targetHandler == null) {
-						iterator.remove();
-						continue;
-					}
-
-					int simulatedTransfer = toTransfer;
-					if (simulate)
-						simulatedTransfer += accumulatedFill.getOrDefault(targetHandler, 0);
-
-					FluidStack divided = transfer.copy();
-					divided.setAmount(simulatedTransfer);
-					int fill = targetHandler.fill(divided, action);
-
-					if (simulate) {
-						accumulatedFill.put(targetHandler, Integer.valueOf(fill));
-						fill -= simulatedTransfer - toTransfer;
-					}
-
-					transfer.setAmount(transfer.getAmount() - fill);
-					if (fill < simulatedTransfer)
-						iterator.remove();
-				}
-
-			}
-
-			flowSpeed -= transfer.getAmount();
-			transfer = FluidStack.EMPTY;
-		}
 	}
 
-//	private void drawDebugOutlines() {
-//		FluidPropagator.showBlockFace(start)
-//			.lineWidth(1 / 8f)
-//			.colored(0xff0000);
-//		for (Pair<BlockFace, LazyOptional<IFluidHandler>> pair : targets)
-//			FluidPropagator.showBlockFace(pair.getFirst())
-//				.lineWidth(1 / 8f)
-//				.colored(0x00ff00);
-//		for (Pair<BlockFace, PipeConnection> pair : frontier)
-//			FluidPropagator.showBlockFace(pair.getFirst())
-//				.lineWidth(1 / 4f)
-//				.colored(0xfaaa33);
-//	}
 
-	private void keepPortableFluidInterfaceEngaged() {
-		if (!(source instanceof InterfaceFluidHandler))
-			return;
-		if (frontier.isEmpty())
-			return;
-		((InterfaceFluidHandler) source).keepAlive();
-	}
+    /** Revalidate routes against current loaded pipe flows, including after a chunk unload or a valve change. */
+    private Set<BlockFace> activeEndpoints(){
+        var endpoints=new HashSet<BlockFace>();var seen=new HashSet<BlockFace>();var queue=new ArrayDeque<BlockFace>();queue.add(start);
+        while(!queue.isEmpty()){
+            var incoming=queue.removeFirst();if(!seen.add(incoming))continue;var in=get(incoming);
+            if(in==null||!in.hasFlow()||!in.flow.get().complete||!in.flow.get().inbound||!FluidStack.isSameFluidSameComponents(in.flow.get().fluid,fluid))continue;
+            var transport=getFluidTransfer(incoming.getPos());if(transport==null||!transport.canPullFluidFrom(in.flow.get().fluid,transport.blockEntity.getBlockState(),incoming.getFace()))continue;
+            for(var side:Direction.values()){
+                if(side==incoming.getFace())continue;var face=new BlockFace(incoming.getPos(),side);var out=get(face);
+                if(out==null||!out.hasFlow()||out.flow.get().inbound||!out.flow.get().complete||!FluidStack.isSameFluidSameComponents(out.flow.get().fluid,fluid))continue;
+                if(out.source.isPresent()&&out.source.get().isEndpoint())endpoints.add(face);
+                else queue.add(face.getOpposite());
+            }
+        }
+        return endpoints;
+    }
 
 	public void reset() {
 		frontier.clear();
@@ -314,12 +213,13 @@ public class FluidNetwork {
 
 	@Nullable
 	private FluidTransportBehaviour getFluidTransfer(BlockPos pos) {
-		WeakReference<FluidTransportBehaviour> weakReference = cache.get(pos);
+		if (!world.isLoaded(pos)) return null;
+        WeakReference<FluidTransportBehaviour> weakReference = cache.get(pos);
 		FluidTransportBehaviour behaviour = weakReference != null ? weakReference.get() : null;
 		if (behaviour != null && behaviour.blockEntity.isRemoved())
 			behaviour = null;
 		if (behaviour == null) {
-			behaviour = BlockEntityBehaviour.get(world, pos, FluidTransportBehaviour.TYPE);
+			behaviour = FluidPropagator.getPipe(world, pos);
 			if (behaviour != null)
 				cache.put(pos, new WeakReference<>(behaviour));
 		}

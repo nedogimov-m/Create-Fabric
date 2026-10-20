@@ -1,196 +1,66 @@
 package com.simibubi.create.content.kinetics.drill;
 
-import java.util.List;
-import java.util.function.Predicate;
-
-import javax.annotation.ParametersAreNonnullByDefault;
-
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.damageTypes.CreateDamageSources;
-
-import net.createmod.catnip.placement.IPlacementHelper;
-import net.createmod.catnip.placement.PlacementHelpers;
-import net.createmod.catnip.placement.PlacementOffset;
-import net.minecraft.MethodsReturnNonnullByDefault;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.util.Mth;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.Entity;
+import com.simibubi.create.*;
+import com.simibubi.create.content.kinetics.base.*;
+import net.minecraft.core.*;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.damagesource.*;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.SimpleWaterloggedBlock;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.level.material.PushReaction;
-import net.minecraft.world.level.pathfinder.PathComputationType;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.material.*;
+import net.minecraft.world.level.redstone.Orientation;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.*;
 
-@ParametersAreNonnullByDefault
-@MethodsReturnNonnullByDefault
-public class DrillBlock extends DirectionalKineticBlock implements IBE<DrillBlockEntity>, SimpleWaterloggedBlock {
-	private static final int placementHelperId = PlacementHelpers.register(new PlacementHelper());
-
-	public DrillBlock(Properties properties) {
-		super(properties);
-		registerDefaultState(super.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, false));
-	}
-
-	@Override
-	public void entityInside(BlockState state, Level worldIn, BlockPos pos, Entity entityIn) {
-		if (entityIn instanceof ItemEntity)
-			return;
-		if (!new AABB(pos).deflate(.1f)
-			.intersects(entityIn.getBoundingBox()))
-			return;
-		withBlockEntityDo(worldIn, pos, be -> {
-			if (be.getSpeed() == 0)
-				return;
-			entityIn.hurt(CreateDamageSources.drill(worldIn), (float) getDamage(be.getSpeed()));
-		});
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		return AllShapes.CASING_12PX.get(state.getValue(FACING));
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level worldIn, BlockPos pos, Block blockIn, BlockPos fromPos,
-		boolean isMoving) {
-		withBlockEntityDo(worldIn, pos, DrillBlockEntity::destroyNextTick);
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return state.getValue(FACING)
-			.getAxis();
-	}
-
-	@Override
-	public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-		return face == state.getValue(FACING)
-			.getOpposite();
-	}
-
-	@Override
-	public PushReaction getPistonPushReaction(BlockState state) {
-		return PushReaction.NORMAL;
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	public FluidState getFluidState(BlockState state) {
-		return state.getValue(BlockStateProperties.WATERLOGGED) ? Fluids.WATER.getSource(false) : Fluids.EMPTY.defaultFluidState();
-	}
-
-	@Override
-	protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-		builder.add(BlockStateProperties.WATERLOGGED);
-		super.createBlockStateDefinition(builder);
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction direction, BlockState neighbourState,
-								  LevelAccessor world, BlockPos pos, BlockPos neighbourPos) {
-		if (state.getValue(BlockStateProperties.WATERLOGGED))
-			world.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(world));
-		return state;
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		FluidState FluidState = context.getLevel().getFluidState(context.getClickedPos());
-		return super.getStateForPlacement(context).setValue(BlockStateProperties.WATERLOGGED, Boolean.valueOf(FluidState.getType() == Fluids.WATER));
-	}
-
-	public static double getDamage(float speed) {
-		float speedAbs = Math.abs(speed);
-		double sub1 = Math.min(speedAbs / 16, 2);
-		double sub2 = Math.min(speedAbs / 32, 4);
-		double sub3 = Math.min(speedAbs / 64, 4);
-		return Mth.clamp(sub1 + sub2 + sub3, 1, 10);
-	}
-
-	@Override
-	public Class<DrillBlockEntity> getBlockEntityClass() {
-		return DrillBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends DrillBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.DRILL.get();
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		IPlacementHelper placementHelper = PlacementHelpers.get(placementHelperId);
-		if (!player.isShiftKeyDown() && player.mayBuild()) {
-			if (placementHelper.matchesItem(stack)) {
-				placementHelper.getOffset(player, level, state, pos, hitResult)
-					.placeInWorld(level, (BlockItem) stack.getItem(), player, hand, hitResult);
-				return ItemInteractionResult.SUCCESS;
-			}
-		}
-
-		return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-	}
-
-	@MethodsReturnNonnullByDefault
-	private static class PlacementHelper implements IPlacementHelper {
-
-		@Override
-		public Predicate<ItemStack> getItemPredicate() {
-			return AllBlocks.MECHANICAL_DRILL::isIn;
-		}
-
-		@Override
-		public Predicate<BlockState> getStatePredicate() {
-			return AllBlocks.MECHANICAL_DRILL::has;
-		}
-
-		@Override
-		public PlacementOffset getOffset(Player player, Level world, BlockState state, BlockPos pos,
-			BlockHitResult ray) {
-			List<Direction> directions = IPlacementHelper.orderedByDistanceExceptAxis(pos, ray.getLocation(),
-				state.getValue(FACING)
-					.getAxis(),
-				dir -> world.getBlockState(pos.relative(dir))
-					.canBeReplaced());
-
-			if (directions.isEmpty())
-				return PlacementOffset.fail();
-			else {
-				return PlacementOffset.success(pos.relative(directions.get(0)),
-					s -> s.setValue(FACING, state.getValue(FACING)));
-			}
-		}
-	}
-
+public final class DrillBlock extends KineticBlock implements SimpleWaterloggedBlock {
+    public static final EnumProperty<Direction> FACING = BlockStateProperties.FACING;
+    public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
+    public static final ResourceKey<DamageType> DRILL_DAMAGE = ResourceKey.create(Registries.DAMAGE_TYPE, Create.asResource("mechanical_drill"));
+    public DrillBlock(Properties properties) { super(properties); registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH).setValue(WATERLOGGED, false)); }
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { builder.add(FACING, WATERLOGGED); }
+    public static Direction facingForPlacement(BlockPlaceContext context) {
+        Direction preferred = null;
+        for (var side : Direction.values()) {
+            var pos = context.getClickedPos().relative(side); var state = context.getLevel().getBlockState(pos);
+            if (state.getBlock() instanceof IRotate rotate && rotate.hasShaftTowards(context.getLevel(), pos, state, side.getOpposite())) {
+                if (preferred != null && preferred.getAxis() != side.getAxis()) { preferred = null; break; } preferred = side;
+            }
+        }
+        boolean shift = context.getPlayer() != null && context.getPlayer().isShiftKeyDown();
+        return preferred != null && !shift ? preferred.getOpposite() : shift ? context.getNearestLookingDirection() : context.getNearestLookingDirection().getOpposite();
+    }
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context) { return defaultBlockState().setValue(FACING, facingForPlacement(context)).setValue(WATERLOGGED, context.getLevel().getFluidState(context.getClickedPos()).is(net.minecraft.tags.FluidTags.WATER)); }
+    @Override public Direction.Axis getRotationAxis(BlockState state) { return state.getValue(FACING).getAxis(); }
+    @Override public boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face) { return face == state.getValue(FACING).getOpposite(); }
+    @Override protected RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
+    public static VoxelShape casingShape(Direction facing) {
+        return switch (facing) {
+            case UP -> box(0, 0, 0, 16, 12, 16); case DOWN -> box(0, 4, 0, 16, 16, 16);
+            case NORTH -> box(0, 0, 4, 16, 16, 16); case SOUTH -> box(0, 0, 0, 16, 16, 12);
+            case WEST -> box(4, 0, 0, 16, 16, 16); case EAST -> box(0, 0, 0, 12, 16, 16);
+        };
+    }
+    @Override protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) { return casingShape(state.getValue(FACING)); }
+    @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new DrillBlockEntity(pos, state); }
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) { return createTickerHelper(type, AllBlockEntityTypes.DRILL, DrillBlockEntity::tick); }
+    @Override protected FluidState getFluidState(BlockState state) { return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : Fluids.EMPTY.defaultFluidState(); }
+    @Override protected BlockState updateShape(BlockState state, LevelReader level, ScheduledTickAccess ticks, BlockPos pos, Direction side, BlockPos next, BlockState neighbor, RandomSource random) { if (state.getValue(WATERLOGGED)) ticks.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(level)); return state; }
+    @Override protected void neighborChanged(BlockState state, Level level, BlockPos pos, Block neighbor, Orientation orientation, boolean moved) { super.neighborChanged(state, level, pos, neighbor, orientation, moved); if (level.getBlockEntity(pos) instanceof DrillBlockEntity drill) drill.destroyNextTick(); }
+    @Override protected BlockState rotate(BlockState state, Rotation rotation) { return state.setValue(FACING, rotation.rotate(state.getValue(FACING))); }
+    @Override protected BlockState mirror(BlockState state, Mirror mirror) { return state.rotate(mirror.getRotation(state.getValue(FACING))); }
+    public static double getDamage(float speed) { float rpm = Math.abs(speed); return Math.clamp(Math.min(rpm / 16, 2) + Math.min(rpm / 32, 4) + Math.min(rpm / 64, 4), 1, 10); }
+    public static void hurtInside(Level level, BlockPos pos, Entity entity, float speed, ResourceKey<DamageType> type) {
+        if (!(level instanceof ServerLevel server) || speed == 0 || entity instanceof ItemEntity || !new AABB(pos).deflate(0.1).intersects(entity.getBoundingBox())) return;
+        entity.hurtServer(server, new DamageSource(server.registryAccess().lookupOrThrow(Registries.DAMAGE_TYPE).getOrThrow(type)), (float) getDamage(speed));
+    }
+    @Override protected void entityInside(BlockState state, Level level, BlockPos pos, Entity entity, InsideBlockEffectApplier effects, boolean inside) { if (level.getBlockEntity(pos) instanceof DrillBlockEntity drill) hurtInside(level, pos, entity, drill.getSpeed(), DRILL_DAMAGE); }
 }

@@ -6,16 +6,12 @@ import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.content.trains.graph.TrackNodeLocation;
 import com.simibubi.create.content.trains.graph.TrackNodeLocation.DiscoveredLocation;
-import com.simibubi.create.content.trains.track.TrackTargetingBehaviour.RenderedTrackOverlayType;
 
-import dev.engine_room.flywheel.lib.model.baked.PartialModel;
-import dev.engine_room.flywheel.lib.transform.Affine;
-import net.createmod.catnip.data.Iterate;
 import net.createmod.catnip.data.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -28,8 +24,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 public interface ITrackBlock {
 
@@ -60,8 +54,13 @@ public interface ITrackBlock {
 		BlockGetter world = location != null && worldIn instanceof ServerLevel sl ? sl.getServer()
 			.getLevel(location.dimension) : worldIn;
 		List<DiscoveredLocation> list = new ArrayList<>();
+        if (world == null) throw new UnloadedTrackException(location.dimension, location.allAdjacent());
+        if (world instanceof Level level) {
+            var missing = location.allAdjacent().stream().filter(p -> !LoadedLevelAccess.isLoaded(level,p)).toList();
+            if (!missing.isEmpty()) throw new UnloadedTrackException(level.dimension(), missing);
+        }
 		for (BlockPos blockPos : location.allAdjacent()) {
-			BlockState blockState = world.getBlockState(blockPos);
+			BlockState blockState = LoadedLevelAccess.blockState(world,blockPos);
 			if (blockState.getBlock() instanceof ITrackBlock track)
 				list.addAll(track.getConnected(world, blockPos, blockState, linear, location));
 		}
@@ -72,13 +71,16 @@ public interface ITrackBlock {
 															   boolean linear, @Nullable TrackNodeLocation connectedTo) {
 		BlockGetter world = connectedTo != null && worldIn instanceof ServerLevel sl ? sl.getServer()
 			.getLevel(connectedTo.dimension) : worldIn;
-		Vec3 center = Vec3.atBottomCenterOf(pos)
+		if (world == null) throw new UnloadedTrackException(connectedTo.dimension, List.of(pos));
+        if (world instanceof Level level && !LoadedLevelAccess.isLoaded(level,pos)) throw new UnloadedTrackException(level,pos);
+        Vec3 center = Vec3.atBottomCenterOf(pos)
 			.add(0, getElevationAtCenter(world, pos, state), 0);
 		List<DiscoveredLocation> list = new ArrayList<>();
 		TrackShape shape = state.getValue(TrackBlock.SHAPE);
 		List<Vec3> trackAxes = getTrackAxes(world, pos, state);
 
 		trackAxes.forEach(axis -> {
+            if (axis.lengthSqr() < 1e-12) return; // TrackShape.NONE has no physical track direction.
 			BiFunction<Double, Boolean, Vec3> offsetFactory = (d, b) -> axis.scale(b ? d : -d)
 				.add(center);
 			Function<Boolean, ResourceKey<Level>> dimensionFactory =
@@ -100,7 +102,9 @@ public interface ITrackBlock {
 		if (defaultMaterial == null)
 			defaultMaterial = TrackMaterial.ANDESITE;
 		if (world != null) {
-			Block block = world.getBlockState(BlockPos.containing(pos)).getBlock();
+			BlockPos at = BlockPos.containing(pos);
+            if (world instanceof Level level && !LoadedLevelAccess.isLoaded(level,at)) throw new UnloadedTrackException(level,at);
+            Block block = LoadedLevelAccess.blockState(world,at).getBlock();
 			if (block instanceof ITrackBlock track) {
 				return track.getMaterial();
 			}
@@ -159,15 +163,6 @@ public interface ITrackBlock {
 			list.add(secondLocation);
 	}
 
-	@OnlyIn(Dist.CLIENT)
-	public <Self extends Affine<Self>> PartialModel prepareTrackOverlay(Affine<Self> affine, BlockGetter world, BlockPos pos, BlockState state,
-																		BezierTrackPointLocation bezierPoint, AxisDirection direction,
-																		RenderedTrackOverlayType type);
-
-	@OnlyIn(Dist.CLIENT)
-	public PartialModel prepareAssemblyOverlay(BlockGetter world, BlockPos pos, BlockState state, Direction direction,
-											   PoseStack ms);
-
 	public default boolean isSlope(BlockGetter world, BlockPos pos, BlockState state) {
 		return getTrackAxes(world, pos, state).get(0).y != 0;
 	}
@@ -177,7 +172,7 @@ public interface ITrackBlock {
 		Vec3 best = null;
 		double bestDiff = Double.MAX_VALUE;
 		for (Vec3 vec3 : getTrackAxes(world, pos, state)) {
-			for (int opposite : Iterate.positiveAndNegative) {
+			for (int opposite : new int[] {1, -1}) {
 				double distanceTo = vec3.normalize()
 					.distanceTo(lookVec.scale(opposite));
 				if (distanceTo > bestDiff)

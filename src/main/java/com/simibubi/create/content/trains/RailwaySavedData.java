@@ -1,107 +1,100 @@
 package com.simibubi.create.content.trains;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
-
+import com.mojang.serialization.*;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.Create;
-import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.content.trains.graph.DimensionPalette;
-import com.simibubi.create.content.trains.graph.EdgePointType;
-import com.simibubi.create.content.trains.graph.TrackGraph;
-import com.simibubi.create.content.trains.signal.SignalBoundary;
-import com.simibubi.create.content.trains.signal.SignalEdgeGroup;
-
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
+import com.simibubi.create.content.trains.graph.*;
+import java.util.*;
+import net.minecraft.core.*;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.saveddata.*;
 
-public class RailwaySavedData extends SavedData {
+/**
+ * Actual registry-aware graph SavedData. It owns topology and pending loaded-only reconciliation,
+ * not a placeholder train/cargo registry. Native point codecs receive the original RegistryOps.
+ */
+public final class RailwaySavedData extends SavedData {
+  public record PendingRail(GlobalPos position, BlockState formerState, boolean removed) {
+    public static final Codec<PendingRail> CODEC =
+        RecordCodecBuilder.create(
+            i ->
+                i.group(
+                        GlobalPos.CODEC.fieldOf("Position").forGetter(PendingRail::position),
+                        BlockState.CODEC.fieldOf("FormerState").forGetter(PendingRail::formerState),
+                        Codec.BOOL.fieldOf("Removed").forGetter(PendingRail::removed))
+                    .apply(i, PendingRail::new));
+  }
 
-	private Map<UUID, TrackGraph> trackNetworks = new HashMap<>();
-	private Map<UUID, SignalEdgeGroup> signalEdgeGroups = new HashMap<>();
-	private Map<UUID, Train> trains = new HashMap<>();
+  private record Data(int version, List<TrackGraph> graphs, List<PendingRail> pending) {
+    static final Codec<Data> CODEC =
+        RecordCodecBuilder.create(
+            i ->
+                i.group(
+                        Codec.intRange(1, 1).fieldOf("GraphFormatVersion").forGetter(Data::version),
+                        TrackGraph.CODEC.listOf().fieldOf("RailGraphs").forGetter(Data::graphs),
+                        PendingRail.CODEC
+                            .listOf()
+                            .optionalFieldOf("PendingRails", List.of())
+                            .forGetter(Data::pending))
+                    .apply(i, Data::new));
+  }
 
-	public static SavedData.Factory<RailwaySavedData> factory() {
-		return new SavedData.Factory<>(RailwaySavedData::new, RailwaySavedData::load);
-	}
+  public static final Codec<RailwaySavedData> CODEC =
+      Data.CODEC.flatXmap(
+          value -> {
+            try {
+              return DataResult.success(new RailwaySavedData(value));
+            } catch (IllegalArgumentException invalid) {
+              return DataResult.error(invalid::getMessage);
+            }
+          },
+          value ->
+              DataResult.success(
+                  new Data(
+                      1, List.copyOf(value.trackNetworks.values()), List.copyOf(value.pending))));
+  public static final SavedDataType<RailwaySavedData> TYPE =
+      new SavedDataType<>(Create.asResource("tracks"), RailwaySavedData::new, CODEC, null);
+  private final Map<UUID, TrackGraph> trackNetworks = new LinkedHashMap<>();
+  private final LinkedHashSet<PendingRail> pending = new LinkedHashSet<>();
 
-	@Override
-	public CompoundTag save(CompoundTag nbt, HolderLookup.Provider registries) {
-		GlobalRailwayManager railways = Create.RAILWAYS;
-//		Create.LOGGER.info("Saving Railway Information...");
-		DimensionPalette dimensions = new DimensionPalette();
-		nbt.put("RailGraphs", NBTHelper.writeCompoundList(railways.trackNetworks.values(), tg -> tg.write(registries, dimensions)));
-		nbt.put("SignalBlocks", NBTHelper.writeCompoundList(railways.signalEdgeGroups.values(), seg -> {
-			if (seg.fallbackGroup && !railways.trackNetworks.containsKey(seg.id))
-				return null;
-			return seg.write();
-		}));
-		nbt.put("Trains", NBTHelper.writeCompoundList(railways.trains.values(), t -> t.write(dimensions, registries)));
-		dimensions.write(nbt);
-		return nbt;
-	}
+  public RailwaySavedData() {}
 
-	private static RailwaySavedData load(CompoundTag nbt, HolderLookup.Provider registries) {
-		RailwaySavedData sd = new RailwaySavedData();
-		sd.trackNetworks = new HashMap<>();
-		sd.signalEdgeGroups = new HashMap<>();
-		sd.trains = new HashMap<>();
-//		Create.LOGGER.info("Loading Railway Information...");
+  private RailwaySavedData(Data data) {
+    for (var graph : data.graphs)
+      if (trackNetworks.putIfAbsent(graph.id, graph) != null)
+        throw new IllegalArgumentException("Duplicate persistent railway graph UUID");
+    var positions = new HashSet<GlobalPos>();
+    for (var request : data.pending)
+      if (!positions.add(request.position))
+        throw new IllegalArgumentException("Duplicate pending railway position");
+    pending.addAll(data.pending);
+  }
 
-		DimensionPalette dimensions = DimensionPalette.read(nbt);
-		NBTHelper.iterateCompoundList(nbt.getList("RailGraphs", Tag.TAG_COMPOUND), c -> {
-			TrackGraph graph = TrackGraph.read(c, registries, dimensions);
-			sd.trackNetworks.put(graph.id, graph);
-		});
-		NBTHelper.iterateCompoundList(nbt.getList("SignalBlocks", Tag.TAG_COMPOUND), c -> {
-			SignalEdgeGroup group = SignalEdgeGroup.read(c);
-			sd.signalEdgeGroups.put(group.id, group);
-		});
-		NBTHelper.iterateCompoundList(nbt.getList("Trains", Tag.TAG_COMPOUND), c -> {
-			Train train = Train.read(c, registries, sd.trackNetworks, dimensions);
-			sd.trains.put(train.id, train);
-		});
+  public Map<UUID, TrackGraph> getTrackNetworks() {
+    return Collections.unmodifiableMap(trackNetworks);
+  }
 
-		for (TrackGraph graph : sd.trackNetworks.values()) {
-			for (SignalBoundary signal : graph.getPoints(EdgePointType.SIGNAL)) {
-				UUID groupId = signal.groups.getFirst();
-				UUID otherGroupId = signal.groups.getSecond();
-				if (groupId == null || otherGroupId == null)
-					continue;
-				SignalEdgeGroup group = sd.signalEdgeGroups.get(groupId);
-				SignalEdgeGroup otherGroup = sd.signalEdgeGroups.get(otherGroupId);
-				if (group == null || otherGroup == null)
-					continue;
-				group.putAdjacent(otherGroupId);
-				otherGroup.putAdjacent(groupId);
-			}
-		}
+  Map<UUID, TrackGraph> mutableTrackNetworks() {
+    return trackNetworks;
+  }
 
-		return sd;
-	}
+  public List<PendingRail> pending() {
+    return List.copyOf(pending);
+  }
 
-	public Map<UUID, TrackGraph> getTrackNetworks() {
-		return trackNetworks;
-	}
+  public void queue(PendingRail request) {
+    if (pending.contains(request)) return;
+    pending.removeIf(old -> old.position.equals(request.position));
+    pending.add(request);
+    setDirty();
+  }
 
-	public Map<UUID, Train> getTrains() {
-		return trains;
-	}
+  public void complete(PendingRail request) {
+    if (pending.remove(request)) setDirty();
+  }
 
-	public Map<UUID, SignalEdgeGroup> getSignalBlocks() {
-		return signalEdgeGroups;
-	}
-
-	private RailwaySavedData() {}
-
-	public static RailwaySavedData load(MinecraftServer server) {
-		return server.overworld()
-			.getDataStorage()
-			.computeIfAbsent(factory(), "create_tracks");
-	}
-
+  public static RailwaySavedData load(MinecraftServer server) {
+    return NeoForgeRailwayImport.load(server).first();
+  }
 }

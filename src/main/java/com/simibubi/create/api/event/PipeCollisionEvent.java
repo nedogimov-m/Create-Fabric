@@ -6,7 +6,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
-import net.neoforged.bus.api.Event;
+import net.fabricmc.fabric.api.event.Event;
+import net.fabricmc.fabric.api.event.EventFactory;
 
 /**
  * This Event is fired when two fluids meet in a pipe ({@link Flow})<br>
@@ -16,7 +17,12 @@ import net.neoforged.bus.api.Event;
  * If it is not null, the event's BlockState will be placed in world after
  * firing.
  */
-public class PipeCollisionEvent extends Event {
+public class PipeCollisionEvent {
+    @FunctionalInterface public interface FlowHandler { void collide(Flow event); }
+    @FunctionalInterface public interface SpillHandler { void collide(Spill event); }
+    public static final Event<FlowHandler> FLOW = EventFactory.createArrayBacked(FlowHandler.class, callbacks -> event -> { for(var callback:callbacks)callback.collide(event); });
+    public static final Event<SpillHandler> SPILL = EventFactory.createArrayBacked(SpillHandler.class, callbacks -> event -> { for(var callback:callbacks)callback.collide(event); });
+
 
 	protected final Fluid firstFluid, secondFluid;
 	private final Level level;

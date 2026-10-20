@@ -1,13 +1,13 @@
 package com.simibubi.create.foundation.recipe;
 
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.AllRecipeTypes;
-
-import net.createmod.catnip.data.IntAttached;
-import net.minecraft.core.HolderLookup;
+import com.mojang.serialization.MapCodec;
+import com.simibubi.create.Create;
+import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.CraftingInput;
@@ -15,93 +15,62 @@ import net.minecraft.world.item.crafting.CustomRecipe;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.minecraft.world.level.Level;
+import org.jspecify.annotations.Nullable;
 
-public class ItemCopyingRecipe extends CustomRecipe {
-	public interface SupportsItemCopying {
-		default ItemStack createCopy(ItemStack original, int count) {
-			ItemStack copyWithCount = original.copyWithCount(count);
-			copyWithCount.set(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY);
-			copyWithCount.remove(DataComponents.STORED_ENCHANTMENTS);
-			return copyWithCount;
-		}
+/** Source component-copying recipe, including removal of enchantments from actual copies. */
+public final class ItemCopyingRecipe extends CustomRecipe {
+    public interface SupportsItemCopying {
+        default ItemStack createCopy(ItemStack original, int count) {
+            ItemStack copy = original.copyWithCount(count);
+            copy.set(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY);
+            copy.remove(DataComponents.STORED_ENCHANTMENTS);
+            return copy;
+        }
+        default boolean canCopyFromItem(ItemStack item) { return item.has(getComponentType()); }
+        default boolean canCopyToItem(ItemStack item) { return !item.has(getComponentType()); }
+        DataComponentType<?> getComponentType();
+    }
 
-		default boolean canCopyFromItem(ItemStack item) {
-			return item.has(getComponentType());
-		}
+    public static final MapCodec<ItemCopyingRecipe> CODEC = CraftingBookCategory.CODEC
+            .optionalFieldOf("category", CraftingBookCategory.MISC)
+            .xmap(ItemCopyingRecipe::new, ItemCopyingRecipe::category);
+    public static final RecipeSerializer<ItemCopyingRecipe> SERIALIZER = Registry.register(
+            BuiltInRegistries.RECIPE_SERIALIZER, Create.asResource("item_copying"),
+            new RecipeSerializer<>(CODEC, StreamCodec.of(
+                    (RegistryFriendlyByteBuf buffer, ItemCopyingRecipe recipe) -> buffer.writeEnum(recipe.category),
+                    buffer -> new ItemCopyingRecipe(buffer.readEnum(CraftingBookCategory.class)))));
+    private final CraftingBookCategory category;
+    private record CopyCheck(ItemStack original, int targets) {}
 
-		default boolean canCopyToItem(ItemStack item) {
-			return !item.has(getComponentType());
-		}
-
-		DataComponentType<?> getComponentType();
-	}
-
-	public ItemCopyingRecipe(CraftingBookCategory category) {
-		super(category);
-	}
-
-	@Override
-	public boolean matches(CraftingInput input, Level level) {
-		return copyCheck(input) != null;
-	}
-
-	@Override
-	public ItemStack assemble(CraftingInput input, HolderLookup.Provider registries) {
-		IntAttached<ItemStack> copyCheck = copyCheck(input);
-		if (copyCheck == null)
-			return ItemStack.EMPTY;
-
-		ItemStack itemToCopy = copyCheck.getValue();
-		if (!(itemToCopy.getItem() instanceof SupportsItemCopying sic))
-			return ItemStack.EMPTY;
-
-		return sic.createCopy(itemToCopy, copyCheck.getFirst() + 1);
-	}
-
-	@Nullable
-	private IntAttached<ItemStack> copyCheck(CraftingInput input) {
-		ItemStack itemToCopy = ItemStack.EMPTY;
-		int copyTargets = 0;
-
-		for (int j = 0; j < input.size(); ++j) {
-			ItemStack itemInSlot = input.getItem(j);
-			if (itemInSlot.isEmpty())
-				continue;
-			if (!(itemInSlot.getItem() instanceof SupportsItemCopying sic))
-				return null;
-			if (!sic.canCopyFromItem(itemInSlot))
-				continue;
-			itemToCopy = itemInSlot;
-			break;
-		}
-		if (itemToCopy.isEmpty())
-			return null;
-
-		for (int j = 0; j < input.size(); ++j) {
-			ItemStack itemInSlot = input.getItem(j);
-			if (itemInSlot.isEmpty() || itemInSlot == itemToCopy)
-				continue;
-			if (itemToCopy.getItem() != itemInSlot.getItem())
-				return null;
-			if (!(itemInSlot.getItem() instanceof SupportsItemCopying sic))
-				return null;
-			if (sic.canCopyFromItem(itemInSlot))
-				return null;
-			if (!sic.canCopyToItem(itemInSlot))
-				return null;
-			copyTargets++;
-		}
-		if (copyTargets == 0)
-			return null;
-
-		return IntAttached.with(copyTargets, itemToCopy);
-	}
-
-	public RecipeSerializer<?> getSerializer() {
-		return AllRecipeTypes.ITEM_COPYING.getSerializer();
-	}
-
-	public boolean canCraftInDimensions(int width, int height) {
-		return width >= 2 && height >= 2;
-	}
+    public ItemCopyingRecipe(CraftingBookCategory category) { this.category = category; }
+    @Override public CraftingBookCategory category() { return category; }
+    @Override public boolean matches(CraftingInput input, Level level) { return copyCheck(input) != null; }
+    @Override public ItemStack assemble(CraftingInput input) {
+        CopyCheck check = copyCheck(input);
+        if (check == null || !(check.original.getItem() instanceof SupportsItemCopying copying)) return ItemStack.EMPTY;
+        return copying.createCopy(check.original, check.targets + 1);
+    }
+    private static @Nullable CopyCheck copyCheck(CraftingInput input) {
+        ItemStack source = ItemStack.EMPTY;
+        int targets = 0;
+        for (int slot = 0; slot < input.size(); slot++) {
+            ItemStack item = input.getItem(slot);
+            if (item.isEmpty()) continue;
+            if (!(item.getItem() instanceof SupportsItemCopying copying)) return null;
+            if (!copying.canCopyFromItem(item)) continue;
+            source = item;
+            break;
+        }
+        if (source.isEmpty()) return null;
+        for (int slot = 0; slot < input.size(); slot++) {
+            ItemStack item = input.getItem(slot);
+            if (item.isEmpty() || item == source) continue;
+            if (item.getItem() != source.getItem() || !(item.getItem() instanceof SupportsItemCopying copying)) return null;
+            if (copying.canCopyFromItem(item) || !copying.canCopyToItem(item)) return null;
+            targets++;
+        }
+        return targets == 0 ? null : new CopyCheck(source, targets);
+    }
+    @Override public RecipeSerializer<ItemCopyingRecipe> getSerializer() { return SERIALIZER; }
+    public static void register() { /* Initializes the actual registered native serializer. */ }
 }

@@ -1,0 +1,32 @@
+{
+  "type": "create:crushing",
+  "ingredients": [
+    "aether:ambrosium_ore"
+  ],
+  "processing_time": 150,
+  "results": [
+    {
+      "id": "aether:ambrosium_shard"
+    },
+    {
+      "chance": 0.75,
+      "id": "aether:ambrosium_shard"
+    },
+    {
+      "chance": 0.125,
+      "id": "aether:holystone"
+    },
+    {
+      "chance": 0.75,
+      "id": "create:experience_nugget"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "aether"
+      ]
+    }
+  ]
+}

@@ -1,109 +1,31 @@
 package com.simibubi.create.content.kinetics.steamEngine;
 
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.content.kinetics.simpleRelays.AbstractShaftBlock;
+import com.simibubi.create.*;
 import com.simibubi.create.content.kinetics.simpleRelays.ShaftBlock;
-
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.placement.IPlacementHelper;
-import net.createmod.catnip.placement.PlacementHelpers;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.RenderShape;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.*;
 
-public class PoweredShaftBlock extends AbstractShaftBlock {
-
-	public PoweredShaftBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState pState, BlockGetter pLevel, BlockPos pPos, CollisionContext pContext) {
-		return AllShapes.EIGHT_VOXEL_POLE.get(pState.getValue(AXIS));
-	}
-
-	@Override
-	public BlockEntityType<? extends KineticBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.POWERED_SHAFT.get();
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (player.isShiftKeyDown() || !player.mayBuild())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		IPlacementHelper helper = PlacementHelpers.get(ShaftBlock.placementHelperId);
-		if (helper.matchesItem(stack))
-			return helper.getOffset(player, level, state, pos, hitResult)
-				.placeInWorld(level, (BlockItem) stack.getItem(), player, hand, hitResult);
-
-		return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-	}
-
-	@Override
-	public RenderShape getRenderShape(BlockState pState) {
-		return RenderShape.ENTITYBLOCK_ANIMATED;
-	}
-
-	@Override
-	public void tick(BlockState pState, ServerLevel pLevel, BlockPos pPos, RandomSource pRandom) {
-		if (!stillValid(pState, pLevel, pPos))
-			pLevel.setBlock(pPos, AllBlocks.SHAFT.getDefaultState()
-				.setValue(ShaftBlock.AXIS, pState.getValue(AXIS))
-				.setValue(WATERLOGGED, pState.getValue(WATERLOGGED)), Block.UPDATE_ALL);
-	}
-
-	@Override
-	public ItemStack getCloneItemStack(BlockState state, HitResult target, LevelReader level, BlockPos pos, Player player) {
-		return AllBlocks.SHAFT.asStack();
-	}
-
-	@Override
-	public boolean canSurvive(BlockState pState, LevelReader pLevel, BlockPos pPos) {
-		return stillValid(pState, pLevel, pPos);
-	}
-
-	public static boolean stillValid(BlockState pState, LevelReader pLevel, BlockPos pPos) {
-		for (Direction d : Iterate.directions) {
-			if (d.getAxis() == pState.getValue(AXIS))
-				continue;
-			BlockPos enginePos = pPos.relative(d, 2);
-			BlockState engineState = pLevel.getBlockState(enginePos);
-			if (!(engineState.getBlock()instanceof SteamEngineBlock engine))
-				continue;
-			if (!SteamEngineBlock.getShaftPos(engineState, enginePos)
-				.equals(pPos))
-				continue;
-			if (SteamEngineBlock.isShaftValid(engineState, pState))
-				return true;
-		}
-		return false;
-	}
-
-	public static BlockState getEquivalent(BlockState stateForPlacement) {
-		return AllBlocks.POWERED_SHAFT.getDefaultState()
-			.setValue(PoweredShaftBlock.AXIS, stateForPlacement.getValue(ShaftBlock.AXIS))
-			.setValue(WATERLOGGED, stateForPlacement.getValue(WATERLOGGED));
-	}
-
+public final class PoweredShaftBlock extends ShaftBlock {
+    public PoweredShaftBlock(Properties properties){super(properties);}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new PoweredShaftBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.POWERED_SHAFT,PoweredShaftBlockEntity::tick);}
+    @Override protected void tick(BlockState state,ServerLevel level,BlockPos pos,RandomSource random){if(!stillValid(state,level,pos))level.setBlockAndUpdate(pos,AllBlocks.SHAFT.defaultBlockState().setValue(AXIS,state.getValue(AXIS)).setValue(WATERLOGGED,state.getValue(WATERLOGGED)));}
+    @Override protected ItemStack getCloneItemStack(LevelReader level,BlockPos pos,BlockState state,boolean data){return new ItemStack(AllBlocks.SHAFT);}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return switch(state.getValue(AXIS)){case X->box(0,4,4,16,12,12);case Y->box(4,0,4,12,16,12);case Z->box(4,4,0,12,12,16);};}
+    public static boolean stillValid(BlockState state,LevelReader level,BlockPos pos){
+        for(var side:Direction.values()){
+            if(side.getAxis()==state.getValue(AXIS))continue;var enginePos=pos.relative(side,2);
+            if(level instanceof Level world&&!world.isLoaded(enginePos))continue;
+            var engine=LoadedLevelAccess.blockState(level,enginePos);
+            if(engine.getBlock() instanceof SteamEngineBlock&&SteamEngineBlock.getShaftPos(engine,enginePos).equals(pos)&&SteamEngineBlock.isShaftValid(engine,state))return true;
+        }return false;
+    }
+    public static BlockState getEquivalent(BlockState state){return AllBlocks.POWERED_SHAFT.defaultBlockState().setValue(AXIS,state.getValue(AXIS)).setValue(WATERLOGGED,state.getValue(WATERLOGGED));}
 }

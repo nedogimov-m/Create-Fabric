@@ -1,157 +1,43 @@
 package com.simibubi.create.content.trains.signal;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
-import java.util.function.Consumer;
-
-import org.apache.commons.lang3.mutable.MutableInt;
-
-import com.google.common.base.Predicates;
-import com.simibubi.create.Create;
+import com.mojang.serialization.*;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.simibubi.create.content.trains.TrainManager;
 import com.simibubi.create.content.trains.entity.Train;
-
-import net.createmod.catnip.nbt.NBTHelper;
+import java.util.*;
+import java.util.function.Consumer;
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
 
-public class SignalEdgeGroup {
-
-	public UUID id;
-	public EdgeGroupColor color;
-
-	public Set<Train> trains;
-	public SignalBoundary reserved;
-
-	public Map<UUID, UUID> intersecting;
-	public Set<SignalEdgeGroup> intersectingResolved;
-	public Set<UUID> adjacent;
-
-	public boolean fallbackGroup;
-
-	public SignalEdgeGroup(UUID id) {
-		this.id = id;
-		trains = new HashSet<>();
-		adjacent = new HashSet<>();
-		intersecting = new HashMap<>();
-		intersectingResolved = new HashSet<>();
-		color = EdgeGroupColor.getDefault();
-	}
-
-	public SignalEdgeGroup asFallback() {
-		fallbackGroup = true;
-		return this;
-	}
-
-	public boolean isOccupiedUnless(Train train) {
-		if (intersectingResolved.isEmpty())
-			walkIntersecting(intersectingResolved::add);
-		for (SignalEdgeGroup group : intersectingResolved)
-			if (group.isThisOccupiedUnless(train))
-				return true;
-		return false;
-	}
-
-	private boolean isThisOccupiedUnless(Train train) {
-		return reserved != null || trains.size() > 1 || !trains.contains(train) && !trains.isEmpty();
-	}
-
-	public boolean isOccupiedUnless(SignalBoundary boundary) {
-		if (intersectingResolved.isEmpty())
-			walkIntersecting(intersectingResolved::add);
-		for (SignalEdgeGroup group : intersectingResolved)
-			if (group.isThisOccupiedUnless(boundary))
-				return true;
-		return false;
-	}
-
-	private boolean isThisOccupiedUnless(SignalBoundary boundary) {
-		return !trains.isEmpty() || reserved != null && reserved != boundary;
-	}
-
-	public void putIntersection(UUID intersectionId, UUID targetGroup) {
-		intersecting.put(intersectionId, targetGroup);
-		walkIntersecting(g -> g.intersectingResolved.clear());
-		resolveColor();
-	}
-
-	public void removeIntersection(UUID intersectionId) {
-		walkIntersecting(g -> g.intersectingResolved.clear());
-
-		UUID removed = intersecting.remove(intersectionId);
-		SignalEdgeGroup other = Create.RAILWAYS.signalEdgeGroups.get(removed);
-		if (other != null)
-			other.intersecting.remove(intersectionId);
-
-		resolveColor();
-	}
-
-	public void putAdjacent(UUID adjacent) {
-		this.adjacent.add(adjacent);
-	}
-
-	public void removeAdjacent(UUID adjacent) {
-		this.adjacent.remove(adjacent);
-	}
-
-	public void resolveColor() {
-		if (intersectingResolved.isEmpty())
-			walkIntersecting(intersectingResolved::add);
-
-		MutableInt mask = new MutableInt(0);
-		intersectingResolved.forEach(group -> group.adjacent.stream()
-			.map(Create.RAILWAYS.signalEdgeGroups::get)
-			.filter(Objects::nonNull)
-			.filter(Predicates.not(intersectingResolved::contains))
-			.forEach(adjacent -> mask.setValue(adjacent.color.strikeFrom(mask.getValue()))));
-
-		EdgeGroupColor newColour = EdgeGroupColor.findNextAvailable(mask.getValue());
-		if (newColour == color)
-			return;
-
-		walkIntersecting(group -> Create.RAILWAYS.sync.edgeGroupCreated(group.id, group.color = newColour));
-		Create.RAILWAYS.markTracksDirty();
-	}
-
-	private void walkIntersecting(Consumer<SignalEdgeGroup> callback) {
-		walkIntersectingRec(new HashSet<>(), callback);
-	}
-
-	private void walkIntersectingRec(Set<SignalEdgeGroup> visited, Consumer<SignalEdgeGroup> callback) {
-		if (!visited.add(this))
-			return;
-		callback.accept(this);
-		for (UUID uuid : intersecting.values()) {
-			SignalEdgeGroup group = Create.RAILWAYS.signalEdgeGroups.get(uuid);
-			if (group != null)
-				group.walkIntersectingRec(visited, callback);
-		}
-	}
-
-	public static SignalEdgeGroup read(CompoundTag tag) {
-		SignalEdgeGroup group = new SignalEdgeGroup(tag.getUUID("Id"));
-		group.color = NBTHelper.readEnum(tag, "Color", EdgeGroupColor.class);
-		NBTHelper.iterateCompoundList(tag.getList("Connected", Tag.TAG_COMPOUND),
-			nbt -> group.intersecting.put(nbt.getUUID("Key"), nbt.getUUID("Value")));
-		group.fallbackGroup = tag.getBoolean("Fallback");
-		return group;
-	}
-
-	public CompoundTag write() {
-		CompoundTag tag = new CompoundTag();
-		tag.putUUID("Id", id);
-		NBTHelper.writeEnum(tag, "Color", color);
-		tag.put("Connected", NBTHelper.writeCompoundList(intersecting.entrySet(), e -> {
-			CompoundTag nbt = new CompoundTag();
-			nbt.putUUID("Key", e.getKey());
-			nbt.putUUID("Value", e.getValue());
-			return nbt;
-		}));
-		tag.putBoolean("Fallback", fallbackGroup);
-		return tag;
-	}
-
+/** Real source traffic group: exact Train membership, boundary reservations and intersecting closure. */
+public final class SignalEdgeGroup {
+    private record Intersection(UUID key,UUID value){static final Codec<Intersection> CODEC=RecordCodecBuilder.create(i->i.group(UUIDUtil.CODEC.fieldOf("Key").forGetter(Intersection::key),UUIDUtil.CODEC.fieldOf("Value").forGetter(Intersection::value)).apply(i,Intersection::new));}
+    public static final Codec<SignalEdgeGroup> CODEC=RecordCodecBuilder.create(i->i.group(UUIDUtil.CODEC.fieldOf("Id").forGetter(group->group.id),EdgeGroupColor.CODEC.optionalFieldOf("Color",EdgeGroupColor.YELLOW).forGetter(group->group.color),Intersection.CODEC.listOf().optionalFieldOf("Connected",List.of()).forGetter(group->group.intersecting.entrySet().stream().map(entry->new Intersection(entry.getKey(),entry.getValue())).toList()),Codec.BOOL.optionalFieldOf("Fallback",false).forGetter(group->group.fallbackGroup)).apply(i,(id,color,intersections,fallback)->{var group=new SignalEdgeGroup(id);group.color=color;group.fallbackGroup=fallback;for(var intersection:intersections)if(group.intersecting.putIfAbsent(intersection.key,intersection.value)!=null)throw new IllegalArgumentException("Duplicate actual signal intersection identity");return group;}));
+    public final UUID id;
+    public EdgeGroupColor color=EdgeGroupColor.getDefault();
+    public final Set<Train> trains=Collections.newSetFromMap(new IdentityHashMap<>());
+    public SignalBoundary reserved;
+    public final Map<UUID,UUID> intersecting=new LinkedHashMap<>();
+    public final Set<SignalEdgeGroup> intersectingResolved=Collections.newSetFromMap(new IdentityHashMap<>());
+    public final Set<UUID> adjacent=new LinkedHashSet<>();
+    public boolean fallbackGroup;
+    public boolean topologyReady=true;
+    private TrainManager manager;
+    public SignalEdgeGroup(UUID id){this.id=Objects.requireNonNull(id);}
+    public SignalEdgeGroup asFallback(){fallbackGroup=true;return this;}
+    public void bind(TrainManager manager){if(this.manager!=null&&manager!=null&&this.manager!=manager)throw new IllegalStateException("Traffic group belongs to another actual native server");this.manager=manager;intersectingResolved.clear();}
+    public TrainManager manager(){return manager;}
+    public boolean hasResolvedTopology(){resolve();return intersectingResolved.stream().allMatch(group->group.topologyReady);}
+    public boolean isOccupiedUnless(Train train){resolve();for(var group:intersectingResolved)if(!group.topologyReady||group.reserved!=null&&(group.manager==null||!group.manager.reservedBy(group,train))||group.trains.size()>1||!group.trains.contains(train)&&!group.trains.isEmpty())return true;return false;}
+    public boolean isOccupiedUnless(SignalBoundary boundary){resolve();for(var group:intersectingResolved)if(!group.topologyReady||!group.trains.isEmpty()||group.reserved!=null&&group.reserved!=boundary)return true;return false;}
+    private void resolve(){if(intersectingResolved.isEmpty())walkIntersecting(intersectingResolved::add);}
+    public void putIntersection(UUID intersectionId,UUID targetGroup){Objects.requireNonNull(intersectionId);Objects.requireNonNull(targetGroup);if(Objects.equals(intersecting.get(intersectionId),targetGroup))return;walkIntersecting(group->group.intersectingResolved.clear());intersecting.put(intersectionId,targetGroup);walkIntersecting(group->group.intersectingResolved.clear());resolveColor();dirty();}
+    public void removeIntersection(UUID intersectionId){walkIntersecting(group->group.intersectingResolved.clear());var removed=intersecting.remove(intersectionId);if(manager!=null){var other=manager.signalEdgeGroups().get(removed);if(other!=null){other.walkIntersecting(group->group.intersectingResolved.clear());other.intersecting.remove(intersectionId);other.resolveColor();}}resolveColor();dirty();}
+    public void putAdjacent(UUID id){if(adjacent.add(Objects.requireNonNull(id)))dirty();}
+    public void removeAdjacent(UUID id){if(adjacent.remove(id))dirty();}
+    public void resolveColor(){resolve();int mask=0;if(manager!=null)for(var group:intersectingResolved)for(var adjacentId:group.adjacent){var other=manager.signalEdgeGroups().get(adjacentId);if(other!=null&&!intersectingResolved.contains(other))mask=other.color.strikeFrom(mask);}var next=EdgeGroupColor.findNextAvailable(mask);if(next==color)return;walkIntersecting(group->{group.color=next;group.dirty();});}
+    public void walkIntersecting(Consumer<SignalEdgeGroup> action){var visited=Collections.newSetFromMap(new IdentityHashMap<SignalEdgeGroup,Boolean>());var queue=new ArrayDeque<SignalEdgeGroup>();queue.add(this);while(!queue.isEmpty()){var group=queue.removeFirst();if(!visited.add(group))continue;action.accept(group);if(group.manager!=null)for(var id:group.intersecting.values()){var next=group.manager.signalEdgeGroups().get(id);if(next!=null)queue.addLast(next);}}}
+    private void dirty(){if(manager!=null)manager.markDirty();}
+    public CompoundTag write(){return (CompoundTag)CODEC.encodeStart(net.minecraft.nbt.NbtOps.INSTANCE,this).getOrThrow();}
+    public static SignalEdgeGroup read(CompoundTag tag){return CODEC.parse(net.minecraft.nbt.NbtOps.INSTANCE,tag).getOrThrow();}
 }

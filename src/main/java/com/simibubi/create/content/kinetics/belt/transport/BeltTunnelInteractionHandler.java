@@ -1,158 +1,46 @@
 package com.simibubi.create.content.kinetics.belt.transport;
 
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.content.kinetics.belt.BeltBlock;
-import com.simibubi.create.content.kinetics.belt.BeltBlockEntity;
-import com.simibubi.create.content.kinetics.belt.BeltHelper;
-import com.simibubi.create.content.kinetics.belt.BeltSlope;
+import com.simibubi.create.content.kinetics.belt.*;
 import com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour;
-import com.simibubi.create.content.logistics.tunnel.BeltTunnelBlock;
-import com.simibubi.create.content.logistics.tunnel.BeltTunnelBlockEntity;
-import com.simibubi.create.content.logistics.tunnel.BrassTunnelBlock;
-import com.simibubi.create.content.logistics.tunnel.BrassTunnelBlockEntity;
-import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock;
-import com.simibubi.create.content.redstone.displayLink.source.AccumulatedItemCountDisplaySource;
+import com.simibubi.create.content.logistics.tunnel.*;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.item.ItemStack;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
+import net.minecraft.core.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
 
-import net.neoforged.neoforge.items.ItemHandlerHelper;
-
-public class BeltTunnelInteractionHandler {
-
-	public static boolean flapTunnelsAndCheckIfStuck(BeltInventory beltInventory, TransportedItemStack current,
-													 float nextOffset) {
-
-		int currentSegment = (int) current.beltPosition;
-		int upcomingSegment = (int) nextOffset;
-
-		Direction movementFacing = beltInventory.belt.getMovementFacing();
-		if (!beltInventory.beltMovementPositive && nextOffset == 0)
-			upcomingSegment = -1;
-		if (currentSegment == upcomingSegment)
-			return false;
-
-		if (stuckAtTunnel(beltInventory, upcomingSegment, current.stack, movementFacing)) {
-			current.beltPosition = currentSegment + (beltInventory.beltMovementPositive ? .99f : .01f);
-			return true;
-		}
-
-		Level world = beltInventory.belt.getLevel();
-		boolean onServer = !world.isClientSide || beltInventory.belt.isVirtual();
-		boolean removed = false;
-		BeltTunnelBlockEntity nextTunnel = getTunnelOnSegment(beltInventory, upcomingSegment);
-		int transferred = current.stack.getCount();
-
-		if (nextTunnel instanceof BrassTunnelBlockEntity brassTunnel) {
-			if (brassTunnel.hasDistributionBehaviour()) {
-				if (!brassTunnel.canTakeItems())
-					return true;
-				if (onServer) {
-					brassTunnel.setStackToDistribute(current.stack, movementFacing.getOpposite());
-					current.stack = ItemStack.EMPTY;
-					beltInventory.belt.notifyUpdate();
-				}
-				removed = true;
-			}
-		} else if (nextTunnel != null) {
-			BlockState blockState = nextTunnel.getBlockState();
-			if (current.stack.getCount() > 1 && AllBlocks.ANDESITE_TUNNEL.has(blockState)
-				&& BeltTunnelBlock.isJunction(blockState)
-				&& movementFacing.getAxis() == blockState.getValue(BeltTunnelBlock.HORIZONTAL_AXIS)) {
-
-				for (Direction d : Iterate.horizontalDirections) {
-					if (d.getAxis() == blockState.getValue(BeltTunnelBlock.HORIZONTAL_AXIS))
-						continue;
-					if (!nextTunnel.flaps.containsKey(d))
-						continue;
-					BlockPos outpos = nextTunnel.getBlockPos()
-						.below()
-						.relative(d);
-					if (!world.isLoaded(outpos))
-						return true;
-					DirectBeltInputBehaviour behaviour =
-						BlockEntityBehaviour.get(world, outpos, DirectBeltInputBehaviour.TYPE);
-					if (behaviour == null)
-						continue;
-					if (!behaviour.canInsertFromSide(d))
-						continue;
-
-					ItemStack toinsert = current.stack.copyWithCount(1);
-					if (!behaviour.handleInsertion(toinsert, d, false)
-						.isEmpty())
-						return true;
-					if (onServer)
-						flapTunnel(beltInventory, upcomingSegment, d, false);
-
-					current.stack.shrink(1);
-					beltInventory.belt.notifyUpdate();
-					if (current.stack.getCount() <= 1)
-						break;
-				}
-			}
-		}
-
-		if (onServer) {
-			flapTunnel(beltInventory, currentSegment, movementFacing, false);
-			flapTunnel(beltInventory, upcomingSegment, movementFacing.getOpposite(), true);
-
-			if (nextTunnel != null)
-				DisplayLinkBlock.sendToGatherers(world, nextTunnel.getBlockPos(),
-					(dgte, b) -> b.itemReceived(dgte, transferred), AccumulatedItemCountDisplaySource.class);
-		}
-
-		if (removed)
-			return true;
-
-		return false;
-	}
-
-	public static boolean stuckAtTunnel(BeltInventory beltInventory, int offset, ItemStack stack,
-										Direction movementDirection) {
-		BeltBlockEntity belt = beltInventory.belt;
-		BlockPos pos = BeltHelper.getPositionForOffset(belt, offset)
-			.above();
-		if (!(belt.getLevel()
-			.getBlockState(pos)
-			.getBlock() instanceof BrassTunnelBlock))
-			return false;
-		BlockEntity be = belt.getLevel()
-			.getBlockEntity(pos);
-		if (be == null || !(be instanceof BrassTunnelBlockEntity tunnel))
-			return false;
-		return !tunnel.canInsert(movementDirection.getOpposite(), stack);
-	}
-
-	public static void flapTunnel(BeltInventory beltInventory, int offset, Direction side, boolean inward) {
-		BeltTunnelBlockEntity be = getTunnelOnSegment(beltInventory, offset);
-		if (be == null)
-			return;
-		be.flap(side, inward);
-	}
-
-	protected static BeltTunnelBlockEntity getTunnelOnSegment(BeltInventory beltInventory, int offset) {
-		BeltBlockEntity belt = beltInventory.belt;
-		if (belt.getBlockState()
-			.getValue(BeltBlock.SLOPE) != BeltSlope.HORIZONTAL)
-			return null;
-		return getTunnelOnPosition(belt.getLevel(), BeltHelper.getPositionForOffset(belt, offset));
-	}
-
-	public static BeltTunnelBlockEntity getTunnelOnPosition(Level world, BlockPos pos) {
-		pos = pos.above();
-		if (!(world.getBlockState(pos)
-			.getBlock() instanceof BeltTunnelBlock))
-			return null;
-		BlockEntity be = world.getBlockEntity(pos);
-		if (be == null || !(be instanceof BeltTunnelBlockEntity))
-			return null;
-		return ((BeltTunnelBlockEntity) be);
-	}
-
+public final class BeltTunnelInteractionHandler {
+    public static BeltTunnelBlockEntity getTunnelOnPosition(Level level,BlockPos beltPos){return LoadedLevelAccess.blockEntity(level,beltPos.above()) instanceof BeltTunnelBlockEntity tunnel?tunnel:null;}
+    public static float checkForTunnels(BeltBlockEntity belt,BeltInventory inventory,TransportedItemStack original,float next){
+        if(belt.getBlockState().getValue(BeltBlock.SLOPE)!=BeltSlope.HORIZONTAL)return next;
+        boolean positive=belt.getDirectionAwareBeltMovementSpeed()>0;int step=positive?1:-1,from=(int)Math.floor(original.beltPosition),to=(int)Math.floor(next);if(!positive&&next==0)to=-1;
+        var world=belt.getLevel();var movement=belt.getMovementFacing();
+        for(int current=from;current!=to;current+=step){
+            int upcoming=current+step;var item=inventory.byId(original.id);if(item==null)return next;
+            var tunnel=getTunnelOnPosition(world,BeltHelper.getPositionForOffset(belt,upcoming));int transferred=item.stack.getCount();float stop=current+(positive?.99f:.01f);
+            if(tunnel instanceof BrassTunnelBlockEntity brass){
+                if(!brass.canInsert(movement.getOpposite(),item.stack))return stop;
+                if(brass.hasDistributionBehaviour()){
+                    if((!world.isClientSide()||belt.isVirtual()))try(var tx=Transaction.openOuter()){long accepted=brass.accept(item.stack,movement.getOpposite(),tx);if(accepted==item.stack.getCount()&&inventory.extractItem(item.id,(int)accepted,tx)==accepted){tx.addOuterCloseCallback(result->{if(result.wasCommitted())com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock.sendToGatherers(world,brass.getBlockPos(),(link,source)->source.itemReceived(link,(int)accepted),com.simibubi.create.content.redstone.displayLink.source.AccumulatedItemCountDisplaySource.class);});tx.commit();}else return stop;}
+                    return stop;
+                }
+            }else if(tunnel!=null&&item.stack.getCount()>1&&BeltTunnelBlock.isJunction(tunnel.getBlockState())&&movement.getAxis()==tunnel.getBlockState().getValue(BeltTunnelBlock.HORIZONTAL_AXIS)&&(!world.isClientSide()||belt.isVirtual())){
+                for(var side:new Direction[]{Direction.SOUTH,Direction.WEST,Direction.NORTH,Direction.EAST}){
+                    var actual=inventory.byId(item.id);if(actual==null||actual.stack.getCount()<=1)break;
+                    if(side.getAxis()==movement.getAxis()||!tunnel.flaps.containsKey(side))continue;
+                    var target=tunnel.getBlockPos().below().relative(side);if(!world.isLoaded(target))return stop;
+                    var input=BlockEntityBehaviour.get(world,target,DirectBeltInputBehaviour.TYPE);if(input==null||!input.canInsertFromSide(side))continue;
+                    try(var tx=Transaction.openOuter()){
+                        if(input.insert(actual.stack.copyWithCount(1),side,tx)!=1||inventory.extractItem(item.id,1,tx)!=1)return stop;
+                        var flapSide=side;tx.addOuterCloseCallback(result->{if(result.wasCommitted())tunnel.flap(flapSide,false);});tx.commit();
+                    }
+                }
+            }
+            if((!world.isClientSide()||belt.isVirtual())){
+                var previous=getTunnelOnPosition(world,BeltHelper.getPositionForOffset(belt,current));if(previous!=null)previous.flap(movement,false);if(tunnel!=null){tunnel.flap(movement.getOpposite(),true);com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock.sendToGatherers(world,tunnel.getBlockPos(),(link,source)->source.itemReceived(link,transferred),com.simibubi.create.content.redstone.displayLink.source.AccumulatedItemCountDisplaySource.class);}
+            }
+        }
+        return next;
+    }
+    private BeltTunnelInteractionHandler(){}
 }

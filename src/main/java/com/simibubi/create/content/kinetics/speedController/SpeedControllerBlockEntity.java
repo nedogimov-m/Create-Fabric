@@ -1,88 +1,21 @@
 package com.simibubi.create.content.kinetics.speedController;
 
+import com.simibubi.create.AllBlockEntityTypes;
+import com.simibubi.create.content.equipment.goggles.GoggleTooltip;
+import com.simibubi.create.content.kinetics.*;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 import java.util.List;
 
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.compat.Mods;
-import com.simibubi.create.compat.computercraft.AbstractComputerBehaviour;
-import com.simibubi.create.compat.computercraft.ComputerCraftProxy;
-import com.simibubi.create.content.kinetics.RotationPropagator;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.content.kinetics.motor.KineticScrollValueBehaviour;
-import com.simibubi.create.content.kinetics.simpleRelays.CogWheelBlock;
-import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollValueBehaviour;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import dan200.computercraft.api.peripheral.PeripheralCapability;
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
-
-public class SpeedControllerBlockEntity extends KineticBlockEntity {
-
-	public static final int DEFAULT_SPEED = 16;
-	public ScrollValueBehaviour targetSpeed;
-	public AbstractComputerBehaviour computerBehaviour;
-
-	boolean hasBracket;
-
-	public SpeedControllerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		hasBracket = false;
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		if (Mods.COMPUTERCRAFT.isLoaded()) {
-			event.registerBlockEntity(
-					PeripheralCapability.get(),
-					AllBlockEntityTypes.ROTATION_SPEED_CONTROLLER.get(),
-					(be, context) -> be.computerBehaviour.getPeripheralCapability()
-			);
-		}
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		updateBracket();
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		Integer max = AllConfigs.server().kinetics.maxRotationSpeed.get();
-
-		targetSpeed = new KineticScrollValueBehaviour(CreateLang.translateDirect("kinetics.speed_controller.rotation_speed"),
-			this, new ControllerValueBoxTransform());
-		targetSpeed.between(-max, max);
-		targetSpeed.value = DEFAULT_SPEED;
-		targetSpeed.withCallback(i -> this.updateTargetRotation());
-		behaviours.add(targetSpeed);
-		behaviours.add(computerBehaviour = ComputerCraftProxy.behaviour(this));
-
-		registerAwardables(behaviours, AllAdvancements.SPEED_CONTROLLER);
-	}
-
-	private void updateTargetRotation() {
-		if (hasNetwork())
-			getOrCreateNetwork().remove(this);
-		RotationPropagator.handleRemoved(level, worldPosition, this);
-		removeSource();
-		attachKinetics();
-
-		if (isCogwheelPresent() && getSpeed() != 0)
-			award(AllAdvancements.SPEED_CONTROLLER);
-	}
-
+public final class SpeedControllerBlockEntity extends KineticBlockEntity {
+    public static final int DEFAULT_SPEED=16;
+    private int targetSpeed=DEFAULT_SPEED;
+    public SpeedControllerBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.ROTATION_SPEED_CONTROLLER,pos,state);}
 	public static float getConveyedSpeed(KineticBlockEntity cogWheel, KineticBlockEntity speedControllerIn,
 		boolean targetingController) {
 		if (!(speedControllerIn instanceof SpeedControllerBlockEntity))
@@ -104,7 +37,7 @@ public class SpeedControllerBlockEntity extends KineticBlockEntity {
 	public static float getDesiredOutputSpeed(KineticBlockEntity cogWheel, KineticBlockEntity speedControllerIn,
 		boolean targetingController) {
 		SpeedControllerBlockEntity speedController = (SpeedControllerBlockEntity) speedControllerIn;
-		float targetSpeed = speedController.targetSpeed.getValue();
+		float targetSpeed = speedController.getTargetSpeed();
 		float speed = speedControllerIn.getTheoreticalSpeed();
 		float wheelSpeed = cogWheel.getTheoreticalSpeed();
 
@@ -131,44 +64,34 @@ public class SpeedControllerBlockEntity extends KineticBlockEntity {
 		return targetSpeed;
 	}
 
-	public void updateBracket() {
-		if (level != null && level.isClientSide)
-			hasBracket = isCogwheelPresent();
-	}
 
-	private boolean isCogwheelPresent() {
-		BlockState stateAbove = level.getBlockState(worldPosition.above());
-		return ICogWheel.isDedicatedCogWheel(stateAbove.getBlock()) && ICogWheel.isLargeCog(stateAbove)
-			&& stateAbove.getValue(CogWheelBlock.AXIS)
-				.isHorizontal();
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		computerBehaviour.removePeripheral();
-	}
-
-	private class ControllerValueBoxTransform extends ValueBoxTransform.Sided {
-
-		@Override
-		protected Vec3 getSouthLocation() {
-			return VecHelper.voxelSpace(8, 11f, 15.5f);
-		}
-
-		@Override
-		protected boolean isSideActive(BlockState state, Direction direction) {
-			if (direction.getAxis()
-				.isVertical())
-				return false;
-			return state.getValue(SpeedControllerBlock.HORIZONTAL_AXIS) != direction.getAxis();
-		}
-
-		@Override
-		public float getScale() {
-			return 0.5f;
-		}
-
-	}
-
+    public int getTargetSpeed(){return targetSpeed;}
+    public void setTargetSpeed(int speed) {
+        int value = Math.clamp(speed, -KineticNetworks.maxRotationSpeed(), KineticNetworks.maxRotationSpeed());
+        if (targetSpeed == value) return;
+        targetSpeed = value;
+        setChanged();
+        if (level instanceof ServerLevel server) {
+            if (!isVirtual() && KineticNetworks.isLive(server, this)) updateTargetRotation();
+            KineticNetworks.markDirty(server);
+            sync();
+        }
+    }
+    /** Exact source setting callback: remove the old dependent tree before applying the new ratio. */
+    private void updateTargetRotation() {
+        if (hasNetwork()) getOrCreateNetwork().remove(this);
+        RotationPropagator.handleRemoved(level, worldPosition, this);
+        removeSource();
+        attachKinetics();
+        if (isCogwheelPresent() && getSpeed() != 0)
+            award(com.simibubi.create.foundation.advancement.AllAdvancements.SPEED_CONTROLLER);
+    }
+    public boolean isCogwheelPresent(){if(level==null)return false;var state=LoadedLevelAccess.blockState(level,worldPosition.above());return state.getBlock() instanceof com.simibubi.create.content.kinetics.simpleRelays.CogWheelBlock cog&&cog.isLargeCog()&&cog.getRotationAxis(state).isHorizontal();}
+    @Override public boolean addToGoggleTooltip(List<Component> tooltip,boolean sneaking){tooltip.add(GoggleTooltip.translate("kinetics.speed_controller.rotation_speed"));GoggleTooltip.line(tooltip,GoggleTooltip.units(targetSpeed,"rpm"),1);return true;}
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);out.putInt("ScrollValue",targetSpeed);}
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);targetSpeed=in.getIntOr("ScrollValue",DEFAULT_SPEED);}
+    @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
+        super.addNativeAdvancementIds(ids);
+        ids.add("speed_controller");
+    }
 }

@@ -1,61 +1,18 @@
 package com.simibubi.create.content.redstone;
 
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.math.AngleHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.core.*;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.*;
 
-public class FilteredDetectorFilterSlot extends ValueBoxTransform.Sided {
-
-	private boolean hasSlotAtBottom;
-
-	public FilteredDetectorFilterSlot(boolean hasSlotAtBottom) {
-		this.hasSlotAtBottom = hasSlotAtBottom;
-	}
-
-	@Override
-	protected boolean isSideActive(BlockState state, Direction direction) {
-		Direction targetDirection = DirectedDirectionalBlock.getTargetDirection(state);
-		if (direction == targetDirection)
-			return false;
-		if (targetDirection.getOpposite() == direction)
-			return true;
-
-		if (targetDirection.getAxis() != Axis.Y)
-			return direction == Direction.UP || direction == Direction.DOWN && hasSlotAtBottom;
-		if (targetDirection == Direction.UP)
-			direction = direction.getOpposite();
-		if (!hasSlotAtBottom)
-			return direction == state.getValue(DirectedDirectionalBlock.FACING);
-
-		return direction.getAxis() == state.getValue(DirectedDirectionalBlock.FACING)
-			.getClockWise()
-			.getAxis();
-	}
-
-	@Override
-	public void rotate(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms) {
-		super.rotate(level, pos, state, ms);
-		Direction facing = state.getValue(DirectedDirectionalBlock.FACING);
-		if (facing.getAxis() == Axis.Y)
-			return;
-		if (getSide() != Direction.UP)
-			return;
-		TransformStack.of(ms)
-			.rotateZDegrees(-AngleHelper.horizontalAngle(facing) + 180);
-	}
-
-	@Override
-	protected Vec3 getSouthLocation() {
-		return VecHelper.voxelSpace(8f, 8f, 15.5f);
-	}
-
+/** Original sided sample positions for directed detectors. */
+public final class FilteredDetectorFilterSlot {
+    private final boolean bottom;
+    public FilteredDetectorFilterSlot(boolean bottom){this.bottom=bottom;}
+    public boolean activeSide(BlockState state,Direction side){
+        var target=DirectedDirectionalBlock.getTargetDirection(state);if(side==target)return false;if(side==target.getOpposite())return true;
+        if(target.getAxis().isHorizontal())return side==Direction.UP||side==Direction.DOWN&&bottom;
+        if(target==Direction.UP)side=side.getOpposite();if(!bottom)return side==state.getValue(DirectedDirectionalBlock.FACING);return side.getAxis()==state.getValue(DirectedDirectionalBlock.FACING).getClockWise().getAxis();
+    }
+    public Vec3 position(Direction side){return new Vec3(.5+side.getStepX()*7.5/16,.5+side.getStepY()*7.5/16,.5+side.getStepZ()*7.5/16);}
+    public boolean testHit(BlockState state,BlockPos pos,BlockHitResult hit){return activeSide(state,hit.getDirection())&&position(hit.getDirection()).distanceTo(hit.getLocation().subtract(Vec3.atLowerCornerOf(pos)))<.25;}
 }

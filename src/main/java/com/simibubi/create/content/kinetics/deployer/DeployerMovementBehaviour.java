@@ -1,314 +1,111 @@
 package com.simibubi.create.content.kinetics.deployer;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.UUID;
-
-import org.jetbrains.annotations.Nullable;
-
-import org.apache.commons.lang3.tuple.Pair;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllItems;
 import com.simibubi.create.api.behaviour.movement.MovementBehaviour;
-import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
-import com.simibubi.create.content.contraptions.OrientedContraptionEntity;
+import com.simibubi.create.content.contraptions.*;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
-import com.simibubi.create.content.contraptions.mounted.MountedContraption;
-import com.simibubi.create.content.contraptions.render.ActorVisual;
-import com.simibubi.create.content.contraptions.render.ContraptionMatrices;
 import com.simibubi.create.content.kinetics.deployer.DeployerBlockEntity.Mode;
-import com.simibubi.create.content.logistics.filter.FilterItemStack;
-import com.simibubi.create.content.schematics.SchematicInstances;
-import com.simibubi.create.content.schematics.requirement.ItemRequirement;
-import com.simibubi.create.content.trains.entity.CarriageContraption;
-import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
-import com.simibubi.create.content.trains.track.ITrackBlock;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.item.ItemHelper;
-import com.simibubi.create.foundation.item.ItemHelper.ExtractionCountMode;
-import com.simibubi.create.foundation.utility.BlockHelper;
-import com.simibubi.create.foundation.virtualWorld.VirtualRenderWorld;
-
-import dev.engine_room.flywheel.api.visualization.VisualizationContext;
-import dev.engine_room.flywheel.api.visualization.VisualizationManager;
-import net.createmod.catnip.levelWrappers.SchematicLevel;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
+import net.minecraft.core.*;
+import net.minecraft.nbt.*;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.neoforge.common.extensions.IBaseRailBlockExtension;
-import net.neoforged.neoforge.common.util.BlockSnapshot;
-import net.neoforged.neoforge.event.EventHooks;
-import net.neoforged.neoforge.items.IItemHandler;
-
+/** Source moving hand, shared native interactions and separately owned fake-player inventory. */
 public class DeployerMovementBehaviour implements MovementBehaviour {
-
-	@Override
-	public Vec3 getActiveAreaOffset(MovementContext context) {
-		return Vec3.atLowerCornerOf(context.state.getValue(DeployerBlock.FACING)
-			.getNormal())
-			.scale(2);
-	}
-
-	@Override
-	public void visitNewPosition(MovementContext context, BlockPos pos) {
-		if (context.world.isClientSide)
-			return;
-
-		tryGrabbingItem(context);
-		DeployerFakePlayer player = getPlayer(context);
-		Mode mode = getMode(context);
-		if (mode == Mode.USE && !DeployerHandler.shouldActivate(player.getMainHandItem(), context.world, pos, null))
-			return;
-
-		activate(context, pos, player, mode);
-		checkForTrackPlacementAdvancement(context, player);
-		tryDisposeOfExcess(context);
-		context.stall = player.blockBreakingProgress != null;
-	}
-
-	public void activate(MovementContext context, BlockPos pos, DeployerFakePlayer player, Mode mode) {
-		Level world = context.world;
-
-		player.placedTracks = false;
-
-		FilterItemStack filter = context.getFilterFromBE();
-		if (AllItems.SCHEMATIC.isIn(filter.item())) {
-			activateAsSchematicPrinter(context, pos, player, world, filter.item());
-			return;
-		}
-
-		Vec3 facingVec = Vec3.atLowerCornerOf(context.state.getValue(DeployerBlock.FACING)
-			.getNormal());
-		facingVec = context.rotation.apply(facingVec);
-		Vec3 vec = context.position.subtract(facingVec.scale(2));
-
-		float xRot = AbstractContraptionEntity.pitchFromVector(facingVec) - 90;
-		if (Math.abs(xRot) > 89) {
-			Vec3 initial = new Vec3(0, 0, 1);
-			if (context.contraption.entity instanceof OrientedContraptionEntity oce)
-				initial = VecHelper.rotate(initial, oce.getInitialYaw(), Axis.Y);
-			if (context.contraption.entity instanceof CarriageContraptionEntity cce)
-				initial = VecHelper.rotate(initial, 90, Axis.Y);
-			facingVec = context.rotation.apply(initial);
-		}
-
-		player.setYRot(AbstractContraptionEntity.yawFromVector(facingVec));
-		player.setXRot(xRot);
-
-		DeployerHandler.activate(player, vec, pos, facingVec, mode);
-	}
-
-	protected void checkForTrackPlacementAdvancement(MovementContext context, DeployerFakePlayer player) {
-		if ((context.contraption instanceof MountedContraption || context.contraption instanceof CarriageContraption)
-			&& player.placedTracks && context.blockEntityData != null && context.blockEntityData.contains("Owner"))
-			AllAdvancements.SELF_DEPLOYING.awardTo(context.world.getPlayerByUUID(context.blockEntityData.getUUID("Owner")));
-	}
-
-	protected void activateAsSchematicPrinter(MovementContext context, BlockPos pos, DeployerFakePlayer player,
-											  Level level, ItemStack filter) {
-		if (!filter.has(AllDataComponents.SCHEMATIC_ANCHOR))
-			return;
-		if (!level.getBlockState(pos)
-			.canBeReplaced())
-			return;
-
-		if (!filter.getOrDefault(AllDataComponents.SCHEMATIC_DEPLOYED, false))
-			return;
-		SchematicLevel schematicWorld = SchematicInstances.get(level, filter);
-		if (schematicWorld == null)
-			return;
-		if (!schematicWorld.getBounds()
-			.isInside(pos.subtract(schematicWorld.anchor)))
-			return;
-		BlockState blockState = schematicWorld.getBlockState(pos);
-		ItemRequirement requirement = ItemRequirement.of(blockState, schematicWorld.getBlockEntity(pos));
-		if (requirement.isInvalid() || requirement.isEmpty())
-			return;
-		if (AllBlocks.BELT.has(blockState))
-			return;
-
-		List<ItemRequirement.StackRequirement> requiredItems = requirement.getRequiredItems();
-		ItemStack contextStack = requiredItems.isEmpty() ? ItemStack.EMPTY : requiredItems.get(0).stack;
-
-		if (!context.contraption.hasUniversalCreativeCrate) {
-			IItemHandler itemHandler = context.contraption.getStorage().getAllItems();
-			for (ItemRequirement.StackRequirement required : requiredItems) {
-				ItemStack stack = ItemHelper
-					.extract(itemHandler, required::matches, ExtractionCountMode.EXACTLY,
-						required.stack.getCount(), true);
-				if (stack.isEmpty())
-					return;
-			}
-			for (ItemRequirement.StackRequirement required : requiredItems)
-				contextStack = ItemHelper.extract(itemHandler, required::matches,
-					ExtractionCountMode.EXACTLY, required.stack.getCount(), false);
-		}
-
-		CompoundTag data = BlockHelper.prepareBlockEntityData(level, blockState, schematicWorld.getBlockEntity(pos));
-		BlockSnapshot blocksnapshot = BlockSnapshot.create(level.dimension(), level, pos);
-		BlockHelper.placeSchematicBlock(level, blockState, pos, contextStack, data);
-
-		if (EventHooks.onBlockPlace(player, blocksnapshot, Direction.UP))
-			blocksnapshot.restore(Block.UPDATE_CLIENTS);
-		else if (blockState.getBlock() instanceof IBaseRailBlockExtension || blockState.getBlock() instanceof ITrackBlock)
-			player.placedTracks = true;
-	}
-
-	@Override
-	public void tick(MovementContext context) {
-		if (context.world.isClientSide)
-			return;
-		if (!context.stall)
-			return;
-
-		DeployerFakePlayer player = getPlayer(context);
-		Mode mode = getMode(context);
-
-		Pair<BlockPos, Float> blockBreakingProgress = player.blockBreakingProgress;
-		if (blockBreakingProgress != null) {
-			int timer = context.data.getInt("Timer");
-			if (timer < 20) {
-				timer++;
-				context.data.putInt("Timer", timer);
-				return;
-			}
-
-			context.data.remove("Timer");
-			activate(context, blockBreakingProgress.getKey(), player, mode);
-			tryDisposeOfExcess(context);
-		}
-
-		context.stall = player.blockBreakingProgress != null;
-	}
-
-	@Override
-	public void cancelStall(MovementContext context) {
-		if (context.world.isClientSide)
-			return;
-
-		MovementBehaviour.super.cancelStall(context);
-		DeployerFakePlayer player = getPlayer(context);
-		if (player == null)
-			return;
-		if (player.blockBreakingProgress == null)
-			return;
-		context.world.destroyBlockProgress(player.getId(), player.blockBreakingProgress.getKey(), -1);
-		player.blockBreakingProgress = null;
-	}
-
-	@Override
-	public void stopMoving(MovementContext context) {
-		if (context.world.isClientSide)
-			return;
-
-		DeployerFakePlayer player = getPlayer(context);
-		if (player == null)
-			return;
-
-		cancelStall(context);
-		context.blockEntityData.put("Inventory", player.getInventory()
-			.save(new ListTag()));
-		player.discard();
-	}
-
-	private void tryGrabbingItem(MovementContext context) {
-		DeployerFakePlayer player = getPlayer(context);
-		if (player == null)
-			return;
-		if (player.getMainHandItem()
-			.isEmpty()) {
-			FilterItemStack filter = context.getFilterFromBE();
-			if (AllItems.SCHEMATIC.isIn(filter.item()))
-				return;
-			ItemStack held = ItemHelper.extract(context.contraption.getStorage().getAllItems(),
-				stack -> filter.test(context.world, stack), 1, false);
-			player.setItemInHand(InteractionHand.MAIN_HAND, held);
-		}
-	}
-
-	private void tryDisposeOfExcess(MovementContext context) {
-		DeployerFakePlayer player = getPlayer(context);
-		if (player == null)
-			return;
-		Inventory inv = player.getInventory();
-		FilterItemStack filter = context.getFilterFromBE();
-
-		for (List<ItemStack> list : Arrays.asList(inv.armor, inv.offhand, inv.items)) {
-			for (int i = 0; i < list.size(); ++i) {
-				ItemStack itemstack = list.get(i);
-				if (itemstack.isEmpty())
-					continue;
-
-				if (list == inv.items && i == inv.selected && filter.test(context.world, itemstack))
-					continue;
-
-				collectOrDropItem(context, itemstack);
-				list.set(i, ItemStack.EMPTY);
-			}
-		}
-	}
-
-	@Override
-	public void writeExtraData(MovementContext context) {
-		DeployerFakePlayer player = getPlayer(context);
-		if (player == null)
-			return;
-		context.data.put("HeldItem", player.getMainHandItem().saveOptional(context.world.registryAccess()));
-	}
-
-	private DeployerFakePlayer getPlayer(MovementContext context) {
-		if (!(context.temporaryData instanceof DeployerFakePlayer) && context.world instanceof ServerLevel) {
-			UUID owner = context.blockEntityData.contains("Owner") ? context.blockEntityData.getUUID("Owner") : null;
-			DeployerFakePlayer deployerFakePlayer = new DeployerFakePlayer((ServerLevel) context.world, owner);
-			deployerFakePlayer.onMinecartContraption = context.contraption instanceof MountedContraption;
-			deployerFakePlayer.getInventory()
-				.load(context.blockEntityData.getList("Inventory", Tag.TAG_COMPOUND));
-			if (context.data.contains("HeldItem"))
-				deployerFakePlayer.setItemInHand(InteractionHand.MAIN_HAND,
-					ItemStack.parseOptional(context.world.registryAccess(), context.data.getCompound("HeldItem")));
-			context.blockEntityData.remove("Inventory");
-			context.temporaryData = deployerFakePlayer;
-		}
-		return (DeployerFakePlayer) context.temporaryData;
-	}
-
-	private Mode getMode(MovementContext context) {
-		return NBTHelper.readEnum(context.blockEntityData, "Mode", Mode.class);
-	}
-
-	@Override
-	public boolean disableBlockEntityRendering() {
-		return true;
-	}
-
-	@Override
-	public void renderInContraption(MovementContext context, VirtualRenderWorld renderWorld,
-		ContraptionMatrices matrices, MultiBufferSource buffers) {
-		if (!VisualizationManager.supportsVisualization(context.world))
-			DeployerRenderer.renderInContraption(context, renderWorld, matrices, buffers);
-	}
-
-	@Nullable
-	@Override
-	public ActorVisual createVisual(VisualizationContext visualizationContext, VirtualRenderWorld simulationWorld,
-		MovementContext movementContext) {
-		return new DeployerActorVisual(visualizationContext, simulationWorld, movementContext);
-	}
+    @Override public Vec3 getActiveAreaOffset(MovementContext context){return context.state.getValue(DeployerBlock.FACING).getUnitVec3().scale(2);}
+    public static Mode getMode(MovementContext context){String mode=context.blockEntityData.getStringOr("Mode","USE");if(context.world.isClientSide())mode=context.data.getStringOr("Mode",mode);try{return Mode.valueOf(mode);}catch(IllegalArgumentException ignored){return Mode.USE;}}
+    public static ItemStack getHeldItem(MovementContext context){return input(context,context.data).read("HeldItem",ItemStack.OPTIONAL_CODEC).orElseGet(()->input(context,context.blockEntityData).read("HeldItem",ItemStack.OPTIONAL_CODEC).orElse(ItemStack.EMPTY));}
+    private static ValueInput input(MovementContext context,CompoundTag data){return TagValueInput.create(ProblemReporter.DISCARDING,context.world.registryAccess(),data);}
+    private static BlockPos position(CompoundTag tag,String key){if(tag.get(key) instanceof CompoundTag old)return new BlockPos(old.getIntOr("X",0),old.getIntOr("Y",0),old.getIntOr("Z",0));return tag.read(key,BlockPos.CODEC).orElse(BlockPos.ZERO);}
+    public DeployerFakePlayer getPlayer(MovementContext context){
+        if(!(context.world instanceof ServerLevel level))return null;
+        if(context.temporaryData instanceof DeployerFakePlayer existing)return existing;
+        var saved=input(context,context.blockEntityData);var player=new DeployerFakePlayer(level,saved.read("Owner",UUIDUtil.CODEC).orElse(null));
+        var held=getHeldItem(context);int selected=saved.getIntOr("SelectedSlot",0);
+        var entries=new ArrayList<>(saved.read("PlayerInventory",DeployerInventory.CODEC).orElse(List.of()));
+        if(saved.childrenList("Inventory").isPresent()){
+            if(saved.read("PlayerInventory",DeployerInventory.CODEC).isPresent())throw new IllegalArgumentException("Two moving Deployer inventory owners");
+            selected=0;var legacyHand=ItemStack.EMPTY;var occupied=new HashSet<Integer>();
+            for(var slot:saved.childrenListOrEmpty("Inventory")){
+                var stack=slot.read(ItemStack.MAP_CODEC).orElseThrow();int index=DeployerInventory.originalSlot(slot.getByteOr("Slot",(byte)-1)&255);
+                if(!occupied.add(index))throw new IllegalArgumentException("Duplicate original moving Deployer slot");
+                if(index==0)legacyHand=stack;else if(!stack.isEmpty())entries.add(new DeployerInventory.Entry(index,stack));
+            }
+            // Source actor Data.HeldItem supersedes the captured Inventory hand, never extra stock.
+            if(!context.data.contains("HeldItem"))held=legacyHand;
+        }
+        var overflow=saved.read("Overflow",ItemStack.CODEC.listOf()).orElse(List.of()).stream().map(ItemStack::copy).toList();
+        DeployerInventory.hydrate(player,entries,selected,held);player.movingOverflow.addAll(overflow);
+        for(var key:new String[]{"Inventory","PlayerInventory","SelectedSlot","Overflow"})context.blockEntityData.remove(key);
+        context.temporaryData=player;
+        if(context.data.contains("BreakingPos")){float progress=context.data.getFloatOr("BreakingProgress",0);if(Float.isFinite(progress)&&progress>0&&progress<1)player.blockBreakingProgress=org.apache.commons.lang3.tuple.Pair.of(position(context.data,"BreakingPos"),progress);else{context.data.remove("BreakingPos");context.data.remove("BreakingProgress");}}
+        return player;
+    }
+    @Override public void visitNewPosition(MovementContext context,BlockPos pos){
+        if(context.world.isClientSide())return;
+        if(!LoadedLevelAccess.isLoaded(context.world,pos)){context.data.store("PendingPos",BlockPos.CODEC,pos);context.stall=true;return;}
+        var player=getPlayer(context);if(player==null)return;tryGrabbingItem(context,player);
+        if(getMode(context)==Mode.USE&&!DeployerHandler.shouldActivate(player.getMainHandItem(),context.world,pos,null)){sync(context);return;}
+        activate(context,pos,player,getMode(context));dispose(context,player);context.stall=player.blockBreakingProgress!=null||DeployerSchematicPrinter.hasPending(context);sync(context);
+    }
+    public void activate(MovementContext context,BlockPos pos,DeployerFakePlayer player,Mode mode){
+        if(!(context.world instanceof ServerLevel level)||context.position==null||!LoadedLevelAccess.isLoaded(level,pos))return;
+        var normal=context.rotation.apply(context.state.getValue(DeployerBlock.FACING).getUnitVec3()).normalize();var center=context.position.subtract(normal.scale(2));var yaw=normal;
+        if(Math.abs(normal.y)>.999){yaw=context.rotation.apply(new Vec3(0,0,1));if(yaw.horizontalDistanceSqr()<1e-8)yaw=context.rotation.apply(new Vec3(1,0,0));}
+        player.setYRot((float)Math.toDegrees(Math.atan2(-yaw.x,yaw.z)));player.setXRot((float)-Math.toDegrees(Math.asin(Math.clamp(normal.y,-1,1))));
+        player.placedTracks=false;
+        var drops=DeployerDropCapture.run(level,pos,()->{try(var source=DeployerCartItemSource.moving(context,player)){if(!DeployerSchematicPrinter.activate(context,pos,player))DeployerHandler.activate(player,center,pos,normal,mode);}});for(var drop:drops)collectOrDropItem(context,drop);
+        if(player.placedTracks&&(context.contraption instanceof com.simibubi.create.content.contraptions.mounted.MountedContraption||context.contraption instanceof com.simibubi.create.content.trains.entity.CarriageContraption))com.simibubi.create.foundation.advancement.GameplayAdvancements.awardOwner(level,input(context,context.blockEntityData).read("Owner",UUIDUtil.CODEC).orElse(null),"self_deploying");
+    }
+    private void tryGrabbingItem(MovementContext context,DeployerFakePlayer player){
+        if(!player.getMainHandItem().isEmpty())return;var filter=context.getFilterFromBE();
+        ItemStack grabbed=ItemStack.EMPTY;try(var transaction=Transaction.openOuter()){
+            for(var view:context.contraption.getStorage().getAllItems()){if(view.isResourceBlank())continue;var variant=view.getResource();var stack=variant.toStack();if(!filter.test(context.world,stack)||view.extract(variant,1,transaction)!=1)continue;grabbed=stack.copyWithCount(1);transaction.commit();break;}
+        }
+        if(!grabbed.isEmpty())player.setItemInHand(InteractionHand.MAIN_HAND,grabbed);
+    }
+    private void dispose(MovementContext context,DeployerFakePlayer player){
+        if(context.position==null)return;var inventory=player.getInventory();var filter=context.getFilterFromBE();for(int i=0;i<inventory.getContainerSize();i++){var stack=inventory.getItem(i);if(stack.isEmpty()||i==inventory.getSelectedSlot()&&filter.test(context.world,stack))continue;DeployerOutputTransfer.inventory(context,player,i);}
+        var actualOverflow=player.movingOverflow;for(int i=0;i<actualOverflow.size();i++)DeployerOutputTransfer.overflow(context,player,actualOverflow,i);actualOverflow.removeIf(ItemStack::isEmpty);
+        // A filtered-out hand can no longer advance its partial punch.
+        if(player.getMainHandItem().isEmpty())DeployerHandler.clearBreaking(player);
+    }
+    @Override public void tick(MovementContext context){
+        if(context.world.isClientSide()||!context.stall&&!DeployerSchematicPrinter.hasPending(context))return;
+        if(DeployerSchematicPrinter.hasPending(context)){
+            var player=getPlayer(context);if(player==null)return;player.placedTracks=false;
+            DeployerSchematicPrinter.retry(context,player);
+            if(player.placedTracks&&(context.contraption instanceof com.simibubi.create.content.contraptions.mounted.MountedContraption||context.contraption instanceof com.simibubi.create.content.trains.entity.CarriageContraption))com.simibubi.create.foundation.advancement.GameplayAdvancements.awardOwner(context.world,input(context,context.blockEntityData).read("Owner",UUIDUtil.CODEC).orElse(null),"self_deploying");
+            dispose(context,player);context.stall=DeployerSchematicPrinter.hasPending(context)||player.blockBreakingProgress!=null;sync(context);return;
+        }
+        if(context.data.contains("PendingPos")){var pos=position(context.data,"PendingPos");if(!LoadedLevelAccess.isLoaded(context.world,pos))return;context.data.remove("PendingPos");context.stall=false;visitNewPosition(context,pos);return;}
+        var player=getPlayer(context);if(player==null)return;if(player.getMainHandItem().isEmpty()&&player.blockBreakingProgress!=null){DeployerHandler.clearBreaking(player);context.stall=false;context.data.remove("Timer");sync(context);return;}if(player.blockBreakingProgress!=null){var pos=player.blockBreakingProgress.getKey();if(!LoadedLevelAccess.isLoaded(context.world,pos))return;int timer=context.data.getIntOr("Timer",0);if(timer<20){context.data.putInt("Timer",timer+1);return;}context.data.remove("Timer");activate(context,pos,player,getMode(context));dispose(context,player);}
+        context.stall=player.blockBreakingProgress!=null||DeployerSchematicPrinter.hasPending(context);sync(context);
+    }
+    @Override public void cancelStall(MovementContext context){
+        if(context.world.isClientSide())return;context.stall=false;for(var key:new String[]{"PendingPos","Timer","BreakingPos","BreakingProgress"})context.data.remove(key);
+        if(context.temporaryData instanceof DeployerFakePlayer player)DeployerHandler.clearBreaking(player);
+    }
+    @Override public void stopMoving(MovementContext context){
+        if(context.world.isClientSide())return;var player=getPlayer(context);if(player!=null)DeployerSchematicPrinter.stop(context,player);cancelStall(context);writeExtraData(context);if(player!=null)player.discard();
+    }
+    @Override public void writeExtraData(MovementContext context){
+        if(context.world.isClientSide())return;DeployerSchematicPrinter.write(context);if(context.contraption.phase()!=Contraption.Phase.REMOVED)return;
+        var player=getPlayer(context);if(player==null)return;var output=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,context.world.registryAccess());output.store("HeldItem",ItemStack.OPTIONAL_CODEC,player.getMainHandItem());
+        output.store("PlayerInventory",DeployerInventory.CODEC,DeployerInventory.capture(player));output.putInt("SelectedSlot",player.getInventory().getSelectedSlot());
+        output.store("Overflow",ItemStack.CODEC.listOf(),player.movingOverflow.stream().filter(stack->!stack.isEmpty()).map(ItemStack::copy).toList());var saved=output.buildResult();
+        context.data.put("HeldItem",saved.get("HeldItem").copy());context.data.putString("Mode",getMode(context).name());
+        for(var key:new String[]{"HeldItem","PlayerInventory","SelectedSlot","Overflow"})context.blockEntityData.put(key,saved.get(key).copy());context.blockEntityData.remove("Inventory");
+        if(player.blockBreakingProgress!=null){context.data.store("BreakingPos",BlockPos.CODEC,player.blockBreakingProgress.getKey());context.data.putFloat("BreakingProgress",player.blockBreakingProgress.getValue());}else{context.data.remove("BreakingPos");context.data.remove("BreakingProgress");}
+        // A captured stationary cycle must not restore an unrelated, pre-move breaking overlay.
+        context.blockEntityData.remove("BreakingPos");context.blockEntityData.remove("BreakingProgress");
+    }
+    public void sync(MovementContext context){writeExtraData(context);if(context.contraption.entity!=null)ContraptionNetworking.syncActorData(context);}
+    @Override public boolean disableBlockEntityRendering(){return true;}
 }

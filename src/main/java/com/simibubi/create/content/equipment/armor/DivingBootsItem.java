@@ -1,113 +1,31 @@
 package com.simibubi.create.content.equipment.armor;
 
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.Holder;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ArmorItem;
-import net.minecraft.world.item.ArmorMaterial;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.equipment.*;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.event.tick.EntityTickEvent;
-
-@EventBusSubscriber
 public class DivingBootsItem extends BaseArmorItem {
-	public static final EquipmentSlot SLOT = EquipmentSlot.FEET;
-	public static final ArmorItem.Type TYPE = ArmorItem.Type.BOOTS;
-
-	public DivingBootsItem(Holder<ArmorMaterial> material, Properties properties, ResourceLocation textureLoc) {
-		super(material, TYPE, properties, textureLoc);
-	}
-
-	public static boolean isWornBy(Entity entity) {
-		return !getWornItem(entity).isEmpty();
-	}
-
-	public static ItemStack getWornItem(Entity entity) {
-		if (!(entity instanceof LivingEntity livingEntity)) {
-			return ItemStack.EMPTY;
-		}
-		ItemStack stack = livingEntity.getItemBySlot(SLOT);
-		if (!(stack.getItem() instanceof DivingBootsItem)) {
-			return ItemStack.EMPTY;
-		}
-		return stack;
-	}
-
-	@SubscribeEvent
-	public static void accelerateDescentUnderwater(EntityTickEvent.Pre event) {
-		if (!(event.getEntity() instanceof LivingEntity entity))
-			return;
-
-		if (!affects(entity))
-			return;
-
-		Vec3 motion = entity.getDeltaMovement();
-		boolean isJumping = entity.jumping;
-		entity.setOnGround(entity.onGround() || entity.verticalCollision);
-
-		if (isJumping && entity.onGround()) {
-			motion = motion.add(0, .5f, 0);
-			entity.setOnGround(false);
-		} else {
-			motion = motion.add(0, -0.05f, 0);
-		}
-
-		float multiplier = 1.3f;
-		if (motion.multiply(1, 0, 1)
-			.length() < 0.145f && (entity.zza > 0 || entity.xxa != 0) && !entity.isShiftKeyDown())
-			motion = motion.multiply(multiplier, 1, multiplier);
-		entity.setDeltaMovement(motion);
-	}
-
-	protected static boolean affects(LivingEntity entity) {
-		if (!isWornBy(entity)) {
-			entity.getPersistentData()
-				.remove("HeavyBoots");
-			return false;
-		}
-
-		NBTHelper.putMarker(entity.getPersistentData(), "HeavyBoots");
-		if (!entity.isInWater())
-			return false;
-		if (entity.getPose() == Pose.SWIMMING)
-			return false;
-		if (entity instanceof Player playerEntity) {
-			if (playerEntity.getAbilities().flying)
-				return false;
-		}
-		return true;
-	}
-
-	public static Vec3 getMovementMultiplier(LivingEntity entity) {
-		double yMotion = entity.getDeltaMovement().y;
-		double vMultiplier = yMotion < 0 ? Math.max(0, 2.5 - Math.abs(yMotion) * 2) : 1;
-
-		if (!entity.onGround()) {
-			if (entity.jumping && entity.getPersistentData()
-				.contains("LavaGrounded")) {
-				boolean eyeInFluid = entity.isEyeInFluid(FluidTags.LAVA);
-				vMultiplier = yMotion == 0 ? 0 : (eyeInFluid ? 1 : 0.5) / yMotion;
-			} else if (yMotion > 0)
-				vMultiplier = 1.3;
-
-			entity.getPersistentData()
-				.remove("LavaGrounded");
-			return new Vec3(1.75, vMultiplier, 1.75);
-		}
-
-		entity.getPersistentData()
-			.putBoolean("LavaGrounded", true);
-		double hMultiplier = entity.isSprinting() ? 1.85 : 1.75;
-		return new Vec3(hMultiplier, vMultiplier, hMultiplier);
-	}
-
+    public static final EquipmentSlot SLOT=EquipmentSlot.FEET;
+    public static final ArmorType TYPE=ArmorType.BOOTS;
+    public DivingBootsItem(ArmorMaterial material,Properties properties,Identifier textureLoc){super(material,TYPE,properties,textureLoc);}
+    public static boolean isWornBy(Entity entity){return !getWornItem(entity).isEmpty();}
+    public static ItemStack getWornItem(Entity entity){if(!(entity instanceof LivingEntity living))return ItemStack.EMPTY;var stack=living.getItemBySlot(SLOT);return stack.getItem() instanceof DivingBootsItem?stack:ItemStack.EMPTY;}
+    public static void accelerateDescentUnderwater(LivingEntity entity){
+        if(!affects(entity))return;var motion=entity.getDeltaMovement();boolean jumping=((ArmorLivingAccess)entity).create$isArmorJumping();entity.setOnGround(entity.onGround()||entity.verticalCollision);
+        if(jumping&&entity.onGround()){motion=motion.add(0,.5,0);entity.setOnGround(false);}else motion=motion.add(0,-.05,0);
+        if(motion.multiply(1,0,1).length()<.145&&(entity.zza>0||entity.xxa!=0)&&!entity.isShiftKeyDown())motion=motion.multiply(1.3,1,1.3);
+        entity.setDeltaMovement(motion);
+    }
+    protected static boolean affects(LivingEntity entity){return isWornBy(entity)&&entity.isInWater()&&entity.getPose()!=Pose.SWIMMING&&!(entity instanceof Player player&&player.getAbilities().flying);}
+    public static Vec3 getMovementMultiplier(LivingEntity entity){
+        var state=(ArmorLivingAccess)entity;double y=entity.getDeltaMovement().y;double vertical=y<0?Math.max(0,2.5-Math.abs(y)*2):1;
+        if(!entity.onGround()){
+            if(state.create$isArmorJumping()&&state.create$wasLavaGrounded())vertical=y==0?0:(entity.isEyeInFluid(FluidTags.LAVA)?1:.5)/y;else if(y>0)vertical=1.3;
+            state.create$setLavaGrounded(false);return new Vec3(1.75,vertical,1.75);
+        }state.create$setLavaGrounded(true);double horizontal=entity.isSprinting()?1.85:1.75;return new Vec3(horizontal,vertical,horizontal);
+    }
 }

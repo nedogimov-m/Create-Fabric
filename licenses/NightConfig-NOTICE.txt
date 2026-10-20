@@ -1,0 +1,9 @@
+NightConfig core and toml 3.8.3
+Project: https://github.com/TheElectronWill/night-config
+Author and contributors: TheElectronWill and NightConfig contributors
+License declared by both published Maven POMs: GNU Lesser General Public License v3.0.
+
+Both libraries are included as replaceable nested library jars by Fabric Loom.
+Exact binary and corresponding-source artifact URLs and SHA-256 hashes are
+packaged in nightconfig-provenance.json. This mod does not modify the library.
+The LGPL-3.0 and GPL-3.0 texts accompany this notice.

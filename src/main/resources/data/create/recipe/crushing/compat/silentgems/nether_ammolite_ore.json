@@ -1,0 +1,33 @@
+{
+  "type": "create:crushing",
+  "ingredients": [
+    "silentgems:nether_ammolite_ore"
+  ],
+  "processing_time": 350,
+  "results": [
+    {
+      "count": 2,
+      "id": "silentgems:ammolite"
+    },
+    {
+      "chance": 0.25,
+      "id": "silentgems:ammolite"
+    },
+    {
+      "chance": 0.75,
+      "id": "create:experience_nugget"
+    },
+    {
+      "chance": 0.12,
+      "id": "minecraft:netherrack"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "silentgems"
+      ]
+    }
+  ]
+}

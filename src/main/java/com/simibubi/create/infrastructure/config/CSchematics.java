@@ -1,8 +1,7 @@
 package com.simibubi.create.infrastructure.config;
 
-import net.createmod.catnip.config.ConfigBase;
 
-public class CSchematics extends ConfigBase {
+public class CSchematics extends NativeConfigBase {
 
 	public final ConfigBool creativePrintIncludesAir = b(false, "creativePrintIncludesAir", Comments.creativePrintIncludesAir);
 	public final ConfigInt maxSchematics = i(10, 1, "maxSchematics", Comments.maxSchematics);

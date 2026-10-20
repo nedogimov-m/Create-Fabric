@@ -1,497 +1,145 @@
 package com.simibubi.create.content.fluids.tank;
 
-import java.util.Arrays;
-import java.util.EnumMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
-import org.jetbrains.annotations.NotNull;
-
 import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllSoundEvents;
 import com.simibubi.create.api.boiler.BoilerHeater;
-import com.simibubi.create.api.stress.BlockStressValues;
-import com.simibubi.create.content.decoration.steamWhistle.WhistleBlock;
-import com.simibubi.create.content.decoration.steamWhistle.WhistleBlockEntity;
 import com.simibubi.create.content.kinetics.steamEngine.SteamEngineBlock;
-import com.simibubi.create.foundation.advancement.AdvancementBehaviour;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.fluid.FluidHelper;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import joptsimple.internal.Strings;
-import net.createmod.catnip.animation.LerpedFloat;
-import net.createmod.catnip.animation.LerpedFloat.Chaser;
-import net.createmod.catnip.data.Iterate;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.fabricmc.fabric.api.transfer.v1.fluid.*;
+import net.fabricmc.fabric.api.transfer.v1.storage.*;
+import net.fabricmc.fabric.api.transfer.v1.transaction.*;
+import net.fabricmc.fabric.api.transfer.v1.transaction.base.SnapshotParticipant;
+import net.minecraft.core.*;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.CommonComponents;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.Mth;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
-
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
-
-public class BoilerData {
-
-	static final int SAMPLE_RATE = 5;
-
-	private static final int waterSupplyPerLevel = 10;
-	private static final float passiveEngineEfficiency = 1 / 8f;
-
-	// pooled water supply
-	int gatheredSupply;
-	float[] supplyOverTime = new float[10];
-	int ticksUntilNextSample;
-	int currentIndex;
-
-	// heat score
-	public boolean needsHeatLevelUpdate;
-	public boolean passiveHeat;
-	public int activeHeat;
-
-	public float waterSupply;
-	public int attachedEngines;
-	public int attachedWhistles;
-
-	// display
-	private int maxHeatForSize = 0;
-	private int maxHeatForWater = 0;
-	private int minValue = 0;
-	private int maxValue = 0;
-	public boolean[] occludedDirections = {true, true, true, true};
-
-	public LerpedFloat gauge = LerpedFloat.linear();
-
-	// client only sound control
-
-	// re-use the same lambda for each side
-	private final SoundPool.Sound sound = (level, pos) -> {
-		float volume = 3f / Math.max(2, attachedEngines / 6);
-		float pitch = 1.18f - level.random.nextFloat() * .25f;
-		level.playLocalSound(pos.getX(), pos.getY(), pos.getZ(),
-			SoundEvents.CANDLE_EXTINGUISH, SoundSource.BLOCKS, volume, pitch, false);
-
-		AllSoundEvents.STEAM.playAt(level, pos, volume / 16, .8f, false);
-	};
-	// separate pools for each side so they sound distinct when standing at corners of the boiler
-	private final EnumMap<Direction, SoundPool> pools = new EnumMap<>(Direction.class);
-
-	public void tick(FluidTankBlockEntity controller) {
-		if (!isActive())
-			return;
-		Level level = controller.getLevel();
-		if (level.isClientSide) {
-			pools.values().forEach(p -> p.play(level));
-			gauge.tickChaser();
-			float current = gauge.getValue(1);
-			if (current > 1 && level.random.nextFloat() < 1 / 2f)
-				gauge.setValueNoUpdate(current + Math.min(-(current - 1) * level.random.nextFloat(), 0));
-			return;
-		}
-		if (needsHeatLevelUpdate && updateTemperature(controller))
-			controller.notifyUpdate();
-		ticksUntilNextSample--;
-		if (ticksUntilNextSample > 0)
-			return;
-		int capacity = controller.tankInventory.getCapacity();
-		if (capacity == 0)
-			return;
-
-		ticksUntilNextSample = SAMPLE_RATE;
-		supplyOverTime[currentIndex] = gatheredSupply / (float) SAMPLE_RATE;
-		waterSupply = Math.max(waterSupply, supplyOverTime[currentIndex]);
-		currentIndex = (currentIndex + 1) % supplyOverTime.length;
-		gatheredSupply = 0;
-
-		if (currentIndex == 0) {
-			waterSupply = 0;
-			for (float i : supplyOverTime)
-				waterSupply = Math.max(i, waterSupply);
-		}
-
-		if (controller instanceof CreativeFluidTankBlockEntity)
-			waterSupply = waterSupplyPerLevel * 20;
-
-		if (getActualHeat(controller.getTotalTankSize()) == 18)
-			controller.award(AllAdvancements.STEAM_ENGINE_MAXED);
-
-		controller.notifyUpdate();
-	}
-
-	public void updateOcclusion(FluidTankBlockEntity controller) {
-		if (!controller.getLevel().isClientSide)
-			return;
-		if (attachedEngines + attachedWhistles == 0)
-			return;
-		for (Direction d : Iterate.horizontalDirections) {
-			AABB aabb =
-				new AABB(controller.getBlockPos()).move(controller.width / 2f - .5f, 0, controller.width / 2f - .5f)
-					.deflate(5f / 8);
-			aabb = aabb.move(d.getStepX() * (controller.width / 2f + 1 / 4f), 0,
-				d.getStepZ() * (controller.width / 2f + 1 / 4f));
-			aabb = aabb.inflate(Math.abs(d.getStepZ()) / 2f, 0.25f, Math.abs(d.getStepX()) / 2f);
-			occludedDirections[d.get2DDataValue()] = !controller.getLevel()
-				.noCollision(aabb);
-		}
-	}
-
-	public void queueSoundOnSide(BlockPos pos, Direction side) {
-		SoundPool pool = pools.get(side);
-		if (pool == null) {
-			pool = new SoundPool(4, 2, sound);
-			pools.put(side, pool);
-		}
-		pool.queueAt(pos);
-	}
-
-	public int getTheoreticalHeatLevel() {
-		return activeHeat;
-	}
-
-	public int getMaxHeatLevelForBoilerSize(int boilerSize) {
-		return (int) Math.min(18, boilerSize / 4);
-	}
-
-	public int getMaxHeatLevelForWaterSupply() {
-		return (int) Math.min(18, Mth.ceil(waterSupply) / waterSupplyPerLevel);
-	}
-
-	public boolean isPassive() {
-		return passiveHeat && maxHeatForSize > 0 && maxHeatForWater > 0;
-	}
-
-	public boolean isPassive(int boilerSize) {
-		calcMinMaxForSize(boilerSize);
-		return isPassive();
-	}
-
-	public float getEngineEfficiency(int boilerSize) {
-		if (isPassive(boilerSize))
-			return passiveEngineEfficiency / attachedEngines;
-		if (activeHeat == 0)
-			return 0;
-		int actualHeat = getActualHeat(boilerSize);
-		return attachedEngines <= actualHeat ? 1 : (float) actualHeat / attachedEngines;
-	}
-
-	private int getActualHeat(int boilerSize) {
-		int forBoilerSize = getMaxHeatLevelForBoilerSize(boilerSize);
-		int forWaterSupply = getMaxHeatLevelForWaterSupply();
-		int actualHeat = Math.min(activeHeat, Math.min(forWaterSupply, forBoilerSize));
-		return actualHeat;
-	}
-
-	public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking, int boilerSize) {
-		if (!isActive())
-			return false;
-
-		calcMinMaxForSize(boilerSize);
-
-		CreateLang.translate("boiler.status", getHeatLevelTextComponent().withStyle(ChatFormatting.GREEN))
-			.forGoggles(tooltip);
-		CreateLang.builder().add(getSizeComponent(true, false)).forGoggles(tooltip, 1);
-		CreateLang.builder().add(getWaterComponent(true, false)).forGoggles(tooltip, 1);
-		CreateLang.builder().add(getHeatComponent(true, false)).forGoggles(tooltip, 1);
-
-		if (attachedEngines == 0)
-			return true;
-
-		int boilerLevel = Math.min(activeHeat, Math.min(maxHeatForWater, maxHeatForSize));
-		double totalSU = getEngineEfficiency(boilerSize) * 16 * Math.max(boilerLevel, attachedEngines)
-			* BlockStressValues.getCapacity(AllBlocks.STEAM_ENGINE.get());
-
-		tooltip.add(CommonComponents.EMPTY);
-
-		if (attachedEngines > 0 && maxHeatForSize > 0 && maxHeatForWater == 0 && (passiveHeat ? 1 : activeHeat) > 0) {
-			CreateLang.translate("boiler.water_input_rate")
-				.style(ChatFormatting.GRAY)
-				.forGoggles(tooltip);
-			CreateLang.number(waterSupply)
-				.style(ChatFormatting.BLUE)
-				.add(CreateLang.translate("generic.unit.millibuckets"))
-				.add(CreateLang.text(" / ")
-					.style(ChatFormatting.GRAY))
-				.add(CreateLang.translate("boiler.per_tick", CreateLang.number(waterSupplyPerLevel)
-						.add(CreateLang.translate("generic.unit.millibuckets")))
-					.style(ChatFormatting.DARK_GRAY))
-				.forGoggles(tooltip, 1);
-			return true;
-		}
-
-		CreateLang.translate("tooltip.capacityProvided")
-			.style(ChatFormatting.GRAY)
-			.forGoggles(tooltip);
-
-		CreateLang.number(totalSU)
-			.translate("generic.unit.stress")
-			.style(ChatFormatting.AQUA)
-			.space()
-			.add((attachedEngines == 1 ? CreateLang.translate("boiler.via_one_engine")
-				: CreateLang.translate("boiler.via_engines", attachedEngines)).style(ChatFormatting.DARK_GRAY))
-			.forGoggles(tooltip, 1);
-
-		return true;
-	}
-
-	public void calcMinMaxForSize(int boilerSize) {
-		maxHeatForSize = getMaxHeatLevelForBoilerSize(boilerSize);
-		maxHeatForWater = getMaxHeatLevelForWaterSupply();
-
-		minValue = Math.min(passiveHeat ? 1 : activeHeat, Math.min(maxHeatForWater, maxHeatForSize));
-		maxValue = Math.max(passiveHeat ? 1 : activeHeat, Math.max(maxHeatForWater, maxHeatForSize));
-	}
-
-	@NotNull
-	public MutableComponent getHeatLevelTextComponent() {
-		int boilerLevel = Math.min(activeHeat, Math.min(maxHeatForWater, maxHeatForSize));
-
-		return isPassive() ? CreateLang.translateDirect("boiler.passive")
-			: (boilerLevel == 0 ? CreateLang.translateDirect("boiler.idle")
-			: boilerLevel == 18 ? CreateLang.translateDirect("boiler.max_lvl")
-			: CreateLang.translateDirect("boiler.lvl", String.valueOf(boilerLevel)));
-	}
-
-	public MutableComponent getSizeComponent(boolean forGoggles, boolean useBlocksAsBars, ChatFormatting... styles) {
-		return componentHelper("size", maxHeatForSize, forGoggles, useBlocksAsBars, styles);
-	}
-
-	public MutableComponent getWaterComponent(boolean forGoggles, boolean useBlocksAsBars, ChatFormatting... styles) {
-		return componentHelper("water", maxHeatForWater, forGoggles, useBlocksAsBars, styles);
-	}
-
-	public MutableComponent getHeatComponent(boolean forGoggles, boolean useBlocksAsBars, ChatFormatting... styles) {
-		return componentHelper("heat", passiveHeat ? 1 : activeHeat, forGoggles, useBlocksAsBars, styles);
-	}
-
-	private MutableComponent componentHelper(String label, int level, boolean forGoggles, boolean useBlocksAsBars,
-											 ChatFormatting... styles) {
-		MutableComponent base = useBlocksAsBars ? blockComponent(level) : barComponent(level);
-
-		if (!forGoggles)
-			return base;
-
-		ChatFormatting style1 = styles.length >= 1 ? styles[0] : ChatFormatting.GRAY;
-		ChatFormatting style2 = styles.length >= 2 ? styles[1] : ChatFormatting.DARK_GRAY;
-
-		return CreateLang.translateDirect("boiler." + label)
-			.withStyle(style1)
-			.append(CreateLang.translateDirect("boiler." + label + "_dots")
-				.withStyle(style2))
-			.append(base);
-	}
-
-	private MutableComponent blockComponent(int level) {
-		return Component.literal("" + "\u2588".repeat(minValue) + "\u2592".repeat(level - minValue) + "\u2591".repeat(maxValue - level));
-	}
-
-	private MutableComponent barComponent(int level) {
-		return Component.empty()
-			.append(bars(Math.max(0, minValue - 1), ChatFormatting.DARK_GREEN))
-			.append(bars(minValue > 0 ? 1 : 0, ChatFormatting.GREEN))
-			.append(bars(Math.max(0, level - minValue), ChatFormatting.DARK_GREEN))
-			.append(bars(Math.max(0, maxValue - level), ChatFormatting.DARK_RED))
-			.append(bars(Math.max(0, Math.min(18 - maxValue, ((maxValue / 5 + 1) * 5) - maxValue)),
-				ChatFormatting.DARK_GRAY));
-
-	}
-
-	private MutableComponent bars(int level, ChatFormatting format) {
-		return Component.literal(Strings.repeat('|', level))
-			.withStyle(format);
-	}
-
-	public boolean evaluate(FluidTankBlockEntity controller) {
-		BlockPos controllerPos = controller.getBlockPos();
-		Level level = controller.getLevel();
-		int prevEngines = attachedEngines;
-		int prevWhistles = attachedWhistles;
-		attachedEngines = 0;
-		attachedWhistles = 0;
-
-		for (int yOffset = 0; yOffset < controller.height; yOffset++) {
-			for (int xOffset = 0; xOffset < controller.width; xOffset++) {
-				for (int zOffset = 0; zOffset < controller.width; zOffset++) {
-
-					BlockPos pos = controllerPos.offset(xOffset, yOffset, zOffset);
-					BlockState blockState = level.getBlockState(pos);
-					if (!FluidTankBlock.isTank(blockState))
-						continue;
-					for (Direction d : Iterate.directions) {
-						BlockPos attachedPos = pos.relative(d);
-						BlockState attachedState = level.getBlockState(attachedPos);
-						if (AllBlocks.STEAM_ENGINE.has(attachedState) && SteamEngineBlock.getFacing(attachedState) == d)
-							attachedEngines++;
-						if (AllBlocks.STEAM_WHISTLE.has(attachedState)
-							&& WhistleBlock.getAttachedDirection(attachedState)
-							.getOpposite() == d)
-							attachedWhistles++;
-					}
-				}
-			}
-		}
-
-		needsHeatLevelUpdate = true;
-		return prevEngines != attachedEngines || prevWhistles != attachedWhistles;
-	}
-
-	public void checkPipeOrganAdvancement(FluidTankBlockEntity controller) {
-		if (!controller.getBehaviour(AdvancementBehaviour.TYPE)
-			.isOwnerPresent())
-			return;
-
-		BlockPos controllerPos = controller.getBlockPos();
-		Level level = controller.getLevel();
-		Set<Integer> whistlePitches = new HashSet<>();
-
-		for (int yOffset = 0; yOffset < controller.height; yOffset++) {
-			for (int xOffset = 0; xOffset < controller.width; xOffset++) {
-				for (int zOffset = 0; zOffset < controller.width; zOffset++) {
-
-					BlockPos pos = controllerPos.offset(xOffset, yOffset, zOffset);
-					BlockState blockState = level.getBlockState(pos);
-					if (!FluidTankBlock.isTank(blockState))
-						continue;
-					for (Direction d : Iterate.directions) {
-						BlockPos attachedPos = pos.relative(d);
-						BlockState attachedState = level.getBlockState(attachedPos);
-						if (AllBlocks.STEAM_WHISTLE.has(attachedState)
-							&& WhistleBlock.getAttachedDirection(attachedState)
-							.getOpposite() == d) {
-							if (level.getBlockEntity(attachedPos) instanceof WhistleBlockEntity wbe)
-								whistlePitches.add(wbe.getPitchId());
-						}
-					}
-				}
-			}
-		}
-
-		if (whistlePitches.size() >= 12)
-			controller.award(AllAdvancements.PIPE_ORGAN);
-	}
-
-	public boolean updateTemperature(FluidTankBlockEntity controller) {
-		BlockPos controllerPos = controller.getBlockPos();
-		Level level = controller.getLevel();
-		needsHeatLevelUpdate = false;
-
-		boolean prevPassive = passiveHeat;
-		int prevActive = activeHeat;
-		passiveHeat = false;
-		activeHeat = 0;
-
-		for (int xOffset = 0; xOffset < controller.width; xOffset++) {
-			for (int zOffset = 0; zOffset < controller.width; zOffset++) {
-				BlockPos pos = controllerPos.offset(xOffset, -1, zOffset);
-				BlockState blockState = level.getBlockState(pos);
-				float heat = BoilerHeater.findHeat(level, pos, blockState);
-				if (heat == 0) {
-					passiveHeat = true;
-				} else if (heat > 0) {
-					activeHeat += heat;
-				}
-			}
-		}
-
-		passiveHeat &= activeHeat == 0;
-
-		return prevActive != activeHeat || prevPassive != passiveHeat;
-	}
-
-	public boolean isActive() {
-		return attachedEngines > 0 || attachedWhistles > 0;
-	}
-
-	public void clear() {
-		waterSupply = 0;
-		activeHeat = 0;
-		passiveHeat = false;
-		attachedEngines = 0;
-		Arrays.fill(supplyOverTime, 0);
-	}
-
-	public CompoundTag write() {
-		CompoundTag nbt = new CompoundTag();
-		nbt.putFloat("Supply", waterSupply);
-		nbt.putInt("ActiveHeat", activeHeat);
-		nbt.putBoolean("PassiveHeat", passiveHeat);
-		nbt.putInt("Engines", attachedEngines);
-		nbt.putInt("Whistles", attachedWhistles);
-		nbt.putBoolean("Update", needsHeatLevelUpdate);
-		return nbt;
-	}
-
-	public void read(CompoundTag nbt, int boilerSize) {
-		waterSupply = nbt.getFloat("Supply");
-		activeHeat = nbt.getInt("ActiveHeat");
-		passiveHeat = nbt.getBoolean("PassiveHeat");
-		attachedEngines = nbt.getInt("Engines");
-		attachedWhistles = nbt.getInt("Whistles");
-		needsHeatLevelUpdate = nbt.getBoolean("Update");
-		Arrays.fill(supplyOverTime, (int) waterSupply);
-
-		int forBoilerSize = getMaxHeatLevelForBoilerSize(boilerSize);
-		int forWaterSupply = getMaxHeatLevelForWaterSupply();
-		int actualHeat = Math.min(activeHeat, Math.min(forWaterSupply, forBoilerSize));
-		float target = isPassive(boilerSize) ? 1 / 8f : forBoilerSize == 0 ? 0 : actualHeat / (forBoilerSize * 1f);
-		gauge.chase(target, 0.125f, Chaser.EXP);
-	}
-
-	public BoilerFluidHandler createHandler() {
-		return new BoilerFluidHandler();
-	}
-
-	public class BoilerFluidHandler implements IFluidHandler {
-
-		@Override
-		public int getTanks() {
-			return 1;
-		}
-
-		@Override
-		public FluidStack getFluidInTank(int tank) {
-			return FluidStack.EMPTY;
-		}
-
-		@Override
-		public int getTankCapacity(int tank) {
-			return 10000;
-		}
-
-		@Override
-		public boolean isFluidValid(int tank, FluidStack stack) {
-			return FluidHelper.isWater(stack.getFluid());
-		}
-
-		@Override
-		public int fill(FluidStack resource, FluidAction action) {
-			if (!isFluidValid(0, resource))
-				return 0;
-			int amount = resource.getAmount();
-			if (action.execute())
-				gatheredSupply += amount;
-			return amount;
-		}
-
-		@Override
-		public FluidStack drain(FluidStack resource, FluidAction action) {
-			return FluidStack.EMPTY;
-		}
-
-		@Override
-		public FluidStack drain(int maxDrain, FluidAction action) {
-			return FluidStack.EMPTY;
-		}
-
-	}
-
+import net.minecraft.network.chat.*;
+import com.simibubi.create.content.equipment.goggles.GoggleTooltip;
+
+/** Original five-tick samples and fifty-tick peak supply window, in Fabric fluid units. */
+public final class BoilerData {
+    private static final int SAMPLE_RATE=5,WATER_PER_LEVEL=10;
+    private final float[] supplyOverTime=new float[10];
+    private long gatheredSupply;
+    private int ticksUntilNextSample,currentIndex;
+    public boolean needsHeatLevelUpdate=true,passiveHeat;
+    public int activeHeat,attachedEngines,attachedWhistles;
+    public float waterSupply;
+    private float previousGauge,gauge;
+    private int maxHeatForSize,maxHeatForWater,minValue,maxValue;
+    public void calcMinMaxForSize(int size){maxHeatForSize=getMaxHeatLevelForBoilerSize(size);maxHeatForWater=getMaxHeatLevelForWaterSupply();minValue=Math.min(passiveHeat?1:activeHeat,Math.min(maxHeatForSize,maxHeatForWater));maxValue=Math.max(passiveHeat?1:activeHeat,Math.max(maxHeatForSize,maxHeatForWater));}
+    public MutableComponent getHeatLevelTextComponent(){int heat=Math.min(activeHeat,Math.min(maxHeatForSize,maxHeatForWater));return passiveHeat&&maxHeatForSize>0&&maxHeatForWater>0?GoggleTooltip.translate("boiler.passive"):heat==0?GoggleTooltip.translate("boiler.idle"):heat==18?GoggleTooltip.translate("boiler.max_lvl"):GoggleTooltip.translate("boiler.lvl",String.valueOf(heat));}
+    private MutableComponent bars(int count,ChatFormatting color){return Component.literal("|".repeat(Math.clamp(count,0,18))).withStyle(color);}
+    private MutableComponent component(String key,int level,boolean goggles,boolean blocks,ChatFormatting... styles){
+        MutableComponent graph=blocks?Component.literal("\u2588".repeat(Math.max(0,minValue))+"\u2592".repeat(Math.max(0,level-minValue))+"\u2591".repeat(Math.max(0,maxValue-level)))
+            :Component.empty().append(bars(minValue-1,ChatFormatting.DARK_GREEN)).append(bars(minValue>0?1:0,ChatFormatting.GREEN)).append(bars(level-minValue,ChatFormatting.DARK_GREEN)).append(bars(maxValue-level,ChatFormatting.DARK_RED)).append(bars(Math.min(18-maxValue,(maxValue/5+1)*5-maxValue),ChatFormatting.DARK_GRAY));
+        if(!goggles)return graph;return GoggleTooltip.translate("boiler."+key).withStyle(styles.length>0?styles[0]:ChatFormatting.GRAY).append(GoggleTooltip.translate("boiler."+key+"_dots").withStyle(styles.length>1?styles[1]:ChatFormatting.DARK_GRAY)).append(graph);
+    }
+    public MutableComponent getSizeComponent(boolean goggles,boolean blocks,ChatFormatting... styles){return component("size",maxHeatForSize,goggles,blocks,styles);}
+    public MutableComponent getWaterComponent(boolean goggles,boolean blocks,ChatFormatting... styles){return component("water",maxHeatForWater,goggles,blocks,styles);}
+    public MutableComponent getHeatComponent(boolean goggles,boolean blocks,ChatFormatting... styles){return component("heat",passiveHeat?1:activeHeat,goggles,blocks,styles);}
+    public boolean addToGoggleTooltip(List<Component> tooltip,boolean sneaking,int size){
+        if(!isActive())return false;calcMinMaxForSize(size);
+        tooltip.add(GoggleTooltip.translate("boiler.status",getHeatLevelTextComponent().withStyle(ChatFormatting.GREEN)));
+        GoggleTooltip.line(tooltip,getSizeComponent(true,false),1);GoggleTooltip.line(tooltip,getWaterComponent(true,false),1);GoggleTooltip.line(tooltip,getHeatComponent(true,false),1);
+        if(attachedEngines==0)return true;tooltip.add(Component.empty());
+        if(maxHeatForSize>0&&maxHeatForWater==0&&(passiveHeat?1:activeHeat)>0){
+            tooltip.add(GoggleTooltip.translate("boiler.water_input_rate").withStyle(ChatFormatting.GRAY));
+            GoggleTooltip.line(tooltip,GoggleTooltip.units(waterSupply,"millibuckets").withStyle(ChatFormatting.BLUE).append(Component.literal(" / ").withStyle(ChatFormatting.GRAY)).append(GoggleTooltip.translate("boiler.per_tick",GoggleTooltip.units(10,"millibuckets")).withStyle(ChatFormatting.DARK_GRAY)),1);return true;
+        }
+        double capacity=getEngineEfficiency(size)*16*Math.max(getActualHeat(size),attachedEngines)*com.simibubi.create.api.stress.BlockStressValues.getCapacity(AllBlocks.STEAM_ENGINE);
+        tooltip.add(GoggleTooltip.translate("tooltip.capacityProvided").withStyle(ChatFormatting.GRAY));
+        var engines=attachedEngines==1?GoggleTooltip.translate("boiler.via_one_engine"):GoggleTooltip.translate("boiler.via_engines",attachedEngines);
+        GoggleTooltip.line(tooltip,GoggleTooltip.units(capacity,"stress").withStyle(ChatFormatting.AQUA).append(" ").append(engines.withStyle(ChatFormatting.DARK_GRAY)),1);return true;
+    }
+    private final BoilerFluidHandler storage=new BoilerFluidHandler();
+    private final Map<Direction,SoundPool> soundPools=new EnumMap<>(Direction.class);
+    public void queueSoundOnSide(BlockPos pos,Direction side){soundPools.computeIfAbsent(side,ignored->new SoundPool(4,2,(level,at)->{
+        float volume=3f/Math.max(2,attachedEngines/6),pitch=1.18f-level.getRandom().nextFloat()*0.25f;
+        level.playLocalSound(at.getX(),at.getY(),at.getZ(),net.minecraft.sounds.SoundEvents.CANDLE_EXTINGUISH,net.minecraft.sounds.SoundSource.BLOCKS,volume,pitch,false);
+        level.playLocalSound(at.getX(),at.getY(),at.getZ(),com.simibubi.create.AllSoundEvents.STEAM,net.minecraft.sounds.SoundSource.BLOCKS,volume/16,0.8f,false);
+    })).queueAt(pos);}
+    public boolean isActive(){return attachedEngines>0||attachedWhistles>0;}
+    public BoilerFluidHandler createHandler(){return storage;}
+    public int getMaxHeatLevelForBoilerSize(int size){return Math.min(18,size/4);}
+    public int getMaxHeatLevelForWaterSupply(){return Math.min(18,(int)Math.ceil(waterSupply)/WATER_PER_LEVEL);}
+    public int getTheoreticalHeatLevel(){return activeHeat;}
+    public int getActualHeat(int size){return Math.min(activeHeat,Math.min(getMaxHeatLevelForBoilerSize(size),getMaxHeatLevelForWaterSupply()));}
+    public boolean isPassive(int size){return passiveHeat&&getMaxHeatLevelForBoilerSize(size)>0&&getMaxHeatLevelForWaterSupply()>0;}
+    public float getEngineEfficiency(int size){
+        if(attachedEngines==0)return 0;
+        if(isPassive(size))return 0.125f/attachedEngines;
+        if(activeHeat==0)return 0;
+        int heat=getActualHeat(size);return attachedEngines<=heat?1:(float)heat/attachedEngines;
+    }
+    public float getGauge(float partial){return previousGauge+(gauge-previousGauge)*partial;}
+    public void tick(FluidTankBlockEntity controller){
+        if(!isActive())return;
+        if(controller.getLevel().isClientSide()){
+            soundPools.values().forEach(pool->pool.play(controller.getLevel()));
+            previousGauge=gauge;int size=controller.getTotalTankSize(),max=getMaxHeatLevelForBoilerSize(size);
+            float target=isPassive(size)?0.125f:max==0?0:(float)getActualHeat(size)/max;gauge+=(target-gauge)*0.125f;return;
+        }
+        if(needsHeatLevelUpdate&&updateTemperature(controller))controller.sync();
+        if(--ticksUntilNextSample>0)return;ticksUntilNextSample=SAMPLE_RATE;
+        supplyOverTime[currentIndex]=gatheredSupply/(81f*SAMPLE_RATE);waterSupply=Math.max(waterSupply,supplyOverTime[currentIndex]);
+        currentIndex=(currentIndex+1)%supplyOverTime.length;gatheredSupply=0;
+        if(currentIndex==0){waterSupply=0;for(float sample:supplyOverTime)waterSupply=Math.max(waterSupply,sample);}
+        if(controller instanceof CreativeFluidTankBlockEntity)waterSupply=200;
+        if(getActualHeat(controller.getTotalTankSize())==18)controller.sourceAdvancements.award("steam_engine_maxed");
+        controller.setChanged();controller.sync();
+    }
+    public boolean evaluate(FluidTankBlockEntity controller){
+        int previous=attachedEngines,previousWhistles=attachedWhistles;attachedEngines=attachedWhistles=0;var level=controller.getLevel();var start=controller.getBlockPos();
+        for(int y=0;y<controller.getHeight();y++)for(int x=0;x<controller.getWidth();x++)for(int z=0;z<controller.getWidth();z++){
+            var pos=start.offset(x,y,z);
+            if(!level.isLoaded(pos)||!(LoadedLevelAccess.blockState(level,pos).getBlock() instanceof FluidTankBlock))continue;
+            for(var side:Direction.values()){
+                var neighbor=pos.relative(side);if(!level.isLoaded(neighbor))continue;var state=LoadedLevelAccess.blockState(level,neighbor);
+                if(state.is(AllBlocks.STEAM_ENGINE)&&SteamEngineBlock.getFacing(state)==side)attachedEngines++;
+                if(state.is(AllBlocks.STEAM_WHISTLE)&&com.simibubi.create.content.decoration.steamWhistle.WhistleBlock.getAttachedDirection(state).getOpposite()==side)attachedWhistles++;
+            }
+        }
+        needsHeatLevelUpdate=true;return previous!=attachedEngines||previousWhistles!=attachedWhistles;
+    }
+    public void checkPipeOrganAdvancement(FluidTankBlockEntity controller){
+        if(controller.sourceAdvancements.uuid()==null||controller.getLevel()==null||controller.getLevel().isClientSide()||!controller.structureLoaded())return;
+        var level=controller.getLevel();var start=controller.getBlockPos();var pitches=new HashSet<Integer>();
+        for(int y=0;y<controller.getHeight();y++)for(int x=0;x<controller.getWidth();x++)for(int z=0;z<controller.getWidth();z++){
+            var pos=start.offset(x,y,z);if(!(LoadedLevelAccess.blockState(level,pos).getBlock() instanceof FluidTankBlock))continue;
+            for(var side:Direction.values()){
+                var attached=pos.relative(side);if(!level.isLoaded(attached))continue;var state=LoadedLevelAccess.blockState(level,attached);
+                if(state.is(AllBlocks.STEAM_WHISTLE)&&com.simibubi.create.content.decoration.steamWhistle.WhistleBlock.getAttachedDirection(state).getOpposite()==side&&LoadedLevelAccess.blockEntity(level,attached) instanceof com.simibubi.create.content.decoration.steamWhistle.WhistleBlockEntity whistle)pitches.add(whistle.getPitchId());
+            }
+        }
+        if(pitches.size()>=12)controller.sourceAdvancements.award("pipe_organ");
+    }
+    public boolean updateTemperature(FluidTankBlockEntity controller){
+        needsHeatLevelUpdate=false;int previous=activeHeat;boolean wasPassive=passiveHeat;activeHeat=0;passiveHeat=false;
+        var level=controller.getLevel();
+        for(int x=0;x<controller.getWidth();x++)for(int z=0;z<controller.getWidth();z++){
+            var pos=controller.getBlockPos().offset(x,-1,z);if(!level.isLoaded(pos))continue;
+            float heat=BoilerHeater.findHeat(level,pos,LoadedLevelAccess.blockState(level,pos));
+            if(heat==0)passiveHeat=true;else if(heat>0)activeHeat+=heat;
+        }
+        passiveHeat&=activeHeat==0;return previous!=activeHeat||wasPassive!=passiveHeat;
+    }
+    public void clear(){waterSupply=0;activeHeat=0;passiveHeat=false;attachedEngines=attachedWhistles=0;gatheredSupply=0;Arrays.fill(supplyOverTime,0);}
+    public void save(ValueOutput out){out.putFloat("Supply",waterSupply);out.putInt("ActiveHeat",activeHeat);out.putBoolean("PassiveHeat",passiveHeat);out.putInt("Engines",attachedEngines);out.putInt("Whistles",attachedWhistles);out.putBoolean("Update",needsHeatLevelUpdate);}
+    public void load(ValueInput in,int size){
+        float supply=in.getFloatOr("Supply",0);waterSupply=Float.isFinite(supply)?Math.max(0,supply):0;
+        activeHeat=Math.max(0,in.getIntOr("ActiveHeat",0));passiveHeat=in.getBooleanOr("PassiveHeat",false);
+        attachedEngines=Math.max(0,in.getIntOr("Engines",0));attachedWhistles=Math.max(0,in.getIntOr("Whistles",0));needsHeatLevelUpdate=in.getBooleanOr("Update",true);
+        Arrays.fill(supplyOverTime,waterSupply);int max=getMaxHeatLevelForBoilerSize(size);gauge=previousGauge=isPassive(size)?0.125f:max==0?0:(float)getActualHeat(size)/max;
+    }
+    /** Sink storage: only committed water input contributes to measured supply; water is never extractable. */
+    public final class BoilerFluidHandler extends SnapshotParticipant<Long> implements Storage<FluidVariant> {
+        @Override protected Long createSnapshot(){return gatheredSupply;}
+        @Override protected void readSnapshot(Long amount){gatheredSupply=amount;}
+        @Override public long insert(FluidVariant fluid,long max,TransactionContext tx){
+            StoragePreconditions.notBlankNotNegative(fluid,max);if(max==0||!fluid.getFluid().is(net.minecraft.tags.FluidTags.WATER))return 0;
+            long moved=Math.min(max,Long.MAX_VALUE-gatheredSupply);if(moved>0){updateSnapshots(tx);gatheredSupply+=moved;}return moved;
+        }
+        @Override public long extract(FluidVariant fluid,long max,TransactionContext tx){StoragePreconditions.notBlankNotNegative(fluid,max);return 0;}
+        @Override public Iterator<StorageView<FluidVariant>> iterator(){return Collections.emptyIterator();}
+    }
 }

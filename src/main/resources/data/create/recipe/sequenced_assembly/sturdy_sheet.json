@@ -1,0 +1,51 @@
+{
+  "type": "create:sequenced_assembly",
+  "ingredient": "#c:dusts/obsidian",
+  "results": [
+    {
+      "id": "create:sturdy_sheet"
+    }
+  ],
+  "sequence": [
+    {
+      "type": "create:filling",
+      "ingredients": [
+        "create:unprocessed_obsidian_sheet",
+        {
+          "fluid": "minecraft:lava",
+          "amount": 40500
+        }
+      ],
+      "results": [
+        {
+          "id": "create:unprocessed_obsidian_sheet"
+        }
+      ]
+    },
+    {
+      "type": "create:pressing",
+      "ingredients": [
+        "create:unprocessed_obsidian_sheet"
+      ],
+      "results": [
+        {
+          "id": "create:unprocessed_obsidian_sheet"
+        }
+      ]
+    },
+    {
+      "type": "create:pressing",
+      "ingredients": [
+        "create:unprocessed_obsidian_sheet"
+      ],
+      "results": [
+        {
+          "id": "create:unprocessed_obsidian_sheet"
+        }
+      ]
+    }
+  ],
+  "transitional_item": {
+    "id": "create:unprocessed_obsidian_sheet"
+  }
+}

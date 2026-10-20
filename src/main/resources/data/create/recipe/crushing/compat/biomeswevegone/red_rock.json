@@ -1,0 +1,20 @@
+{
+  "type": "create:crushing",
+  "ingredients": [
+    "biomeswevegone:red_rock"
+  ],
+  "processing_time": 150,
+  "results": [
+    {
+      "id": "minecraft:red_sand"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "biomeswevegone"
+      ]
+    }
+  ]
+}

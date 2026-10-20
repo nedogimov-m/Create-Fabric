@@ -1,184 +1,53 @@
 package com.simibubi.create.content.fluids.pump;
 
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.fluids.FluidPropagator;
+import com.simibubi.create.*;
+import com.simibubi.create.content.fluids.*;
 import com.simibubi.create.content.fluids.pipes.FluidPipeBlock;
-import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
+import com.simibubi.create.content.kinetics.base.*;
 import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.block.ProperWaterloggedBlock;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.network.protocol.game.DebugPackets;
+import net.minecraft.core.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.SimpleWaterloggedBlock;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.level.pathfinder.PathComputationType;
-import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
-import net.minecraft.world.ticks.TickPriority;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.material.*;
+import net.minecraft.world.level.redstone.Orientation;
+import net.minecraft.world.phys.shapes.*;
 
-public class PumpBlock extends DirectionalKineticBlock
-	implements SimpleWaterloggedBlock, ICogWheel, IBE<PumpBlockEntity> {
-
-	public PumpBlock(Properties p_i48415_1_) {
-		super(p_i48415_1_);
-		registerDefaultState(super.defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, false));
-	}
-
-	@Override
-	public BlockState getRotatedBlockState(BlockState originalState, Direction targetedFace) {
-		return originalState.setValue(FACING, originalState.getValue(FACING)
-			.getOpposite());
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return state.getValue(FACING)
-			.getAxis();
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter p_220053_2_, BlockPos p_220053_3_,
-							   CollisionContext p_220053_4_) {
-		return AllShapes.PUMP.get(state.getValue(FACING));
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level world, BlockPos pos, Block otherBlock, BlockPos neighborPos,
-								boolean isMoving) {
-		DebugPackets.sendNeighborsUpdatePacket(world, pos);
-		Direction d = FluidPropagator.validateNeighbourChange(state, world, pos, otherBlock, neighborPos, isMoving);
-		if (d == null)
-			return;
-		if (!isOpenAt(state, d))
-			return;
-		world.scheduleTick(pos, this, 1, TickPriority.HIGH);
-	}
-
-	@Override
-	public FluidState getFluidState(BlockState state) {
-		return state.getValue(BlockStateProperties.WATERLOGGED) ? Fluids.WATER.getSource(false)
-			: Fluids.EMPTY.defaultFluidState();
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		builder.add(BlockStateProperties.WATERLOGGED);
-		super.createBlockStateDefinition(builder);
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction direction, BlockState neighbourState, LevelAccessor world,
-								  BlockPos pos, BlockPos neighbourPos) {
-		if (state.getValue(BlockStateProperties.WATERLOGGED))
-			world.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(world));
-		return state;
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		BlockState toPlace = super.getStateForPlacement(context);
-		Level level = context.getLevel();
-		BlockPos pos = context.getClickedPos();
-
-		boolean isShiftKeyDown = context.getPlayer() != null && context.getPlayer().isShiftKeyDown();
-		toPlace = ProperWaterloggedBlock.withWater(level, toPlace, pos);
-
-		Direction nearestLookingDirection = context.getNearestLookingDirection();
-		Direction targetDirection = isShiftKeyDown ? nearestLookingDirection : nearestLookingDirection.getOpposite();
-		Direction bestConnectedDirection = null;
-		double bestDistance = Double.MAX_VALUE;
-
-		for (Direction d : Iterate.directions) {
-			BlockPos adjPos = pos.relative(d);
-			BlockState adjState = level.getBlockState(adjPos);
-			if (!FluidPipeBlock.canConnectTo(level, adjPos, adjState, d))
-				continue;
-			double distance = Vec3.atLowerCornerOf(d.getNormal())
-				.distanceTo(Vec3.atLowerCornerOf(targetDirection.getNormal()));
-			if (distance > bestDistance)
-				continue;
-			bestDistance = distance;
-			bestConnectedDirection = d;
-		}
-
-		if (bestConnectedDirection != null && bestConnectedDirection.getAxis() != targetDirection.getAxis() && !isShiftKeyDown)
-			return toPlace.setValue(FACING, bestConnectedDirection);
-
-		return toPlace;
-	}
-
-	public static boolean isPump(BlockState state) {
-		return state.getBlock() instanceof PumpBlock;
-	}
-
-	@Override
-	public void onPlace(BlockState state, Level world, BlockPos pos, BlockState oldState, boolean isMoving) {
-		super.onPlace(state, world, pos, oldState, isMoving);
-		if (world.isClientSide)
-			return;
-		if (state != oldState)
-			world.scheduleTick(pos, this, 1, TickPriority.HIGH);
-
-		if (isPump(state) && isPump(oldState) && state.getValue(FACING) == oldState.getValue(FACING)
-			.getOpposite()) {
-			BlockEntity blockEntity = world.getBlockEntity(pos);
-			if (!(blockEntity instanceof PumpBlockEntity pump))
-				return;
-			pump.pressureUpdate = true;
-		}
-	}
-
-	public static boolean isOpenAt(BlockState state, Direction d) {
-		return d.getAxis() == state.getValue(FACING)
-			.getAxis();
-	}
-
-	@Override
-	public void tick(BlockState state, ServerLevel world, BlockPos pos, RandomSource r) {
-		FluidPropagator.propagateChangedPipe(world, pos, state);
-	}
-
-	@Override
-	public void onRemove(BlockState state, Level world, BlockPos pos, BlockState newState, boolean isMoving) {
-		boolean blockTypeChanged = !state.is(newState.getBlock());
-		if (blockTypeChanged && !world.isClientSide)
-			FluidPropagator.propagateChangedPipe(world, pos, state);
-		super.onRemove(state, world, pos, newState, isMoving);
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	public Class<PumpBlockEntity> getBlockEntityClass() {
-		return PumpBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends PumpBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.MECHANICAL_PUMP.get();
-	}
-
+public final class PumpBlock extends KineticBlock implements ICogWheel,SimpleWaterloggedBlock {
+    public static final EnumProperty<Direction> FACING=BlockStateProperties.FACING;
+    public static final BooleanProperty WATERLOGGED=BlockStateProperties.WATERLOGGED;
+    public PumpBlock(Properties properties){super(properties);registerDefaultState(stateDefinition.any().setValue(FACING,Direction.NORTH).setValue(WATERLOGGED,false));}
+    @Override public void setPlacedBy(Level level,BlockPos pos,BlockState state,net.minecraft.world.entity.LivingEntity placer,net.minecraft.world.item.ItemStack stack){super.setPlacedBy(level,pos,state,placer,stack);if(com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,pos) instanceof PumpBlockEntity device)device.sourceAdvancements.place(placer);}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(FACING,WATERLOGGED);}
+    @Override public Direction.Axis getRotationAxis(BlockState state){return state.getValue(FACING).getAxis();}
+    @Override public boolean hasShaftTowards(LevelReader level,BlockPos pos,BlockState state,Direction side){return false;}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new PumpBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.MECHANICAL_PUMP,PumpBlockEntity::tick);}
+    public static boolean isPump(BlockState state){return state.getBlock() instanceof PumpBlock;}
+    public static boolean isOpenAt(BlockState state,Direction side){return side.getAxis()==state.getValue(FACING).getAxis();}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){
+        var facing=com.simibubi.create.content.kinetics.drill.DrillBlock.facingForPlacement(context);boolean shift=context.getPlayer()!=null&&context.getPlayer().isShiftKeyDown();
+        var target=shift?context.getNearestLookingDirection():context.getNearestLookingDirection().getOpposite();Direction best=null;int distance=Integer.MAX_VALUE;
+        for(var side:Direction.values()){
+            var pos=context.getClickedPos().relative(side);if(!context.getLevel().isLoaded(pos))continue;
+            if(!FluidPipeBlock.canConnectTo(context.getLevel(),pos,context.getLevel().getBlockState(pos),side))continue;
+            int squared=(side.getStepX()-target.getStepX())*(side.getStepX()-target.getStepX())+(side.getStepY()-target.getStepY())*(side.getStepY()-target.getStepY())+(side.getStepZ()-target.getStepZ())*(side.getStepZ()-target.getStepZ());
+            if(squared<=distance){best=side;distance=squared;}
+        }
+        if(best!=null&&best.getAxis()!=target.getAxis()&&!shift)facing=best;
+        return defaultBlockState().setValue(FACING,facing).setValue(WATERLOGGED,context.getLevel().getFluidState(context.getClickedPos()).is(net.minecraft.tags.FluidTags.WATER));
+    }
+    @Override protected FluidState getFluidState(BlockState state){return state.getValue(WATERLOGGED)?Fluids.WATER.getSource(false):Fluids.EMPTY.defaultFluidState();}
+    @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction side,BlockPos neighborPos,BlockState neighbor,RandomSource random){if(state.getValue(WATERLOGGED))ticks.scheduleTick(pos,Fluids.WATER,Fluids.WATER.getTickDelay(level));return state;}
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block neighbor,Orientation orientation,boolean moved){super.neighborChanged(state,level,pos,neighbor,orientation,moved);if(!level.isClientSide()&&level.getBlockEntity(pos) instanceof PumpBlockEntity pump)pump.updatePressureChange();}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return switch(state.getValue(FACING).getAxis()){case X->box(0,2,2,16,14,14);case Y->box(2,0,2,14,16,14);case Z->box(2,2,0,14,14,16);};}
+    @Override protected BlockState rotate(BlockState state,Rotation rotation){return state.setValue(FACING,rotation.rotate(state.getValue(FACING)));}
+    @Override protected BlockState mirror(BlockState state,Mirror mirror){return state.setValue(FACING,mirror.mirror(state.getValue(FACING)));}
+    @Override protected void affectNeighborsAfterRemoval(BlockState state,ServerLevel level,BlockPos pos,boolean moved){for(var side:Direction.values()){var pipe=FluidPropagator.getPipe(level,pos.relative(side));if(pipe!=null)FluidPropagator.propagateChangedPipe(level,pos.relative(side),pipe.blockEntity.getBlockState());}}
 }

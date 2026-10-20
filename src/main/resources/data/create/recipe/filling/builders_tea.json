@@ -1,0 +1,15 @@
+{
+  "type": "create:filling",
+  "ingredients": [
+    "minecraft:glass_bottle",
+    {
+      "fluid": "create:tea",
+      "amount": 20250
+    }
+  ],
+  "results": [
+    {
+      "id": "create:builders_tea"
+    }
+  ]
+}

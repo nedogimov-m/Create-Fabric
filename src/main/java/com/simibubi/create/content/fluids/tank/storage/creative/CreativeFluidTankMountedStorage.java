@@ -1,55 +1,28 @@
 package com.simibubi.create.content.fluids.tank.storage.creative;
 
-import org.jetbrains.annotations.Nullable;
-
-import com.mojang.serialization.MapCodec;
+import com.mojang.serialization.*;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.AllMountedStorageTypes;
-import com.simibubi.create.api.contraption.storage.fluid.MountedFluidStorageType;
 import com.simibubi.create.api.contraption.storage.fluid.WrapperMountedFluidStorage;
 import com.simibubi.create.content.fluids.tank.CreativeFluidTankBlockEntity;
 import com.simibubi.create.content.fluids.tank.CreativeFluidTankBlockEntity.CreativeSmartFluidTank;
-
+import com.simibubi.create.foundation.fluid.FluidStack;
+import net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.templates.FluidTank;
+import org.jspecify.annotations.Nullable;
 
 public class CreativeFluidTankMountedStorage extends WrapperMountedFluidStorage<CreativeSmartFluidTank> {
-	public static final MapCodec<CreativeFluidTankMountedStorage> CODEC = CreativeSmartFluidTank.CODEC.xmap(
-		CreativeFluidTankMountedStorage::new, storage -> storage.wrapped
-	).fieldOf("value");
-
-	protected CreativeFluidTankMountedStorage(MountedFluidStorageType<?> type, CreativeSmartFluidTank tank) {
-		super(type, tank);
-	}
-
-	protected CreativeFluidTankMountedStorage(CreativeSmartFluidTank tank) {
-		this(AllMountedStorageTypes.CREATIVE_FLUID_TANK.get(), tank);
-	}
-
-	@Override
-	public void unmount(Level level, BlockState state, BlockPos pos, @Nullable BlockEntity be) {
-		// no need to do anything, supplied stack can't change while mounted
-	}
-
-	public static CreativeFluidTankMountedStorage fromTank(CreativeFluidTankBlockEntity tank) {
-		// make an isolated copy
-		FluidTank inv = tank.getTankInventory();
-		CreativeSmartFluidTank copy = new CreativeSmartFluidTank(inv.getCapacity(), $ -> {});
-		copy.setContainedFluid(inv.getFluid());
-		return new CreativeFluidTankMountedStorage(copy);
-	}
-
-	public static CreativeFluidTankMountedStorage fromLegacy(HolderLookup.Provider registries, CompoundTag nbt) {
-		int capacity = nbt.getInt("Capacity");
-		FluidStack fluid = FluidStack.parseOptional(registries, nbt.getCompound("ProvidedStack"));
-		CreativeSmartFluidTank tank = new CreativeSmartFluidTank(capacity, $ -> {});
-		tank.setContainedFluid(fluid);
-		return new CreativeFluidTankMountedStorage(tank);
-	}
+    public static final MapCodec<CreativeFluidTankMountedStorage> CODEC = RecordCodecBuilder.mapCodec(i -> i.group(
+        Codec.LONG.validate(value -> value >= 0 ? DataResult.success(value) : DataResult.error(() -> "Negative mounted capacity")).fieldOf("capacity").forGetter(storage -> storage.wrapped.getCapacity()),
+        FluidVariant.CODEC.fieldOf("variant").forGetter(storage -> storage.wrapped.getResource())
+    ).apply(i, CreativeFluidTankMountedStorage::new));
+    public CreativeFluidTankMountedStorage(long capacity, FluidVariant fluid) {
+        super(AllMountedStorageTypes.CREATIVE_FLUID_TANK, new CreativeSmartFluidTank(capacity, ignored -> {}));
+        wrapped.setContainedFluid(new FluidStack(fluid, capacity));
+    }
+    @Override public void unmount(Level level, BlockState state, BlockPos pos, @Nullable BlockEntity be) { /* Supply is immutable while mounted. */ }
+    public static CreativeFluidTankMountedStorage fromTank(CreativeFluidTankBlockEntity tank) { return new CreativeFluidTankMountedStorage(tank.getTankInventory().getCapacity(), tank.getTankInventory().getResource()); }
 }

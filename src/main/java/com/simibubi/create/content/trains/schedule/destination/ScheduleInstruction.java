@@ -2,25 +2,25 @@ package com.simibubi.create.content.trains.schedule.destination;
 
 import java.util.function.Supplier;
 
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.graph.DiscoveredPath;
 import com.simibubi.create.content.trains.schedule.Schedule;
 import com.simibubi.create.content.trains.schedule.ScheduleDataEntry;
 import com.simibubi.create.content.trains.schedule.ScheduleRuntime;
-import com.simibubi.create.foundation.codec.CreateStreamCodecs;
+import com.simibubi.create.content.trains.schedule.ScheduleSerialization;
 
 import net.createmod.catnip.data.Pair;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.Level;
 
 public abstract class ScheduleInstruction extends ScheduleDataEntry {
-	public static final StreamCodec<RegistryFriendlyByteBuf, ScheduleInstruction> STREAM_CODEC = CreateStreamCodecs.ofLegacyNbtWithRegistries(
+	public static final StreamCodec<RegistryFriendlyByteBuf, ScheduleInstruction> STREAM_CODEC = ScheduleSerialization.ofLegacyNbtWithRegistries(
 			ScheduleInstruction::write, ScheduleInstruction::fromTag
 	);
 
@@ -39,9 +39,9 @@ public abstract class ScheduleInstruction extends ScheduleDataEntry {
 	}
 
 	public static ScheduleInstruction fromTag(HolderLookup.Provider registries, CompoundTag tag) {
-		ResourceLocation location = ResourceLocation.parse(tag.getString("Id"));
+		Identifier location = Identifier.parse(tag.getStringOr("Id", ""));
 		Supplier<? extends ScheduleInstruction> supplier = null;
-		for (Pair<ResourceLocation, Supplier<? extends ScheduleInstruction>> pair : Schedule.INSTRUCTION_TYPES)
+		for (Pair<Identifier, Supplier<? extends ScheduleInstruction>> pair : Schedule.INSTRUCTION_TYPES)
 			if (pair.getFirst()
 				.equals(location))
 				supplier = pair.getSecond();
@@ -54,7 +54,7 @@ public abstract class ScheduleInstruction extends ScheduleDataEntry {
 		ScheduleInstruction scheduleDestination = supplier.get();
 		// Left around for migration purposes. Data added in writeAdditional has moved into the "Data" tag
 		scheduleDestination.readAdditional(registries, tag);
-		CompoundTag data = tag.getCompound("Data");
+		CompoundTag data = tag.getCompoundOrEmpty("Data");
 		scheduleDestination.readAdditional(registries, data);
 		scheduleDestination.data = data;
 		return scheduleDestination;

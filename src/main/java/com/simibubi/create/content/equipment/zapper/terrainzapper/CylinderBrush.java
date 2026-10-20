@@ -8,9 +8,9 @@ import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.tuple.Pair;
 
-import com.simibubi.create.foundation.utility.CreateLang;
 
-import net.createmod.catnip.math.VecHelper;
+
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Direction.AxisDirection;
@@ -31,9 +31,9 @@ public class CylinderBrush extends ShapedBrush {
 			int radius = i;
 			List<BlockPos> positions =
 				BlockPos.betweenClosedStream(BlockPos.ZERO.offset(-i - 1, 0, -i - 1), BlockPos.ZERO.offset(i + 1, 0, i + 1))
-					.map(BlockPos::new)
-					.filter(p -> VecHelper.getCenterOf(p)
-						.distanceTo(VecHelper.getCenterOf(BlockPos.ZERO)) < radius + .42f)
+					.map(BlockPos::immutable)
+					.filter(p -> Vec3.atCenterOf(p)
+						.distanceTo(Vec3.atCenterOf(BlockPos.ZERO)) < radius + .42f)
 					.collect(Collectors.toList());
 			for (int h = 0; h <= MAX_HEIGHT; h++) {
 				List<BlockPos> stackedPositions = new ArrayList<>();
@@ -63,18 +63,18 @@ public class CylinderBrush extends ShapedBrush {
 	}
 
 	@Override
-	int getMax(int paramIndex) {
+	public int getMax(int paramIndex) {
 		return paramIndex == 0 ? MAX_RADIUS : MAX_HEIGHT;
 	}
 
 	@Override
-	int getMin(int paramIndex) {
+	public int getMin(int paramIndex) {
 		return paramIndex == 0 ? 0 : 1;
 	}
 
 	@Override
-	Component getParamLabel(int paramIndex) {
-		return paramIndex == 0 ? CreateLang.translateDirect("generic.radius") : super.getParamLabel(paramIndex);
+	public Component getParamLabel(int paramIndex) {
+		return paramIndex == 0 ? Component.translatable("create."+"generic.radius") : super.getParamLabel(paramIndex);
 	}
 
 	@Override

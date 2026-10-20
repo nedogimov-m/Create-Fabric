@@ -1,0 +1,33 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "bonus_rolls": 0.0,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "create:polished_cut_dripstone_slab",
+          "modifier": [
+            {
+              "add": false,
+              "count": 2.0,
+              "condition": {
+                "type": "minecraft:match_block",
+                "blocks": "create:polished_cut_dripstone_slab",
+                "state": {
+                  "type": "double"
+                }
+              },
+              "type": "minecraft:set_count"
+            },
+            {
+              "type": "minecraft:explosion_decay"
+            }
+          ]
+        }
+      ],
+      "rolls": 1.0
+    }
+  ],
+  "random_sequence": "create:blocks/polished_cut_dripstone_slab"
+}

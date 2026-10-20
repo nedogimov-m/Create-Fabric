@@ -1,134 +1,41 @@
 package com.simibubi.create.content.kinetics.deployer;
 
-import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.item.ItemHelper;
-
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.world.InteractionHand;
+import java.util.*;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.storage.*;
+import net.fabricmc.fabric.api.transfer.v1.transaction.*;
+import net.fabricmc.fabric.api.transfer.v1.transaction.base.SnapshotParticipant;
 import net.minecraft.world.item.ItemStack;
 
-import net.neoforged.neoforge.items.IItemHandlerModifiable;
-
-public class DeployerItemHandler implements IItemHandlerModifiable {
-
-	private DeployerBlockEntity be;
-	private DeployerFakePlayer player;
-
-	public DeployerItemHandler(DeployerBlockEntity be) {
-		this.be = be;
-		this.player = be.player;
-	}
-
-	@Override
-	public int getSlots() {
-		return 1 + be.overflowItems.size();
-	}
-
-	@Override
-	public ItemStack getStackInSlot(int slot) {
-		return slot >= be.overflowItems.size() ? getHeld() : be.overflowItems.get(slot);
-	}
-
-	public ItemStack getHeld() {
-		if (player == null)
-			return ItemStack.EMPTY;
-		return player.getMainHandItem();
-	}
-
-	public void set(ItemStack stack) {
-		if (player == null)
-			return;
-		if (be.getLevel().isClientSide)
-			return;
-		player.setItemInHand(InteractionHand.MAIN_HAND, stack);
-		be.setChanged();
-		be.sendData();
-	}
-
-	@Override
-	public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
-		if (slot < be.overflowItems.size())
-			return stack;
-		if (!isItemValid(slot, stack))
-			return stack;
-
-		ItemStack held = getHeld();
-		if (held.isEmpty()) {
-			ItemStack remainder = ItemHelper.limitCountToMaxStackSize(stack, simulate);
-			if (!simulate)
-				set(stack);
-			return remainder;
-		}
-
-		if (!ItemStack.isSameItemSameComponents(held, stack))
-			return stack;
-
-		int space = held.getMaxStackSize() - held.getCount();
-		ItemStack remainder = stack.copy();
-		ItemStack split = remainder.split(space);
-
-		if (space == 0)
-			return stack;
-		if (!simulate) {
-			held = held.copy();
-			held.setCount(held.getCount() + split.getCount());
-			set(held);
-		}
-
-		return remainder;
-	}
-
-	@Override
-	public ItemStack extractItem(int slot, int amount, boolean simulate) {
-		if (amount == 0)
-			return ItemStack.EMPTY;
-
-		if (slot < be.overflowItems.size()) {
-			ItemStack itemStack = be.overflowItems.get(slot);
-			int toExtract = Math.min(amount, itemStack.getCount());
-			ItemStack extracted = simulate ? itemStack.copy() : itemStack.split(toExtract);
-			extracted.setCount(toExtract);
-			if (!simulate && itemStack.isEmpty())
-				be.overflowItems.remove(slot);
-			if (!simulate && !extracted.isEmpty())
-				be.setChanged();
-			return extracted;
-		}
-
-		ItemStack held = getHeld();
-		if (amount == 0 || held.isEmpty())
-			return ItemStack.EMPTY;
-		if (!be.filtering.getFilter()
-			.isEmpty() && be.filtering.test(held))
-			return ItemStack.EMPTY;
-		if (simulate)
-			return held.copy()
-				.split(amount);
-
-		ItemStack toReturn = held.split(amount);
-		be.setChanged();
-		be.sendData();
-		return toReturn;
-	}
-
-	@Override
-	public int getSlotLimit(int slot) {
-		return getStackInSlot(slot).getOrDefault(DataComponents.MAX_STACK_SIZE, 64);
-	}
-
-	@Override
-	public boolean isItemValid(int slot, ItemStack stack) {
-		FilteringBehaviour filteringBehaviour = be.getBehaviour(FilteringBehaviour.TYPE);
-		return filteringBehaviour == null || filteringBehaviour.test(stack);
-	}
-
-	@Override
-	public void setStackInSlot(int slot, ItemStack stack) {
-		if (slot < be.overflowItems.size()) {
-			be.overflowItems.set(slot, stack);
-			return;
-		}
-		set(stack);
-	}
-
+/** The live hand is insertable; collected inventory is output-only. */
+public final class DeployerItemHandler extends SnapshotParticipant<DeployerItemHandler.Snapshot> implements Storage<ItemVariant> {
+    record Snapshot(ItemStack held,List<ItemStack> tokens,List<Integer> counts){}
+    private final DeployerBlockEntity owner;
+    public DeployerItemHandler(DeployerBlockEntity owner){this.owner=owner;}
+    @Override protected Snapshot createSnapshot(){return new Snapshot(owner.heldItem.copy(),new ArrayList<>(owner.overflowItems),owner.overflowItems.stream().map(ItemStack::getCount).toList());}
+    @Override protected void readSnapshot(Snapshot snapshot){owner.heldItem=snapshot.held;owner.overflowItems.clear();owner.overflowItems.addAll(snapshot.tokens);for(int i=0;i<snapshot.tokens.size();i++)snapshot.tokens.get(i).setCount(snapshot.counts.get(i));}
+    @Override protected void onFinalCommit(){owner.overflowItems.removeIf(ItemStack::isEmpty);owner.inventoryChanged();}
+    @Override public long insert(ItemVariant resource,long amount,TransactionContext tx){
+        StoragePreconditions.notBlankNotNegative(resource,amount);if(!owner.accepts(resource.toStack()))return 0;
+        var held=owner.heldItem;if(!held.isEmpty()&&!resource.matches(held))return 0;long moved=Math.min(amount,resource.toStack().getMaxStackSize()-held.getCount());if(moved<=0)return 0;updateSnapshots(tx);owner.heldItem=resource.toStack((int)(held.getCount()+moved));return moved;
+    }
+    @Override public long extract(ItemVariant resource,long amount,TransactionContext tx){
+        StoragePreconditions.notBlankNotNegative(resource,amount);long moved=0;
+        for(var output:owner.overflowItems){long taken=extractOutput(output,resource,amount-moved,tx);moved+=taken;if(moved==amount)return moved;}
+        return moved+extractHeld(resource,amount-moved,tx);
+    }
+    private long extractOutput(ItemStack token,ItemVariant resource,long amount,TransactionContext tx){if(amount==0||!owner.overflowItems.contains(token)||!resource.matches(token))return 0;long moved=Math.min(amount,token.getCount());if(moved>0){updateSnapshots(tx);token.shrink((int)moved);}return moved;}
+    private long extractHeld(ItemVariant resource,long amount,TransactionContext tx){if(amount==0||!resource.matches(owner.heldItem)||!owner.filter.isEmpty()&&owner.accepts(owner.heldItem))return 0;long moved=Math.min(amount,owner.heldItem.getCount());if(moved>0){updateSnapshots(tx);owner.heldItem=owner.heldItem.copyWithCount(owner.heldItem.getCount()-(int)moved);}return moved;}
+    public void consumeOne(TransactionContext tx){updateSnapshots(tx);var item=owner.heldItem.getItem();owner.heldItem=owner.heldItem.copyWithCount(owner.heldItem.getCount()-1);var remainder=item.getCraftingRemainder();if(remainder!=null){if(owner.heldItem.isEmpty())owner.heldItem=remainder.create();else owner.overflowItems.add(remainder.create());}}
+    @Override public Iterator<StorageView<ItemVariant>> iterator(){
+        var views=new ArrayList<StorageView<ItemVariant>>();for(var token:owner.overflowItems)views.add(view(token));views.add(view(null));return views.iterator();
+    }
+    private StorageView<ItemVariant> view(ItemStack token){return new StorageView<>(){
+        private ItemStack stack(){return token==null?owner.heldItem:owner.overflowItems.contains(token)?token:ItemStack.EMPTY;}
+        @Override public long extract(ItemVariant resource,long amount,TransactionContext tx){StoragePreconditions.notBlankNotNegative(resource,amount);return token==null?extractHeld(resource,amount,tx):extractOutput(token,resource,amount,tx);}
+        @Override public boolean isResourceBlank(){return stack().isEmpty();}
+        @Override public ItemVariant getResource(){return ItemVariant.of(stack());}
+        @Override public long getAmount(){return stack().getCount();}
+        @Override public long getCapacity(){return stack().getMaxStackSize();}
+    };}
 }

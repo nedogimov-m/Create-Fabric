@@ -1,64 +1,84 @@
+// Create1.21.1 callback queue semantics, MIT; genuine native Registry/Fabric publication.
 package com.simibubi.create.impl.registrate;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
-import com.mojang.datafixers.util.Either;
-import com.simibubi.create.foundation.data.CreateRegistrate;
-import com.tterrag.registrate.util.nullness.NonNullConsumer;
-
+import java.util.Objects;
+import java.util.function.Consumer;
+import net.fabricmc.fabric.api.event.registry.RegistryEntryAddedCallback;
+import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 
-public class CreateRegistrateRegistrationCallbackImpl {
-	// Intentionally not a synchronized map, since all safe accesses have to be synchronized anyway.
-	private static final Map<String, Either<List<CallbackImpl<?, ?>>, CreateRegistrate>> CALLBACKS = new HashMap<>();
+public final class CreateRegistrateRegistrationCallbackImpl {
+    private static final Map<ResourceKey<?>, Slot<?>> SLOTS = new HashMap<>();
+    private static final class Slot<R> {
+        Registry<R> registry;
+        final Map<Identifier, R> published = new HashMap<>();
+        final Map<Identifier, List<Consumer<? super R>>> waiting = new LinkedHashMap<>();
+    }
+    static {
+        RegistryEntryAddedCallback.event(BuiltInRegistries.REGISTRY).register((rawId, id, registry) -> {
+            boolean interested;
+            synchronized (SLOTS) { interested = SLOTS.containsKey(registry.key()); }
+            if (interested) provideRegistry(registry);
+        });
+    }
+    @SuppressWarnings("unchecked")
+    private static <R> Slot<R> slot(ResourceKey<?> key) { return (Slot<R>) SLOTS.computeIfAbsent(key, ignored -> new Slot<>()); }
 
-	public static void provideRegistrate(CreateRegistrate registrate) {
-		synchronized (CALLBACKS) {
-			String modid = registrate.getModid();
-
-			var either = CALLBACKS.remove(modid);
-			if (either != null) {
-				var optionalCallbacks = either.left();
-				if (optionalCallbacks.isEmpty()) { // in other words, either.right().isPresent()
-					throw new IllegalArgumentException("Tried to register a duplicate CreateRegistrate instance for mod ID: " + modid);
-				}
-
-				for (CallbackImpl<?, ?> callback : optionalCallbacks.get()) {
-					callback.addToRegistrate(registrate);
-				}
-			}
-
-			CALLBACKS.put(modid, Either.right(registrate));
-		}
-	}
-
-	public static <R, T extends R> void register(ResourceKey<? extends Registry<R>> registry, ResourceLocation id, NonNullConsumer<? super T> callback) {
-		CallbackImpl<R, T> callbackImpl = new CallbackImpl<>(registry, id, callback);
-
-		Either<List<CallbackImpl<?, ?>>, CreateRegistrate> either;
-		synchronized (CALLBACKS) {
-			either = CALLBACKS.computeIfAbsent(id.getNamespace(),
-				k -> Either.left(new ArrayList<>()));
-			// must be synchronized here, because if `registerRegistrate` were called between these two calls,
-			// we would be adding to a list that would never be used
-			either.ifLeft(callbacks -> callbacks.add(callbackImpl));
-		}
-
-		// This is safe to call outside the synchronized block, because a registrate will only ever be added once.
-		either.ifRight(callbackImpl::addToRegistrate);
-	}
-
-	private record CallbackImpl<R, T extends R>(ResourceKey<? extends Registry<R>> registry, ResourceLocation id, NonNullConsumer<? super T> callback) {
-		// Helper method so javac doesn't explode on the generic types.
-		// Otherwise, IntelliJ does type inference better than javac,
-		// and everything becomes illegible with generic erasure casts.
-		public void addToRegistrate(CreateRegistrate registrate) {
-			registrate.<R, T>addRegisterCallback(id.getPath(), registry, callback);
-		}
-	}
+    @SuppressWarnings("unchecked")
+    public static <R, T extends R> void register(ResourceKey<? extends Registry<R>> registryKey, Identifier id, Consumer<? super T> callback) {
+        Objects.requireNonNull(registryKey, "registryKey"); Objects.requireNonNull(id, "id"); Objects.requireNonNull(callback, "callback");
+        Consumer<R> typed = value -> callback.accept((T) value);
+        R immediate;
+        Registry<R> toBind = null;
+        synchronized (SLOTS) {
+            Slot<R> slot = slot(registryKey);
+            immediate = slot.published.get(id);
+            if (immediate == null) slot.waiting.computeIfAbsent(id, ignored -> new ArrayList<>()).add(typed);
+            if (slot.registry == null) {
+                var nativeRegistry = BuiltInRegistries.REGISTRY.getValue(registryKey.identifier());
+                if (nativeRegistry != null) toBind = (Registry<R>) nativeRegistry;
+            }
+        }
+        if (toBind != null) provideRegistry(toBind);
+        if (immediate != null) typed.accept(immediate);
+    }
+    public static <R, T extends R> void register(Registry<R> registry, Identifier id, Consumer<? super T> callback) {
+        provideRegistry(Objects.requireNonNull(registry, "registry"));
+        CreateRegistrateRegistrationCallbackImpl.<R, T>register(registry.key(), id, callback);
+    }
+    public static <R> void provideRegistry(Registry<R> registry) {
+        Objects.requireNonNull(registry, "registry");
+        Slot<R> slot;
+        synchronized (SLOTS) {
+            slot = slot(registry.key());
+            if (slot.registry == registry) return;
+            if (slot.registry != null) throw new IllegalArgumentException("Different native registry already bound for key: " + registry.key().identifier());
+            slot.registry = registry;
+        }
+        // Native API installs its real entry event before replaying real existing Holder.Reference values.
+        // An entry seen both during that transition and in the replay is deduplicated by actual identity.
+        RegistryEntryAddedCallback.allEntries(registry, holder -> published(slot, holder));
+    }
+    private static <R> void published(Slot<R> slot, Holder.Reference<R> holder) {
+        Identifier id = holder.key().identifier(); R value = holder.value();
+        List<Consumer<? super R>> callbacks;
+        synchronized (SLOTS) {
+            R prior = slot.published.putIfAbsent(id, value);
+            if (prior != null) {
+                if (prior != value) throw new IllegalStateException("Native registry entry identity changed after publication: " + holder.key());
+                return;
+            }
+            var pending = slot.waiting.remove(id); callbacks = pending == null ? List.of() : List.copyOf(pending);
+        }
+        for (var callback : callbacks) callback.accept(value);
+    }
+    private CreateRegistrateRegistrationCallbackImpl() {}
 }

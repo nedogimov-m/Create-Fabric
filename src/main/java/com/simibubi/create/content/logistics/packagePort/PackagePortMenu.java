@@ -1,202 +1,56 @@
 package com.simibubi.create.content.logistics.packagePort;
-
-import com.simibubi.create.AllMenuTypes;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.animatedContainer.AnimatedContainerBehaviour;
-import com.simibubi.create.foundation.gui.menu.MenuBase;
-import com.simibubi.create.foundation.item.SmartInventory;
-
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
+import com.simibubi.create.*;
+import com.simibubi.create.content.logistics.packagePort.frogport.FrogportBlockEntity;
+import com.simibubi.create.content.logistics.box.PackageItem;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.fabricmc.fabric.api.menu.v1.*;
+import net.fabricmc.fabric.api.networking.v1.*;
+import net.minecraft.core.*;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.inventory.MenuType;
-import net.minecraft.world.inventory.Slot;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.codec.*;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.*;
+import net.minecraft.world.inventory.*;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.entity.BlockEntity;
-
-import net.neoforged.neoforge.items.SlotItemHandler;
-
-public class PackagePortMenu extends MenuBase<PackagePortBlockEntity> {
-
-	public PackagePortMenu(MenuType<?> type, int id, Inventory inv, RegistryFriendlyByteBuf extraData) {
-		super(type, id, inv, extraData);
-	}
-
-	public PackagePortMenu(MenuType<?> type, int id, Inventory inv, PackagePortBlockEntity be) {
-		super(type, id, inv, be);
-		BlockEntityBehaviour.get(be, AnimatedContainerBehaviour.TYPE)
-			.startOpen(player);
-	}
-
-	public static PackagePortMenu create(int id, Inventory inv, PackagePortBlockEntity be) {
-		return new PackagePortMenu(AllMenuTypes.PACKAGE_PORT.get(), id, inv, be);
-	}
-
-	@Override
-	protected PackagePortBlockEntity createOnClient(RegistryFriendlyByteBuf extraData) {
-		BlockPos readBlockPos = extraData.readBlockPos();
-		ClientLevel world = Minecraft.getInstance().level;
-		BlockEntity blockEntity = world.getBlockEntity(readBlockPos);
-		if (blockEntity instanceof PackagePortBlockEntity ppbe)
-			return ppbe;
-		return null;
-	}
-
-	@Override
-	public ItemStack quickMoveStack(Player player, int index) {
-		// based on the impl from chests.
-		Slot slot = this.slots.get(index);
-		if (!slot.hasItem()) {
-			return ItemStack.EMPTY;
-		}
-
-		// we need to copy the stack here since it may be modified by moveItemStackTo, but the
-		// stack may be taken directly from a SlotItemHandler, which just defers to an IItemHandler.
-		// modifying the original stack would violate the class's contract and cause problems.
-		ItemStack stack = slot.getItem().copy();
-		// we return the stack that was moved out of the slot, so make a copy of that now too.
-		ItemStack moved = stack.copy();
-
-		int size = contentHolder.inventory.getSlots();
-		if (index < size) {
-			// move into player inventory
-			if (!this.moveItemStackTo(stack, size, this.slots.size(), true)) {
-				return ItemStack.EMPTY;
-			}
-		} else {
-			// move into port inventory
-			if (!this.moveItemStackTo(stack, 0, size, false)) {
-				return ItemStack.EMPTY;
-			}
-		}
-
-		if (stack.isEmpty()) {
-			slot.setByPlayer(ItemStack.EMPTY);
-		} else {
-			// setByPlayer instead of just setChanged, since we made a copy
-			// setByPlayer instead of set because, I don't know, that's what the other branch does
-			slot.setByPlayer(stack.copy());
-		}
-
-		return moved;
-	}
-
-	@Override
-	protected void initAndReadInventory(PackagePortBlockEntity contentHolder) {}
-
-	@Override
-	protected void addSlots() {
-		SmartInventory inventory = contentHolder.inventory;
-		int x = 27;
-		int y = 9;
-
-		for (int row = 0; row < 2; row++)
-			for (int col = 0; col < 9; col++)
-				addSlot(new SlotItemHandler(inventory, row * 9 + col, x + col * 18, y + row * 18));
-
-		addPlayerSlots(38, 108);
-	}
-
-	@Override
-	protected void saveData(PackagePortBlockEntity contentHolder) {}
-
-	@Override
-	public void removed(Player playerIn) {
-		super.removed(playerIn);
-		if (!playerIn.level().isClientSide)
-			BlockEntityBehaviour.get(contentHolder, AnimatedContainerBehaviour.TYPE)
-				.stopOpen(playerIn);
-	}
-
-	@Override
-	protected boolean moveItemStackTo(ItemStack stack, int startIndex, int endIndex, boolean reverseDirection) {
-		// unfortunately, we kinda need to copy this entire method to make two tiny changes. I'm surprised
-		// there's no forge patch for this considering it violates the contract of IItemHandler.getStackInSlot.
-
-		boolean success = false;
-		int i = startIndex;
-		if (reverseDirection) {
-			i = endIndex - 1;
-		}
-
-		if (stack.isStackable()) {
-			while (!stack.isEmpty()) {
-				if (reverseDirection) {
-					if (i < startIndex) {
-						break;
-					}
-				} else if (i >= endIndex) {
-					break;
-				}
-
-				Slot slot = this.slots.get(i);
-				ItemStack stackInSlot = slot.getItem();
-				if (!stackInSlot.isEmpty() && ItemStack.isSameItemSameComponents(stack, stackInSlot)) {
-					int totalCount = stackInSlot.getCount() + stack.getCount();
-					// note: forge patches this variable in, vanilla just uses stack.getMaxStackSize 4 times
-					int maxSize = Math.min(slot.getMaxStackSize(), stack.getMaxStackSize());
-					if (totalCount <= maxSize) {
-						stack.setCount(0);
-						// change #1: set a new stack instead of modifying it directly
-						slot.setByPlayer(stackInSlot.copyWithCount(totalCount));
-						success = true;
-					} else if (stackInSlot.getCount() < maxSize) {
-						stack.shrink(maxSize - stackInSlot.getCount());
-						// change #2: set a new stack instead of modifying it directly
-						slot.setByPlayer(stackInSlot.copyWithCount(maxSize));
-						success = true;
-					}
-				}
-
-				if (reverseDirection) {
-					--i;
-				} else {
-					++i;
-				}
-			}
-		}
-
-		if (!stack.isEmpty()) {
-			if (reverseDirection) {
-				i = endIndex - 1;
-			} else {
-				i = startIndex;
-			}
-
-			while (true) {
-				if (reverseDirection) {
-					if (i < startIndex) {
-						break;
-					}
-				} else if (i >= endIndex) {
-					break;
-				}
-
-				Slot slot = this.slots.get(i);
-				ItemStack stackInSlot = slot.getItem();
-				if (stackInSlot.isEmpty() && slot.mayPlace(stack)) {
-					if (stack.getCount() > slot.getMaxStackSize()) {
-						slot.setByPlayer(stack.split(slot.getMaxStackSize()));
-					} else {
-						slot.setByPlayer(stack.split(stack.getCount()));
-					}
-
-					slot.setChanged();
-					success = true;
-					break;
-				}
-
-				if (reverseDirection) {
-					--i;
-				} else {
-					++i;
-				}
-			}
-		}
-
-		return success;
-	}
+public final class PackagePortMenu extends AbstractContainerMenu {
+    public record Opening(BlockPos pos,net.minecraft.world.level.block.state.BlockState block,CompoundTag state){
+        public Opening(BlockPos pos,CompoundTag state){this(pos,AllBlocks.PACKAGE_FROGPORT.defaultBlockState(),state);}
+        public static final StreamCodec<RegistryFriendlyByteBuf,Opening> CODEC=StreamCodec.of((buf,value)->{buf.writeBlockPos(value.pos);buf.writeVarInt(net.minecraft.world.level.block.Block.getId(value.block));buf.writeNbt(value.state);},buf->new Opening(buf.readBlockPos(),net.minecraft.world.level.block.Block.stateById(buf.readVarInt()),buf.readNbt()));
+    }
+    public record Settings(int menu,String address,boolean accepts) implements CustomPacketPayload{
+        public static final Type<Settings> TYPE=new Type<>(Create.asResource("package_port_settings"));
+        public static final StreamCodec<RegistryFriendlyByteBuf,Settings> CODEC=StreamCodec.composite(ByteBufCodecs.VAR_INT,Settings::menu,ByteBufCodecs.stringUtf8(25),Settings::address,ByteBufCodecs.BOOL,Settings::accepts,Settings::new);
+        @Override public Type<Settings> type(){return TYPE;}
+    }
+    public static final ExtendedMenuType<PackagePortMenu,Opening> TYPE=Registry.register(BuiltInRegistries.MENU,Create.asResource("package_port"),new ExtendedMenuType<>(PackagePortMenu::new,Opening.CODEC));
+    public final PackagePortBlockEntity owner;
+    private final Inventory playerInventory;
+    public PackagePortMenu(int id,Inventory inventory,Opening opening){
+        super(TYPE,id);playerInventory=inventory;
+        if(inventory.player.level().isClientSide()){
+            var actual=opening.block.getBlock() instanceof net.minecraft.world.level.block.EntityBlock block?block.newBlockEntity(opening.pos,opening.block):null;
+            if(!(actual instanceof PackagePortBlockEntity port))throw new IllegalArgumentException("Native package-port menu has no actual matching block entity factory");
+            owner=port;owner.setLevel(inventory.player.level());owner.loadWithComponents(net.minecraft.world.level.storage.TagValueInput.create(net.minecraft.util.ProblemReporter.DISCARDING,inventory.player.registryAccess(),opening.state));
+        }else{
+            var actual=LoadedLevelAccess.blockEntity(inventory.player.level(),opening.pos);
+            if(!(actual instanceof PackagePortBlockEntity port)||port.getBlockState()!=opening.block)throw new IllegalArgumentException("Actual package-port menu owner changed");owner=port;
+        }
+        for(int i=0;i<18;i++)addSlot(new Slot(owner.inventory,i,27+i%9*18,9+i/9*18){@Override public boolean mayPlace(ItemStack item){return PackageItem.isPackage(item);}@Override public int getMaxStackSize(){return 1;}});
+        addStandardInventorySlots(inventory,38,108);if(!inventory.player.level().isClientSide())owner.startOpen();
+    }
+    public static void open(Player player,PackagePortBlockEntity owner){if(player instanceof ServerPlayer server)server.openMenu(new ExtendedMenuProvider<Opening>(){
+        @Override public Component getDisplayName(){return owner.getBlockState().getBlock().getName();}
+        @Override public Opening getScreenOpeningData(ServerPlayer ignored){return new Opening(owner.getBlockPos(),owner.getBlockState(),owner.getUpdateTag(server.registryAccess()));}
+        @Override public AbstractContainerMenu createMenu(int id,Inventory inventory,Player ignored){return new PackagePortMenu(id,inventory,getScreenOpeningData(server));}
+    });}
+    @Override public boolean stillValid(Player player){return player.getInventory()==playerInventory&&!owner.isRemoved()&&!player.isSpectator()&&player.mayBuild()&&player.isWithinBlockInteractionRange(owner.getBlockPos(),1)&&player.level().mayInteract(player,owner.getBlockPos())&&(player.level().isClientSide()||LoadedLevelAccess.blockEntity(player.level(),owner.getBlockPos())==owner);}
+    public boolean apply(Player player,Settings settings){if(player.level().isClientSide()||!stillValid(player)||settings.address.length()>25)return false;if(owner.target!=null)owner.target.deregister(owner);owner.addressFilter=settings.address;owner.acceptsPackages=settings.accepts;owner.filterChanged();return true;}
+    @Override public void clicked(int index,int button,ContainerInput input,Player player){if(!player.level().isClientSide()&&!stillValid(player))return;super.clicked(index,button,input,player);}
+    @Override public ItemStack quickMoveStack(Player player,int index){if(index<0||index>=slots.size()||!stillValid(player))return ItemStack.EMPTY;var slot=slots.get(index);if(!slot.hasItem())return ItemStack.EMPTY;var item=slot.getItem().copy();var original=item.copy();if(index<18?!moveItemStackTo(item,18,slots.size(),true):!moveItemStackTo(item,0,18,false))return ItemStack.EMPTY;slot.setByPlayer(item);return original;}
+    @Override public void removed(Player player){super.removed(player);if(!player.level().isClientSide())owner.stopOpen();}
+    public static void register(){PayloadTypeRegistry.serverboundPlay().register(Settings.TYPE,Settings.CODEC);ServerPlayNetworking.registerGlobalReceiver(Settings.TYPE,(packet,context)->{if(context.player().containerMenu instanceof PackagePortMenu menu&&menu.containerId==packet.menu)menu.apply(context.player(),packet);});}
 }

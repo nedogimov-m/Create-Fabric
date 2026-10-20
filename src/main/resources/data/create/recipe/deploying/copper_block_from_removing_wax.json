@@ -1,0 +1,13 @@
+{
+  "type": "create:deploying",
+  "ingredients": [
+    "minecraft:waxed_copper_block",
+    "#minecraft:axes"
+  ],
+  "keep_held_item": true,
+  "results": [
+    {
+      "id": "minecraft:copper_block"
+    }
+  ]
+}

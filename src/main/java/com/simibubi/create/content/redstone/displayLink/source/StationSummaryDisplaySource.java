@@ -15,9 +15,9 @@ import com.simibubi.create.content.trains.display.FlapDisplaySection;
 import com.simibubi.create.content.trains.display.GlobalTrainDisplayData;
 import com.simibubi.create.content.trains.station.GlobalStation;
 import com.simibubi.create.content.trains.station.StationBlockEntity;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.gui.ModularGuiLineBuilder;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.redstone.displayLink.DisplayLinkAdvancements;
+import com.simibubi.create.content.redstone.displayLink.DisplaySourceConfiguration;
+import com.simibubi.create.content.trains.schedule.ScheduleText;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
@@ -25,8 +25,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.Mth;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 public class StationSummaryDisplaySource extends DisplaySource {
 
@@ -55,12 +53,13 @@ public class StationSummaryDisplaySource extends DisplaySource {
 
 	@Override
 	public List<List<MutableComponent>> provideFlapDisplayText(DisplayLinkContext context, DisplayTargetStats stats) {
+        if (context.level().getServer() == null) return List.of();
 		String filter = context.sourceConfig()
-			.getString("Filter");
+			.getStringOr("Filter", "");
 		boolean hasPlatform = filter.contains("*");
 
 		List<List<MutableComponent>> list = new ArrayList<>();
-		GlobalTrainDisplayData.prepare(filter, stats.maxRows())
+		GlobalTrainDisplayData.get(context.level().getServer()).prepare(context.level().getServer(), filter, stats.maxRows())
 			.forEach(prediction -> {
 				List<MutableComponent> lines = new ArrayList<>();
 
@@ -70,7 +69,7 @@ public class StationSummaryDisplaySource extends DisplaySource {
 
 				} else if (prediction.ticks < 200) {
 					lines.add(WHITESPACE);
-					lines.add(CreateLang.translateDirect("display_source.station_summary.now"));
+					lines.add(ScheduleText.translate("display_source.station_summary.now"));
 
 				} else {
 					int min = prediction.ticks / 1200;
@@ -81,8 +80,8 @@ public class StationSummaryDisplaySource extends DisplaySource {
 						sec = 0;
 					}
 					lines.add(min > 0 ? Component.literal(String.valueOf(min)) : WHITESPACE);
-					lines.add(min > 0 ? CreateLang.translateDirect("display_source.station_summary.minutes")
-						: CreateLang.translateDirect("display_source.station_summary.seconds", sec));
+					lines.add(min > 0 ? ScheduleText.translate("display_source.station_summary.minutes")
+						: ScheduleText.translate("display_source.station_summary.seconds", sec));
 				}
 
 				lines.add(prediction.train.name.copy());
@@ -104,8 +103,7 @@ public class StationSummaryDisplaySource extends DisplaySource {
 			});
 
 		if (list.size() > 0)
-			context.blockEntity()
-				.award(AllAdvancements.DISPLAY_BOARD);
+			DisplayLinkAdvancements.award(context.blockEntity(), DisplayLinkAdvancements.Award.DISPLAY_BOARD);
 
 		int toPad = stats.maxRows() - list.size();
 		for (int padding = 0; padding < toPad; padding++)
@@ -118,9 +116,9 @@ public class StationSummaryDisplaySource extends DisplaySource {
 	public void loadFlapDisplayLayout(DisplayLinkContext context, FlapDisplayBlockEntity flapDisplay,
 		FlapDisplayLayout layout) {
 		CompoundTag conf = context.sourceConfig();
-		int columnWidth = conf.getInt("NameColumn");
-		int columnWidth2 = conf.getInt("PlatformColumn");
-		boolean hasPlatform = conf.getString("Filter")
+		int columnWidth = conf.getIntOr("NameColumn", 50);
+		int columnWidth2 = conf.getIntOr("PlatformColumn", 3);
+		boolean hasPlatform = conf.getStringOr("Filter", "")
 			.contains("*");
 
 		String layoutName = "StationSummary" + columnWidth + hasPlatform + columnWidth2;
@@ -190,39 +188,15 @@ public class StationSummaryDisplaySource extends DisplaySource {
 		GlobalStation station = stationBe.getStation();
 		if (station == null)
 			return;
-		conf.putString("Filter", station.name);
+		conf.putString("Filter", station.name());
 	}
 
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void initConfigurationWidgets(DisplayLinkContext context, ModularGuiLineBuilder builder,
-		boolean isFirstLine) {
-		if (isFirstLine) {
-			builder.addTextInput(0, 137, (e, t) -> {
-				e.setValue("");
-				t.withTooltip(ImmutableList.of(CreateLang.translateDirect("display_source.station_summary.filter")
-					.withStyle(s -> s.withColor(0x5391E1)),
-					CreateLang.translateDirect("gui.schedule.lmb_edit")
-						.withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC)));
-			}, "Filter");
-			return;
-		}
-
-		builder.addScrollInput(0, 32, (si, l) -> {
-			si.titled(CreateLang.translateDirect("display_source.station_summary.train_name_column"))
-				.withRange(0, 73)
-				.withShiftStep(12);
-			si.setState(50);
-			l.withSuffix("%");
-		}, "NameColumn");
-
-		builder.addScrollInput(36, 22, (si, l) -> {
-			si.titled(CreateLang.translateDirect("display_source.station_summary.platform_column"))
-				.withRange(0, 16)
-				.withShiftStep(4);
-			si.setState(3);
-		}, "PlatformColumn");
-
-	}
-
+    @Override
+    public List<DisplaySourceConfiguration> configuration(DisplayLinkContext context) {
+        return List.of(DisplaySourceConfiguration.text("Filter", 256),
+                DisplaySourceConfiguration.integer("NameColumn", 0, 73, 50, 12, 1, 0, 32,
+                        "create.display_source.station_summary.train_name_column", "%"),
+                DisplaySourceConfiguration.integer("PlatformColumn", 0, 16, 3, 4, 1, 36, 22,
+                        "create.display_source.station_summary.platform_column", ""));
+    }
 }

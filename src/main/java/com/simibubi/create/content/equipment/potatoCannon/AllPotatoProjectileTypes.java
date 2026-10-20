@@ -100,7 +100,7 @@ public class AllPotatoProjectileTypes {
 			.renderTumbling()
 			.splitInto(3)
 			.soundPitch(1.25f)
-			.addItems(AllItems.CHOCOLATE_BERRIES.get())
+			.addItems(AllItems.CHOCOLATE_BERRIES)
 			.build());
 
 		register(ctx, "poison_potato", new PotatoCannonProjectileType.Builder()
@@ -140,8 +140,8 @@ public class AllPotatoProjectileTypes {
 			.knockback(0.1f)
 			.renderTumbling()
 			.soundPitch(1.1f)
-			.onEntityHit(new PotionEffect(MobEffects.MOVEMENT_SLOWDOWN, 2, 160, true))
-			.addItems(AllItems.HONEYED_APPLE.get())
+			.onEntityHit(new PotionEffect(MobEffects.SLOWNESS, 2, 160, true))
+			.addItems(AllItems.HONEYED_APPLE)
 			.build());
 
 		register(ctx, "golden_apple", new PotatoCannonProjectileType.Builder()
@@ -248,7 +248,7 @@ public class AllPotatoProjectileTypes {
 			.renderTumbling()
 			.sticky()
 			.preEntityHit(SetOnFire.seconds(12))
-			.addItems(AllItems.BLAZE_CAKE.get())
+			.addItems(AllItems.BLAZE_CAKE)
 			.build());
 
 		register(ctx, "fish", new PotatoCannonProjectileType.Builder()

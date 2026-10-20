@@ -1,0 +1,20 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "#c:gems/certus_quartz"
+  ],
+  "processing_time": 200,
+  "results": [
+    {
+      "id": "ae2:certus_quartz_dust"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "ae2"
+      ]
+    }
+  ]
+}

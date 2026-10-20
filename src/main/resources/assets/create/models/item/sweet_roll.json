@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/sweet_roll",
+    "particle": "create:item/sweet_roll"
+  }
+}

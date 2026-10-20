@@ -18,7 +18,7 @@ public class KineticScrollValueBehaviour extends ScrollValueBehaviour {
 
 	public KineticScrollValueBehaviour(Component label, SmartBlockEntity be, ValueBoxTransform slot) {
 		super(label, be, slot);
-		withFormatter(v -> String.valueOf(Math.abs(v)));
+		withFormatter(v -> String.valueOf(Math.abs((long)v)));
 	}
 
 	@Override
@@ -28,7 +28,7 @@ public class KineticScrollValueBehaviour extends ScrollValueBehaviour {
 			Component.literal("\u27f2")
 				.withStyle(ChatFormatting.BOLD));
 		ValueSettingsFormatter formatter = new ValueSettingsFormatter(this::formatSettings);
-		return new ValueSettingsBoard(label, 256, 32, rows, formatter);
+		return new ValueSettingsBoard(label, Math.max(1,maximum()), 32, rows, formatter);
 	}
 
 	@Override
@@ -41,11 +41,11 @@ public class KineticScrollValueBehaviour extends ScrollValueBehaviour {
 
 	@Override
 	public ValueSettings getValueSettings() {
-		return new ValueSettings(value < 0 ? 0 : 1, Math.abs(value));
+		return new ValueSettings(value < 0 ? 0 : 1, (int)Math.min(Integer.MAX_VALUE, Math.abs((long)value)));
 	}
 
 	public MutableComponent formatSettings(ValueSettings settings) {
-		return CreateLang.number(Math.max(1, Math.abs(settings.value())))
+		return CreateLang.number(Math.max(1L, Math.abs((long)settings.value())))
 			.add(CreateLang.text(settings.row() == 0 ? "\u27f3" : "\u27f2")
 				.style(ChatFormatting.BOLD))
 			.component();

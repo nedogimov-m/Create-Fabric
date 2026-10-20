@@ -16,25 +16,25 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.Holder.Reference;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.core.RegistryCodecs;
+import net.minecraft.core.registries.codec.RegistryCodecs;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
 import net.minecraft.world.level.ItemLike;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 
-// TODO: 1.21.1+ - Move into api package
 public record PotatoCannonProjectileType(HolderSet<Item> items, int reloadTicks, int damage, int split, float knockback,
 										 float drag, float velocityMultiplier, float gravityMultiplier,
-										 float soundPitch, boolean sticky, ItemStack dropStack,
+										 float soundPitch, boolean sticky, Optional<ItemStackTemplate> dropTemplate,
 										 PotatoProjectileRenderMode renderMode,
 										 Optional<PotatoProjectileEntityHitAction> preEntityHit,
 										 Optional<PotatoProjectileEntityHitAction> onEntityHit,
 										 Optional<PotatoProjectileBlockHitAction> onBlockHit) {
 	public static final Codec<PotatoCannonProjectileType> CODEC = RecordCodecBuilder.create(i -> i.group(
-		RegistryCodecs.homogeneousList(Registries.ITEM).fieldOf("items").forGetter(PotatoCannonProjectileType::items),
+		RegistryCodecs.holderSet(Registries.ITEM).fieldOf("items").forGetter(PotatoCannonProjectileType::items),
 		Codec.INT.optionalFieldOf("reload_ticks", 10).forGetter(PotatoCannonProjectileType::reloadTicks),
 		Codec.INT.optionalFieldOf("damage", 1).forGetter(PotatoCannonProjectileType::damage),
 		Codec.INT.optionalFieldOf("split", 1).forGetter(PotatoCannonProjectileType::split),
@@ -44,12 +44,24 @@ public record PotatoCannonProjectileType(HolderSet<Item> items, int reloadTicks,
 		Codec.FLOAT.optionalFieldOf("gravity_multiplier", 1f).forGetter(PotatoCannonProjectileType::gravityMultiplier),
 		Codec.FLOAT.optionalFieldOf("sound_pitch", 1f).forGetter(PotatoCannonProjectileType::soundPitch),
 		Codec.BOOL.optionalFieldOf("sticky", false).forGetter(PotatoCannonProjectileType::sticky),
-		ItemStack.CODEC.optionalFieldOf("drop_stack", ItemStack.EMPTY).forGetter(PotatoCannonProjectileType::dropStack),
+		ItemStackTemplate.CODEC.optionalFieldOf("drop_stack").forGetter(PotatoCannonProjectileType::dropTemplate),
 		PotatoProjectileRenderMode.CODEC.optionalFieldOf("render_mode", Billboard.INSTANCE).forGetter(PotatoCannonProjectileType::renderMode),
 		PotatoProjectileEntityHitAction.CODEC.optionalFieldOf("pre_entity_hit").forGetter(p -> p.preEntityHit),
 		PotatoProjectileEntityHitAction.CODEC.optionalFieldOf("on_entity_hit").forGetter(p -> p.onEntityHit),
 		PotatoProjectileBlockHitAction.CODEC.optionalFieldOf("on_block_hit").forGetter(p -> p.onBlockHit)
 	).apply(i, PotatoCannonProjectileType::new));
+
+    /** Preserve the source constructor while storing native pre-binding item data. */
+    public PotatoCannonProjectileType(HolderSet<Item> items, int reloadTicks, int damage, int split, float knockback,
+            float drag, float velocityMultiplier, float gravityMultiplier, float soundPitch, boolean sticky,
+            ItemStack dropStack, PotatoProjectileRenderMode renderMode,
+            Optional<PotatoProjectileEntityHitAction> preEntityHit,
+            Optional<PotatoProjectileEntityHitAction> onEntityHit,
+            Optional<PotatoProjectileBlockHitAction> onBlockHit) {
+        this(items, reloadTicks, damage, split, knockback, drag, velocityMultiplier, gravityMultiplier,
+            soundPitch, sticky, dropStack.isEmpty() ? Optional.empty() : Optional.of(ItemStackTemplate.fromNonEmptyStack(dropStack)),
+            renderMode, preEntityHit, onEntityHit, onBlockHit);
+    }
 
 	public static Optional<Reference<PotatoCannonProjectileType>> getTypeForItem(RegistryAccess registryAccess, Item item) {
 		// Cache this if it causes performance issues, but it probably won't
@@ -71,10 +83,9 @@ public record PotatoCannonProjectileType(HolderSet<Item> items, int reloadTicks,
 		return onBlockHit.map(i -> i.execute(level, stack, ray)).orElse(false);
 	}
 
-	// Copy the stack so it's not mutated and lost
-	@Override
+	// Materialize fresh runtime stacks only after native item components are bound.
 	public ItemStack dropStack() {
-		return dropStack.copy();
+		return dropTemplate.map(ItemStackTemplate::create).orElse(ItemStack.EMPTY);
 	}
 
 	public static class Builder {

@@ -1,59 +1,41 @@
 package com.simibubi.create.content.logistics.vault;
 
-import org.jetbrains.annotations.Nullable;
-
 import com.mojang.serialization.MapCodec;
 import com.simibubi.create.AllMountedStorageTypes;
-import com.simibubi.create.api.contraption.storage.item.MountedItemStorageType;
-import com.simibubi.create.api.contraption.storage.item.WrapperMountedItemStorage;
-import com.simibubi.create.content.contraptions.Contraption;
-import com.simibubi.create.foundation.codec.CreateCodecs;
-
+import com.simibubi.create.api.contraption.storage.item.simple.SimpleMountedStorage;
+import com.simibubi.create.foundation.item.MountedItemInventory;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
+import org.jspecify.annotations.Nullable;
 
-import net.neoforged.neoforge.items.ItemStackHandler;
-
-public class ItemVaultMountedStorage extends WrapperMountedItemStorage<ItemStackHandler> {
-	public static final MapCodec<ItemVaultMountedStorage> CODEC = CreateCodecs.ITEM_STACK_HANDLER.xmap(
-		ItemVaultMountedStorage::new, storage -> storage.wrapped
-	).fieldOf("value");
-
-	protected ItemVaultMountedStorage(MountedItemStorageType<?> type, ItemStackHandler handler) {
-		super(type, handler);
-	}
-
-	protected ItemVaultMountedStorage(ItemStackHandler handler) {
-		this(AllMountedStorageTypes.VAULT.get(), handler);
-	}
-
-	@Override
-	public void unmount(Level level, BlockState state, BlockPos pos, @Nullable BlockEntity be) {
-		if (be instanceof ItemVaultBlockEntity vault) {
-			vault.applyInventoryToBlock(this.wrapped);
-		}
-	}
-
-	@Override
-	public boolean handleInteraction(ServerPlayer player, Contraption contraption, StructureBlockInfo info) {
-		// vaults should never be opened.
-		return false;
-	}
-
-	public static ItemVaultMountedStorage fromVault(ItemVaultBlockEntity vault) {
-		// Vault inventories have a world-affecting onContentsChanged, copy to a safe one
-		return new ItemVaultMountedStorage(copyToItemStackHandler(vault.getInventoryOfBlock()));
-	}
-
-	public static ItemVaultMountedStorage fromLegacy(HolderLookup.Provider registries,  CompoundTag nbt) {
-		ItemStackHandler handler = new ItemStackHandler();
-		handler.deserializeNBT(registries, nbt);
-		return new ItemVaultMountedStorage(handler);
-	}
+public class ItemVaultMountedStorage extends SimpleMountedStorage {
+    public static final MapCodec<ItemVaultMountedStorage> CODEC = codec(ItemVaultMountedStorage::new);
+    public ItemVaultMountedStorage(MountedItemInventory inventory) { super(AllMountedStorageTypes.VAULT, inventory); }
+    /** Existing overflow stays extractable on moving vaults; only active configured slots accept insertion. */
+    @Override public long insert(net.fabricmc.fabric.api.transfer.v1.item.ItemVariant resource,long amount,net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext tx){
+        net.fabricmc.fabric.api.transfer.v1.storage.StoragePreconditions.notBlankNotNegative(resource,amount);if(!isAvailable())return 0;long moved=0;
+        for(int i=0;i<Math.min(wrapped.getSlotCount(),ItemVaultBlockEntity.configuredSlots())&&moved<amount;i++)moved+=super.getSlot(i).insert(resource,amount-moved,tx);return moved;
+    }
+    @Override public net.fabricmc.fabric.api.transfer.v1.storage.base.SingleSlotStorage<net.fabricmc.fabric.api.transfer.v1.item.ItemVariant> getSlot(int index){
+        var actual=super.getSlot(index);return new net.fabricmc.fabric.api.transfer.v1.storage.base.SingleSlotStorage<>(){
+            private boolean active(){return index<ItemVaultBlockEntity.configuredSlots();}
+            @Override public boolean isResourceBlank(){return actual.isResourceBlank();}
+            @Override public net.fabricmc.fabric.api.transfer.v1.item.ItemVariant getResource(){return actual.getResource();}
+            @Override public long getAmount(){return actual.getAmount();}
+            @Override public long getCapacity(){return active()?actual.getCapacity():actual.getAmount();}
+            @Override public boolean supportsInsertion(){return active()&&actual.supportsInsertion();}
+            @Override public boolean supportsExtraction(){return actual.supportsExtraction();}
+            @Override public long insert(net.fabricmc.fabric.api.transfer.v1.item.ItemVariant resource,long amount,net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext tx){net.fabricmc.fabric.api.transfer.v1.storage.StoragePreconditions.notBlankNotNegative(resource,amount);return active()?actual.insert(resource,amount,tx):0;}
+            @Override public long extract(net.fabricmc.fabric.api.transfer.v1.item.ItemVariant resource,long amount,net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext tx){return actual.extract(resource,amount,tx);}
+            @Override public long getVersion(){return isAvailable()?actual.getVersion()*31+ItemVaultBlockEntity.configuredSlots():Long.MIN_VALUE;}
+        };
+    }
+    @Override public java.util.Iterator<net.fabricmc.fabric.api.transfer.v1.storage.StorageView<net.fabricmc.fabric.api.transfer.v1.item.ItemVariant>> iterator(){var result=new java.util.ArrayList<net.fabricmc.fabric.api.transfer.v1.storage.StorageView<net.fabricmc.fabric.api.transfer.v1.item.ItemVariant>>();for(int i=0;i<getSlotCount();i++)result.add(getSlot(i));return result.iterator();}
+    @Override public long getVersion(){return isAvailable()?super.getVersion()*31+ItemVaultBlockEntity.configuredSlots():Long.MIN_VALUE;}
+    @Override public void unmount(Level level, BlockState state, BlockPos pos, @Nullable BlockEntity be) {
+        if (be instanceof ItemVaultBlockEntity vault) vault.restoreMounted(wrapped);
+    }
+    public static ItemVaultMountedStorage fromVault(ItemVaultBlockEntity vault) { return new ItemVaultMountedStorage(MountedItemInventory.copy(vault.mountedSlots())); }
 }

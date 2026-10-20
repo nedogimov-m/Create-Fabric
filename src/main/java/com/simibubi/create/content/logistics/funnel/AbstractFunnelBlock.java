@@ -1,151 +1,46 @@
 package com.simibubi.create.content.logistics.funnel;
 
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.block.ProperWaterloggedBlock;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.inventory.InvManipulationBehaviour;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import com.simibubi.create.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.pathfinder.PathComputationType;
+import net.minecraft.world.*;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.material.*;
+import net.minecraft.world.level.redstone.Orientation;
+import net.minecraft.world.phys.*;
 
-public abstract class AbstractFunnelBlock extends Block
-	implements IBE<FunnelBlockEntity>, IWrenchable, ProperWaterloggedBlock {
-
-	public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
-
-	protected AbstractFunnelBlock(Properties p_i48377_1_) {
-		super(p_i48377_1_);
-		registerDefaultState(defaultBlockState().setValue(POWERED, false)
-			.setValue(WATERLOGGED, false));
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		return withWater(defaultBlockState().setValue(POWERED, context.getLevel()
-			.hasNeighborSignal(context.getClickedPos())), context);
-	}
-
-	@Override
-	public FluidState getFluidState(BlockState pState) {
-		return fluidState(pState);
-	}
-
-	@Override
-	public BlockState updateShape(BlockState pState, Direction pDirection, BlockState pNeighborState,
-								  LevelAccessor pLevel, BlockPos pCurrentPos, BlockPos pNeighborPos) {
-		updateWater(pLevel, pState, pCurrentPos);
-		return pState;
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(POWERED, WATERLOGGED));
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level level, BlockPos pos, Block block, BlockPos fromPos,
-								boolean isMoving) {
-		if (level.isClientSide)
-			return;
-		InvManipulationBehaviour behaviour = BlockEntityBehaviour.get(level, pos, InvManipulationBehaviour.TYPE);
-		if (behaviour != null)
-			behaviour.onNeighborChanged(fromPos);
-		if (!level.getBlockTicks()
-			.willTickThisTick(pos, this))
-			level.scheduleTick(pos, this, 1);
-	}
-
-	@Override
-	public void tick(BlockState state, ServerLevel worldIn, BlockPos pos, RandomSource r) {
-		boolean previouslyPowered = state.getValue(POWERED);
-		if (previouslyPowered != worldIn.hasNeighborSignal(pos))
-			worldIn.setBlock(pos, state.cycle(POWERED), Block.UPDATE_CLIENTS);
-	}
-
-	public static ItemStack tryInsert(Level worldIn, BlockPos pos, ItemStack toInsert, boolean simulate) {
-		FilteringBehaviour filter = BlockEntityBehaviour.get(worldIn, pos, FilteringBehaviour.TYPE);
-		InvManipulationBehaviour inserter = BlockEntityBehaviour.get(worldIn, pos, InvManipulationBehaviour.TYPE);
-		if (inserter == null)
-			return toInsert;
-		if (filter != null && !filter.test(toInsert))
-			return toInsert;
-		if (simulate)
-			inserter.simulate();
-		ItemStack insert = inserter.insert(toInsert);
-
-		if (!simulate && insert.getCount() != toInsert.getCount()) {
-			BlockEntity blockEntity = worldIn.getBlockEntity(pos);
-			if (blockEntity instanceof FunnelBlockEntity funnelBlockEntity) {
-				funnelBlockEntity.onTransfer(toInsert);
-				if (funnelBlockEntity.hasFlap())
-					funnelBlockEntity.flap(true);
-			}
-		}
-		return insert;
-	}
-
-	@Override
-	public boolean canSurvive(BlockState state, LevelReader world, BlockPos pos) {
-		Block block = world.getBlockState(pos.relative(getFunnelFacing(state).getOpposite()))
-			.getBlock();
-		return !(block instanceof AbstractFunnelBlock);
-	}
-
-	@Nullable
-	public static boolean isFunnel(BlockState state) {
-		return state.getBlock() instanceof AbstractFunnelBlock;
-	}
-
-	@Nullable
-	public static Direction getFunnelFacing(BlockState state) {
-		if (!(state.getBlock() instanceof AbstractFunnelBlock))
-			return null;
-		return ((AbstractFunnelBlock) state.getBlock()).getFacing(state);
-	}
-
-	protected abstract Direction getFacing(BlockState state);
-
-	@Override
-	public void onRemove(BlockState state, Level world, BlockPos pos, BlockState newState, boolean isMoving) {
-		if (state.getBlock() != newState.getBlock() && !isFunnel(newState) || !newState.hasBlockEntity())
-			IBE.onRemove(state, world, pos, newState);
-	}
-
-	@Override
-	public Class<FunnelBlockEntity> getBlockEntityClass() {
-		return FunnelBlockEntity.class;
-	}
-
-	public BlockEntityType<? extends FunnelBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.FUNNEL.get();
-	}
-
-	;
-
+public abstract class AbstractFunnelBlock extends BaseEntityBlock implements SimpleWaterloggedBlock {
+    public static final BooleanProperty POWERED=BlockStateProperties.POWERED,WATERLOGGED=BlockStateProperties.WATERLOGGED;
+    public final boolean brass;
+    protected AbstractFunnelBlock(Properties properties,boolean brass){super(properties);this.brass=brass;registerDefaultState(defaultBlockState().setValue(POWERED,false).setValue(WATERLOGGED,false));}
+    protected abstract Direction getFacing(BlockState state);
+    public static Direction getFunnelFacing(BlockState state){return state.getBlock() instanceof AbstractFunnelBlock funnel?funnel.getFacing(state):null;}
+    public static boolean isFunnel(BlockState state){return state.getBlock() instanceof AbstractFunnelBlock;}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(POWERED,WATERLOGGED);}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return FunnelBlockEntity.create(pos,state);}
+    @Override public <T extends BlockEntity>BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.FUNNEL,FunnelBlockEntity::tick);}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){return defaultBlockState().setValue(POWERED,context.getLevel().hasNeighborSignal(context.getClickedPos())).setValue(WATERLOGGED,context.getLevel().getFluidState(context.getClickedPos()).getType()==Fluids.WATER);}
+    @Override protected FluidState getFluidState(BlockState state){return state.getValue(WATERLOGGED)?Fluids.WATER.getSource(false):super.getFluidState(state);}
+    @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction side,BlockPos neighborPos,BlockState neighbor,RandomSource random){if(state.getValue(WATERLOGGED))ticks.scheduleTick(pos,Fluids.WATER,Fluids.WATER.getTickDelay(level));return state;}
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block neighbor,Orientation orientation,boolean moved){if(!level.isClientSide())level.scheduleTick(pos,this,1);}
+    @Override protected void tick(BlockState state,ServerLevel level,BlockPos pos,RandomSource random){boolean powered=level.hasNeighborSignal(pos);if(powered!=state.getValue(POWERED))level.setBlock(pos,state.setValue(POWERED,powered),Block.UPDATE_CLIENTS);}
+    @Override protected boolean canSurvive(BlockState state,LevelReader level,BlockPos pos){return !(LoadedLevelAccess.blockState(level,pos.relative(getFacing(state).getOpposite())).getBlock() instanceof AbstractFunnelBlock);}
+    public abstract InteractionResult onWrenched(BlockState state,UseOnContext context);
+    public static ItemStack tryInsert(Level level,BlockPos pos,ItemStack stack,boolean simulate){if(!(LoadedLevelAccess.blockEntity(level,pos) instanceof FunnelBlockEntity funnel))return stack.copy();return funnel.insert(stack,simulate);}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){
+        if(!player.mayBuild()||player.isSpectator()||!level.mayInteract(player,pos)||stack.is(AllItems.WRENCH))return InteractionResult.PASS;
+        if(brass&&FunnelFilterSlotPositioning.testHit(state,pos,hit))return com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringSettings.interact(level,player,hand,hit);
+        return InteractionResult.PASS;
+    }
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){return useItemOn(ItemStack.EMPTY,state,level,pos,player,InteractionHand.MAIN_HAND,hit);}
 }

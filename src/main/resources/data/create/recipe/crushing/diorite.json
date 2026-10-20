@@ -1,0 +1,24 @@
+{
+  "type": "create:crushing",
+  "ingredients": [
+    "minecraft:diorite"
+  ],
+  "processing_time": 350,
+  "results": [
+    {
+      "chance": 0.25,
+      "id": "minecraft:quartz"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:not",
+      "value": {
+        "condition": "fabric:all_mods_loaded",
+        "values": [
+          "exnihilosequentia"
+        ]
+      }
+    }
+  ]
+}

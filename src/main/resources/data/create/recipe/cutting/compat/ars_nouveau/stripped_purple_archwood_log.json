@@ -1,0 +1,21 @@
+{
+  "type": "create:cutting",
+  "ingredients": [
+    "ars_nouveau:stripped_purple_archwood_log"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "count": 6,
+      "id": "ars_nouveau:archwood_planks"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "ars_nouveau"
+      ]
+    }
+  ]
+}

@@ -1,147 +1,68 @@
 package com.simibubi.create.content.trains.track;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllSpecialTextures;
-import com.simibubi.create.AllTags;
-import com.simibubi.create.AllTags.AllItemTags;
-import com.simibubi.create.content.equipment.blueprint.BlueprintOverlayRenderer;
-import com.simibubi.create.foundation.block.ProperWaterloggedBlock;
-import com.simibubi.create.foundation.utility.BlockHelper;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.animation.LerpedFloat;
-import net.createmod.catnip.animation.LerpedFloat.Chaser;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecs;
+import com.simibubi.create.content.trains.graph.RailMath;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
 import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.Iterate;
 import net.createmod.catnip.data.Pair;
-import net.createmod.catnip.math.AngleHelper;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.outliner.Outliner;
-import net.createmod.catnip.theme.Color;
-import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import net.minecraft.core.*;
 import net.minecraft.core.Direction.Axis;
 import net.minecraft.core.Direction.AxisDirection;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.tags.BlockTags;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.phys.HitResult.Type;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-
-public class TrackPlacement {
-	public record ConnectingFrom(BlockPos pos, Vec3 axis, Vec3 normal, Vec3 end) {
-		public static final Codec<ConnectingFrom> CODEC = RecordCodecBuilder.create(i -> i.group(
-			BlockPos.CODEC.fieldOf("pos").forGetter(ConnectingFrom::pos),
-			Vec3.CODEC.fieldOf("axis").forGetter(ConnectingFrom::axis),
-			Vec3.CODEC.fieldOf("normal").forGetter(ConnectingFrom::normal),
-			Vec3.CODEC.fieldOf("end").forGetter(ConnectingFrom::end)
-		).apply(i, ConnectingFrom::new));
-
-		public static final StreamCodec<ByteBuf, ConnectingFrom> STREAM_CODEC = StreamCodec.composite(
-		    BlockPos.STREAM_CODEC, ConnectingFrom::pos,
-			CatnipStreamCodecs.VEC3, ConnectingFrom::axis,
-			CatnipStreamCodecs.VEC3, ConnectingFrom::normal,
-			CatnipStreamCodecs.VEC3, ConnectingFrom::end,
-		    ConnectingFrom::new
-		);
-	}
-
-	public static class PlacementInfo {
-
-		public PlacementInfo(TrackMaterial material) {
-			this.trackMaterial = material;
-		}
-
-		BezierConnection curve = null;
-		boolean valid = false;
-		int end1Extent = 0;
-		int end2Extent = 0;
-		String message = null;
-
-		public int requiredTracks = 0;
-		public boolean hasRequiredTracks = false;
-
-		public int requiredPavement = 0;
-		public boolean hasRequiredPavement = false;
-		public final TrackMaterial trackMaterial;
-
-		// for visualisation
-		Vec3 end1;
-		Vec3 end2;
-		Vec3 normal1;
-		Vec3 normal2;
-		Vec3 axis1;
-		Vec3 axis2;
-		BlockPos pos1;
-		BlockPos pos2;
-
-		public PlacementInfo withMessage(String message) {
-			this.message = "track." + message;
-			return this;
-		}
-
-		public PlacementInfo tooJumbly() {
-			curve = null;
-			return this;
-		}
-	}
-
-	public static PlacementInfo cached;
-
-	static BlockPos hoveringPos;
-	static boolean hoveringMaxed;
-	static int hoveringAngle;
-	static ItemStack lastItem;
-
-	static int extraTipWarmup;
-
-	public static PlacementInfo tryConnect(Level level, Player player, BlockPos pos2, BlockState state2,
-										   ItemStack stack, boolean girder, boolean maximiseTurn) {
-		Vec3 lookVec = player.getLookAngle();
-		int lookAngle = (int) (22.5 + AngleHelper.deg(Mth.atan2(lookVec.z, lookVec.x)) % 360) / 8;
-		int maxLength = AllConfigs.server().trains.maxTrackPlacementLength.get();
-
-		if (level.isClientSide && cached != null && pos2.equals(hoveringPos) && stack.equals(lastItem)
-			&& hoveringMaxed == maximiseTurn && lookAngle == hoveringAngle)
-			return cached;
-
-		PlacementInfo info = new PlacementInfo(TrackMaterial.fromItem(stack.getItem()));
-		hoveringMaxed = maximiseTurn;
-		hoveringAngle = lookAngle;
-		hoveringPos = pos2;
-		lastItem = stack;
-		cached = info;
-
+/** Source turn/S-curve/slope sizing, followed by complete loaded-world/inventory preflight. */
+public final class TrackPlacement {
+    public static int maxTrackPlacementLength=32;
+    public record ConnectingFrom(BlockPos pos,Vec3 axis,Vec3 normal,Vec3 end,net.minecraft.resources.ResourceKey<Level> dimension){
+        public ConnectingFrom(BlockPos pos,Vec3 axis,Vec3 normal,Vec3 end){this(pos,axis,normal,end,Level.OVERWORLD);}
+        public static final Codec<ConnectingFrom> CODEC=RecordCodecBuilder.create(i->i.group(BlockPos.CODEC.fieldOf("pos").forGetter(ConnectingFrom::pos),Vec3.CODEC.fieldOf("axis").forGetter(ConnectingFrom::axis),Vec3.CODEC.fieldOf("normal").forGetter(ConnectingFrom::normal),Vec3.CODEC.fieldOf("end").forGetter(ConnectingFrom::end),Level.RESOURCE_KEY_CODEC.optionalFieldOf("dimension",Level.OVERWORLD).forGetter(ConnectingFrom::dimension)).apply(i,ConnectingFrom::new));
+        public static final StreamCodec<FriendlyByteBuf,ConnectingFrom> STREAM_CODEC=new StreamCodec<>(){
+            @Override public ConnectingFrom decode(FriendlyByteBuf b){return new ConnectingFrom(b.readBlockPos(),new Vec3(b.readDouble(),b.readDouble(),b.readDouble()),new Vec3(b.readDouble(),b.readDouble(),b.readDouble()),new Vec3(b.readDouble(),b.readDouble(),b.readDouble()),net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,b.readIdentifier()));}
+            @Override public void encode(FriendlyByteBuf b,ConnectingFrom v){b.writeBlockPos(v.pos());for(var a:List.of(v.axis(),v.normal(),v.end())){b.writeDouble(a.x);b.writeDouble(a.y);b.writeDouble(a.z);}b.writeIdentifier(v.dimension().identifier());}
+        };
+    }
+    public static final class PlacementInfo {
+        public final TrackMaterial trackMaterial;public BezierConnection curve;public boolean valid,hasRequiredTracks,hasRequiredGirders,hasRequiredPavement;public int requiredTracks,requiredGirders,requiredPavement,end1Extent,end2Extent;public Item pavingItem;public String message;
+        public BlockPos pos1,pos2;public Vec3 axis1,axis2,end1,end2,normal1,normal2;public Map<BlockPos,BlockState> desiredTracks=Map.of(),desiredPavement=Map.of();
+        PlacementInfo(TrackMaterial material){trackMaterial=material;}
+        PlacementInfo withMessage(String message){valid=false;this.message="create.track."+message;return this;}
+        PlacementInfo tooJumbly(){curve=null;return this;}
+    }
+    public static PlacementInfo tryConnect(Level level,Player player,BlockPos pos2,BlockState state2,ItemStack stack,boolean girder,boolean maximiseTurn){
+        var info=plan(level,player,pos2,state2,stack,girder,maximiseTurn);
+        if(!info.valid)return info;
+        if(level.isClientSide())return complete(level,player,stack,info,state2,true);
+        return commit((ServerLevel)level,player,stack,info,state2);
+    }
+    /** Advisory native client/server simulation. Uses the same world/inventory preflight without committing anything. */
+    public static PlacementInfo preview(Level level,Player player,BlockPos pos,BlockState state,ItemStack stack,boolean girder,boolean maximise){var info=plan(level,player,pos,state,stack,girder,maximise);return info.valid?complete(level,player,stack,info,state,true):info;}
+    private static PlacementInfo plan(Level level,Player player,BlockPos pos2,BlockState state2,ItemStack stack,boolean girder,boolean maximiseTurn){
+        var info=new PlacementInfo(TrackMaterial.fromItem(stack.getItem()));
+        var connecting=stack.get(AllDataComponents.TRACK_CONNECTING_FROM);
+        if(connecting==null || !(state2.getBlock() instanceof ITrackBlock))return info.withMessage("original_missing");
+        if(!player.mayBuild()||player.isSpectator())return info.withMessage("forbidden");
+        if(!LoadedLevelAccess.isLoaded(level,pos2))return info.withMessage("unloaded");
+        var actualTarget=LoadedLevelAccess.blockState(level,pos2);var targetOwner=TrackBlockEntityAccess.existing(level,pos2);
+        if(actualTarget.getOptionalValue(TrackBlock.HAS_BE).orElse(false)&&!(targetOwner instanceof TrackBlockEntity))return info.withMessage("unloaded");
+        for(var vector:List.of(connecting.axis(),connecting.normal(),connecting.end()))if(!Double.isFinite(vector.x)||!Double.isFinite(vector.y)||!Double.isFinite(vector.z))return info.withMessage("original_missing");
+        if(((ITrackBlock)state2.getBlock()).getTrackAxes(level,pos2,state2).stream().noneMatch(axis->axis.lengthSqr()>1e-12))return info.withMessage("original_missing");
+        int maxLength=Mth.clamp(maxTrackPlacementLength,16,128);var lookVec=player.getLookAngle();
 		ITrackBlock track = (ITrackBlock) state2.getBlock();
 		Pair<Vec3, AxisDirection> nearestTrackAxis = track.getNearestTrackAxis(level, pos2, state2, lookVec);
 		Vec3 axis2 = nearestTrackAxis.getFirst()
@@ -151,23 +72,26 @@ public class TrackPlacement {
 		Vec3 normedAxis2 = axis2.normalize();
 		Vec3 end2 = track.getCurveStart(level, pos2, state2, axis2);
 
-		ConnectingFrom connectingFrom = stack.get(AllDataComponents.TRACK_CONNECTING_FROM);
+		ConnectingFrom connectingFrom = connecting;
 
 		BlockPos pos1 = connectingFrom.pos();
 		Vec3 axis1 = connectingFrom.axis();
 		Vec3 normedAxis1 = axis1.normalize();
 		Vec3 end1 = connectingFrom.end();
 		Vec3 normal1 = connectingFrom.normal();
-		BlockState state1 = level.getBlockState(pos1);
+		if (!connectingFrom.dimension().equals(level.dimension())) return info.withMessage("different_dimension");
+        if (!LoadedLevelAccess.isLoaded(level,pos1) || !LoadedLevelAccess.isLoaded(level,pos2)) return info.withMessage("unloaded");
+        BlockState state1 = LoadedLevelAccess.blockState(level,pos1);
+        if (!(state1.getBlock() instanceof ITrackBlock source) || !state1.hasProperty(TrackBlock.HAS_BE)) return info.withMessage("original_missing");
+        var sourceOwner=TrackBlockEntityAccess.existing(level,pos1);
+        if(state1.getValue(TrackBlock.HAS_BE)&&!(sourceOwner instanceof TrackBlockEntity))return info.withMessage("unloaded");
+        boolean axisFound=false; for(var a:source.getTrackAxes(level,pos1,state1))if(a.distanceTo(axis1)<1e-6 || a.scale(-1).distanceTo(axis1)<1e-6)axisFound=true; if(!axisFound)return info.withMessage("original_missing");
+        if (source.getCurveStart(level,pos1,state1,axis1).distanceTo(end1)>1e-6 || source.getUpNormal(level,pos1,state1).normalize().distanceTo(normal1)>1e-6) return info.withMessage("original_missing");
+        if (sourceOwner instanceof TrackBlockEntity old && old.isTilted())return info.withMessage("turn_start");
+        if (state1.getValue(TrackBlock.SHAPE).isPortal() || state2.getValue(TrackBlock.SHAPE).isPortal()) return info.withMessage("portal_pending");
+        if (source.getTrackAxes(level,pos1,state1).size()!=1 || track.getTrackAxes(level,pos2,state2).size()!=1) return info.withMessage("junction_start");
 
-		if (level.isClientSide) {
-			info.end1 = end1;
-			info.end2 = end2;
-			info.normal1 = normal1;
-			info.normal2 = normal2;
-			info.axis1 = axis1;
-			info.axis2 = axis2;
-		}
+		
 
 		if (pos1.equals(pos2))
 			return info.withMessage("second_point");
@@ -176,20 +100,17 @@ public class TrackPlacement {
 				.tooJumbly();
 		if (!state1.hasProperty(TrackBlock.HAS_BE))
 			return info.withMessage("original_missing");
-		if (level.getBlockEntity(pos2) instanceof TrackBlockEntity tbe && tbe.isTilted())
+		if (targetOwner instanceof TrackBlockEntity tbe && tbe.isTilted())
 			return info.withMessage("turn_start");
 
 		if (axis1.dot(end2.subtract(end1)) < 0) {
 			axis1 = axis1.scale(-1);
 			normedAxis1 = normedAxis1.scale(-1);
-			end1 = track.getCurveStart(level, pos1, state1, axis1);
-			if (level.isClientSide) {
-				info.end1 = end1;
-				info.axis1 = axis1;
-			}
+			end1 = source.getCurveStart(level, pos1, state1, axis1);
+			
 		}
 
-		double[] intersect = VecHelper.intersect(end1, end2, normedAxis1, normedAxis2, Axis.Y);
+		double[] intersect = RailMath.intersect(end1, end2, normedAxis1, normedAxis2, Axis.Y);
 		boolean parallel = intersect == null;
 		boolean skipCurve = false;
 
@@ -197,10 +118,7 @@ public class TrackPlacement {
 			axis2 = axis2.scale(-1);
 			normedAxis2 = normedAxis2.scale(-1);
 			end2 = track.getCurveStart(level, pos2, state2, axis2);
-			if (level.isClientSide) {
-				info.end2 = end2;
-				info.axis2 = axis2;
-			}
+			
 		}
 
 		Vec3 cross2 = normedAxis2.cross(new Vec3(0, 1, 0));
@@ -212,22 +130,14 @@ public class TrackPlacement {
 		double absAscend = Math.abs(ascend);
 		boolean slope = !normal1.equals(normal2);
 
-		if (level.isClientSide) {
-			Vec3 offset1 = axis1.scale(info.end1Extent);
-			Vec3 offset2 = axis2.scale(info.end2Extent);
-			BlockPos targetPos1 = pos1.offset(BlockPos.containing(offset1));
-			BlockPos targetPos2 = pos2.offset(BlockPos.containing(offset2));
-			info.curve = new BezierConnection(Couple.create(targetPos1, targetPos2),
-				Couple.create(end1.add(offset1), end2.add(offset2)), Couple.create(normedAxis1, normedAxis2),
-				Couple.create(normal1, normal2), true, girder, TrackMaterial.fromItem(stack.getItem()));
-		}
+		
 
 		// S curve or Straight
 
 		double dist = 0;
 
 		if (parallel) {
-			double[] sTest = VecHelper.intersect(end1, end2, normedAxis1, cross2, Axis.Y);
+			double[] sTest = RailMath.intersect(end1, end2, normedAxis1, cross2, Axis.Y);
 			if (sTest != null) {
 				double t = Math.abs(sTest[0]);
 				double u = Math.abs(sTest[1]);
@@ -239,8 +149,8 @@ public class TrackPlacement {
 						.tooJumbly();
 
 				if (skipCurve) {
-					dist = VecHelper.getCenterOf(pos1)
-						.distanceTo(VecHelper.getCenterOf(pos2));
+					dist = Vec3.atCenterOf(pos1)
+						.distanceTo(Vec3.atCenterOf(pos2));
 					info.end1Extent = (int) Math.round((dist + 1) / axis1.length());
 
 				} else {
@@ -279,8 +189,9 @@ public class TrackPlacement {
 			info.end2Extent = 0;
 
 			Axis plane = Mth.equal(axis1.x, 0) ? Axis.X : Axis.Z;
-			intersect = VecHelper.intersect(end1, end2, normedAxis1, normedAxis2, plane);
-			double dist1 = Math.abs(intersect[0] / axis1.length());
+			intersect = RailMath.intersect(end1, end2, normedAxis1, normedAxis2, plane);
+			if(intersect==null)return info.withMessage("too_sharp");
+            double dist1 = Math.abs(intersect[0] / axis1.length());
 			double dist2 = Math.abs(intersect[1] / axis2.length());
 
 			if (dist1 > dist2)
@@ -329,12 +240,12 @@ public class TrackPlacement {
 		// Turn
 
 		if (!parallel) {
-			float absAngle = Math.abs(AngleHelper.deg(angle));
+			float absAngle = Math.abs((float)Math.toDegrees(angle));
 			if (absAngle < 60 || absAngle > 300)
 				return info.withMessage("turn_90")
 					.tooJumbly();
 
-			intersect = VecHelper.intersect(end1, end2, normedAxis1, normedAxis2, Axis.Y);
+			intersect = RailMath.intersect(end1, end2, normedAxis1, normedAxis2, Axis.Y);
 			double dist1 = Math.abs(intersect[0]);
 			double dist2 = Math.abs(intersect[1]);
 			float ex1 = 0;
@@ -386,405 +297,114 @@ public class TrackPlacement {
 		info.pos1 = pos1;
 		info.pos2 = pos2;
 		info.axis1 = axis1;
-		info.axis2 = axis2;
+		info.axis2 = axis2;info.end1=end1;info.end2=end2;info.normal1=normal1;info.normal2=normal2;
 
-		placeTracks(level, info, state1, state2, targetPos1, targetPos2, true);
-
-		ItemStack offhandItem = player.getOffhandItem()
-			.copy();
-		boolean shouldPave = offhandItem.getItem() instanceof BlockItem && !AllItemTags.INVALID_FOR_TRACK_PAVING.matches(offhandItem);
-		if (shouldPave) {
-			BlockItem paveItem = (BlockItem) offhandItem.getItem();
-			paveTracks(level, info, paveItem, true);
-			info.hasRequiredPavement = true;
-		}
-
-		info.hasRequiredTracks = true;
-
-		if (!player.isCreative()) {
-			for (boolean simulate : Iterate.trueAndFalse) {
-				if (level.isClientSide && !simulate)
-					break;
-
-				int tracks = info.requiredTracks;
-				int pavement = info.requiredPavement;
-				int foundTracks = 0;
-				int foundPavement = 0;
-
-				Inventory inv = player.getInventory();
-				int size = inv.items.size();
-				for (int j = 0; j <= size + 1; j++) {
-					int i = j;
-					boolean offhand = j == size + 1;
-					if (j == size)
-						i = inv.selected;
-					else if (offhand)
-						i = 0;
-					else if (j == inv.selected)
-						continue;
-
-					ItemStack stackInSlot = (offhand ? inv.offhand : inv.items).get(i);
-					boolean isTrack = AllTags.AllBlockTags.TRACKS.matches(stackInSlot) && stackInSlot.is(stack.getItem());
-					if (!isTrack && (!shouldPave || offhandItem.getItem() != stackInSlot.getItem()))
-						continue;
-					if (isTrack ? foundTracks >= tracks : foundPavement >= pavement)
-						continue;
-
-					int count = stackInSlot.getCount();
-
-					if (!simulate) {
-						int remainingItems =
-							count - Math.min(isTrack ? tracks - foundTracks : pavement - foundPavement, count);
-						if (i == inv.selected)
-							stackInSlot.remove(AllDataComponents.TRACK_CONNECTING_FROM);
-						ItemStack newItem = stackInSlot.copyWithCount(remainingItems);
-						if (offhand)
-							player.setItemInHand(InteractionHand.OFF_HAND, newItem);
-						else
-							inv.setItem(i, newItem);
-					}
-
-					if (isTrack)
-						foundTracks += count;
-					else
-						foundPavement += count;
-				}
-
-				if (simulate && foundTracks < tracks) {
-					info.valid = false;
-					info.tooJumbly();
-					info.hasRequiredTracks = false;
-					return info.withMessage("not_enough_tracks");
-				}
-
-				if (simulate && foundPavement < pavement) {
-					info.valid = false;
-					info.tooJumbly();
-					info.hasRequiredPavement = false;
-					return info.withMessage("not_enough_pavement");
-				}
-			}
-		}
-
-		if (level.isClientSide())
-			return info;
-		if (shouldPave) {
-			BlockItem paveItem = (BlockItem) offhandItem.getItem();
-			paveTracks(level, info, paveItem, false);
-		}
-		return placeTracks(level, info, state1, state2, targetPos1, targetPos2, false);
-	}
-
-	private static void paveTracks(Level level, PlacementInfo info, BlockItem blockItem, boolean simulate) {
-		Block block = blockItem.getBlock();
-		info.requiredPavement = 0;
-		if (block == null || block instanceof EntityBlock || block.defaultBlockState()
-			.getCollisionShape(level, info.pos1)
-			.isEmpty())
-			return;
-
-		Set<BlockPos> visited = new HashSet<>();
-
-		for (boolean first : Iterate.trueAndFalse) {
-			int extent = (first ? info.end1Extent : info.end2Extent) + (info.curve != null ? 1 : 0);
-			Vec3 axis = first ? info.axis1 : info.axis2;
-			BlockPos pavePos = first ? info.pos1 : info.pos2;
-			info.requiredPavement +=
-				TrackPaver.paveStraight(level, pavePos.below(), axis, extent, block, simulate, visited);
-		}
-
-		if (info.curve != null)
-			info.requiredPavement += TrackPaver.paveCurve(level, info.curve, block, simulate, visited);
-	}
-
-	private static PlacementInfo placeTracks(Level level, PlacementInfo info, BlockState state1, BlockState state2,
-											 BlockPos targetPos1, BlockPos targetPos2, boolean simulate) {
-		info.requiredTracks = 0;
-
-		for (boolean first : Iterate.trueAndFalse) {
-			int extent = first ? info.end1Extent : info.end2Extent;
-			Vec3 axis = first ? info.axis1 : info.axis2;
-			BlockPos pos = first ? info.pos1 : info.pos2;
-			BlockState state = first ? state1 : state2;
-			if (state.hasProperty(TrackBlock.HAS_BE) && !simulate)
-				state = state.setValue(TrackBlock.HAS_BE, false);
-
-			switch (state.getValue(TrackBlock.SHAPE)) {
-				case TE, TW:
-					state = state.setValue(TrackBlock.SHAPE, TrackShape.XO);
-					break;
-				case TN, TS:
-					state = state.setValue(TrackBlock.SHAPE, TrackShape.ZO);
-					break;
-				default:
-					break;
-			}
-
-			for (int i = 0; i < (info.curve != null ? extent + 1 : extent); i++) {
-				Vec3 offset = axis.scale(i);
-				BlockPos offsetPos = pos.offset(BlockPos.containing(offset));
-				BlockState stateAtPos = level.getBlockState(offsetPos);
-				// copy over all shared properties from the shaped state to the correct track material block
-				BlockState toPlace = BlockHelper.copyProperties(state, info.trackMaterial.getBlock().defaultBlockState());
-
-				boolean canPlace = stateAtPos.canBeReplaced() || stateAtPos.is(BlockTags.FLOWERS);
-				if (canPlace)
-					info.requiredTracks++;
-				if (simulate)
-					continue;
-
-				if (stateAtPos.getBlock() instanceof ITrackBlock trackAtPos) {
-					toPlace = trackAtPos.overlay(level, offsetPos, stateAtPos, toPlace);
-					canPlace = true;
-				}
-
-				if (canPlace)
-					level.setBlock(offsetPos, ProperWaterloggedBlock.withWater(level, toPlace, offsetPos), Block.UPDATE_ALL);
-			}
-		}
-
-		if (info.curve == null)
-			return info;
-
-		if (!simulate) {
-			BlockState onto = info.trackMaterial.getBlock().defaultBlockState();
-			BlockState stateAtPos = level.getBlockState(targetPos1);
-			level.setBlock(targetPos1, ProperWaterloggedBlock.withWater(level,
-				(AllTags.AllBlockTags.TRACKS.matches(stateAtPos) ? stateAtPos : BlockHelper.copyProperties(state1, onto))
-					.setValue(TrackBlock.HAS_BE, true), targetPos1), Block.UPDATE_ALL);
-
-			stateAtPos = level.getBlockState(targetPos2);
-			level.setBlock(targetPos2, ProperWaterloggedBlock.withWater(level,
-				(AllTags.AllBlockTags.TRACKS.matches(stateAtPos) ? stateAtPos : BlockHelper.copyProperties(state2, onto))
-					.setValue(TrackBlock.HAS_BE, true), targetPos2), Block.UPDATE_ALL);
-		}
-
-		BlockEntity te1 = level.getBlockEntity(targetPos1);
-		BlockEntity te2 = level.getBlockEntity(targetPos2);
-		int requiredTracksForTurn = (info.curve.getSegmentCount() + 1) / 2;
-
-		if (!(te1 instanceof TrackBlockEntity tte1) || !(te2 instanceof TrackBlockEntity tte2)) {
-			info.requiredTracks += requiredTracksForTurn;
-			return info;
-		}
-
-		if (!tte1.getConnections()
-			.containsKey(tte2.getBlockPos()))
-			info.requiredTracks += requiredTracksForTurn;
-
-		if (simulate)
-			return info;
-
-		tte1.addConnection(info.curve);
-		tte2.addConnection(info.curve.secondary());
-		tte1.tilt.tryApplySmoothing();
-		tte2.tilt.tryApplySmoothing();
-		return info;
-	}
-
-	static LerpedFloat animation = LerpedFloat.linear()
-		.startWithValue(0);
-	static int lastLineCount = 0;
-
-	static BlockPos hintPos;
-	static int hintAngle;
-	static Couple<List<BlockPos>> hints;
-
-	@OnlyIn(Dist.CLIENT)
-	public static void clientTick() {
-		LocalPlayer player = Minecraft.getInstance().player;
-		ItemStack stack = player.getMainHandItem();
-		HitResult hitResult = Minecraft.getInstance().hitResult;
-		int restoreWarmup = extraTipWarmup;
-		extraTipWarmup = 0;
-
-		if (hitResult == null)
-			return;
-		if (hitResult.getType() != Type.BLOCK)
-			return;
-
-		InteractionHand hand = InteractionHand.MAIN_HAND;
-		if (!AllTags.AllBlockTags.TRACKS.matches(stack)) {
-			stack = player.getOffhandItem();
-			hand = InteractionHand.OFF_HAND;
-			if (!AllTags.AllBlockTags.TRACKS.matches(stack))
-				return;
-		}
-
-		if (!stack.hasFoil())
-			return;
-
-		TrackBlockItem blockItem = (TrackBlockItem) stack.getItem();
-		Level level = player.level();
-		BlockHitResult bhr = (BlockHitResult) hitResult;
-		BlockPos pos = bhr.getBlockPos();
-		BlockState hitState = level.getBlockState(pos);
-		if (!(hitState.getBlock() instanceof TrackBlock) && !hitState.canBeReplaced()) {
-			pos = pos.relative(bhr.getDirection());
-			hitState = blockItem.getPlacementState(new UseOnContext(player, hand, bhr));
-			if (hitState == null)
-				return;
-		}
-
-		if (!(hitState.getBlock() instanceof TrackBlock))
-			return;
-
-		extraTipWarmup = restoreWarmup;
-		boolean maxTurns = Minecraft.getInstance().options.keySprint.isDown();
-		PlacementInfo info = tryConnect(level, player, pos, hitState, stack, false, maxTurns);
-		if (extraTipWarmup < 20)
-			extraTipWarmup++;
-		if (!info.valid || !hoveringMaxed && (info.end1Extent == 0 || info.end2Extent == 0))
-			extraTipWarmup = 0;
-
-		if (!player.isCreative() && (info.valid || !info.hasRequiredTracks || !info.hasRequiredPavement))
-			BlueprintOverlayRenderer.displayTrackRequirements(info, player.getOffhandItem());
-
-		if (info.valid)
-			player.displayClientMessage(CreateLang.translateDirect("track.valid_connection")
-				.withStyle(ChatFormatting.GREEN), true);
-		else if (info.message != null)
-			player.displayClientMessage(CreateLang.translateDirect(info.message)
-					.withStyle(info.message.equals("track.second_point") ? ChatFormatting.WHITE : ChatFormatting.RED),
-				true);
-
-		if (bhr.getDirection() == Direction.UP) {
-			Vec3 lookVec = player.getLookAngle();
-			int lookAngle = (int) (22.5 + AngleHelper.deg(Mth.atan2(lookVec.z, lookVec.x)) % 360) / 8;
-
-			if (!pos.equals(hintPos) || lookAngle != hintAngle) {
-				hints = Couple.create(ArrayList::new);
-				hintAngle = lookAngle;
-				hintPos = pos;
-
-				for (int xOffset = -2; xOffset <= 2; xOffset++) {
-					for (int zOffset = -2; zOffset <= 2; zOffset++) {
-						BlockPos offset = pos.offset(xOffset, 0, zOffset);
-						PlacementInfo adjInfo = tryConnect(level, player, offset, hitState, stack, false, maxTurns);
-						hints.get(adjInfo.valid)
-							.add(offset.below());
-					}
-				}
-			}
-
-			if (hints != null && !hints.either(Collection::isEmpty)) {
-				Outliner.getInstance().showCluster("track_valid", hints.getFirst())
-					.withFaceTexture(AllSpecialTextures.THIN_CHECKERED)
-					.colored(0x95CD41)
-					.lineWidth(0);
-				Outliner.getInstance().showCluster("track_invalid", hints.getSecond())
-					.withFaceTexture(AllSpecialTextures.THIN_CHECKERED)
-					.colored(0xEA5C2B)
-					.lineWidth(0);
-			}
-		}
-
-		animation.chase(info.valid ? 1 : 0, 0.25, Chaser.EXP);
-		animation.tickChaser();
-
-		if (!info.valid) {
-			info.end1Extent = 0;
-			info.end2Extent = 0;
-		}
-
-		int color = Color.mixColors(0xEA5C2B, 0x95CD41, animation.getValue());
-		Vec3 up = new Vec3(0, 4 / 16f, 0);
-
-		{
-			Vec3 v1 = info.end1;
-			Vec3 a1 = info.axis1.normalize();
-			Vec3 n1 = info.normal1.cross(a1)
-				.scale(15 / 16f);
-			Vec3 o1 = a1.scale(0.125f);
-			Vec3 ex1 =
-				a1.scale((info.end1Extent - (info.curve == null && info.end1Extent > 0 ? 2 : 0)) * info.axis1.length());
-			line(1, v1.add(n1)
-				.add(up), o1, ex1);
-			line(2, v1.subtract(n1)
-				.add(up), o1, ex1);
-
-			Vec3 v2 = info.end2;
-			Vec3 a2 = info.axis2.normalize();
-			Vec3 n2 = info.normal2.cross(a2)
-				.scale(15 / 16f);
-			Vec3 o2 = a2.scale(0.125f);
-			Vec3 ex2 = a2.scale(info.end2Extent * info.axis2.length());
-			line(3, v2.add(n2)
-				.add(up), o2, ex2);
-			line(4, v2.subtract(n2)
-				.add(up), o2, ex2);
-		}
-
-		BezierConnection bc = info.curve;
-		if (bc == null)
-			return;
-
-		Vec3 previous1 = null;
-		Vec3 previous2 = null;
-		int railcolor = color;
-		int segCount = bc.getSegmentCount();
-
-		float s = animation.getValue() * 7 / 8f + 1 / 8f;
-		float lw = animation.getValue() * 1 / 16f + 1 / 16f;
-		Vec3 end1 = bc.starts.getFirst();
-		Vec3 end2 = bc.starts.getSecond();
-		Vec3 finish1 = end1.add(bc.axes.getFirst()
-			.scale(bc.getHandleLength()));
-		Vec3 finish2 = end2.add(bc.axes.getSecond()
-			.scale(bc.getHandleLength()));
-		String key = "curve";
-
-		for (int i = 0; i <= segCount; i++) {
-			float t = i / (float) segCount;
-			Vec3 result = VecHelper.bezier(end1, end2, finish1, finish2, t);
-			Vec3 derivative = VecHelper.bezierDerivative(end1, end2, finish1, finish2, t)
-				.normalize();
-			Vec3 normal = bc.getNormal(t)
-				.cross(derivative)
-				.scale(15 / 16f);
-			Vec3 rail1 = result.add(normal)
-				.add(up);
-			Vec3 rail2 = result.subtract(normal)
-				.add(up);
-
-			if (previous1 != null) {
-				Vec3 middle1 = rail1.add(previous1)
-					.scale(0.5f);
-				Vec3 middle2 = rail2.add(previous2)
-					.scale(0.5f);
-				Outliner.getInstance()
-					.showLine(Pair.of(key, i * 2), VecHelper.lerp(s, middle1, previous1),
-						VecHelper.lerp(s, middle1, rail1))
-					.colored(railcolor)
-					.disableLineNormals()
-					.lineWidth(lw);
-				Outliner.getInstance()
-					.showLine(Pair.of(key, i * 2 + 1), VecHelper.lerp(s, middle2, previous2),
-						VecHelper.lerp(s, middle2, rail2))
-					.colored(railcolor)
-					.disableLineNormals()
-					.lineWidth(lw);
-			}
-
-			previous1 = rail1;
-			previous2 = rail2;
-		}
-
-		for (int i = segCount + 1; i <= lastLineCount; i++) {
-			Outliner.getInstance().remove(Pair.of(key, i * 2));
-			Outliner.getInstance().remove(Pair.of(key, i * 2 + 1));
-		}
-
-		lastLineCount = segCount;
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private static void line(int id, Vec3 v1, Vec3 o1, Vec3 ex) {
-		int color = Color.mixColors(0xEA5C2B, 0x95CD41, animation.getValue());
-		Outliner.getInstance().showLine(Pair.of("start", id), v1.subtract(o1), v1.add(ex))
-			.lineWidth(1 / 8f)
-			.disableLineNormals()
-			.colored(color);
-	}
-
+        return info;
+    }
+    private record Snapshot(BlockState state,CompoundTag blockEntity){}
+    private static PlacementInfo commit(ServerLevel level,Player player,ItemStack held,PlacementInfo info,BlockState state2){return complete(level,player,held,info,state2,false);}
+    private static PlacementInfo complete(Level level,Player player,ItemStack held,PlacementInfo info,BlockState state2,boolean simulate){
+        var desired=new LinkedHashMap<BlockPos,BlockState>();boolean curveExists=false;
+        var source=LoadedLevelAccess.blockState(level,info.pos1);
+        if(source.getOptionalValue(TrackBlock.HAS_BE).orElse(false)&&!(TrackBlockEntityAccess.existing(level,info.pos1) instanceof TrackBlockEntity))return info.withMessage("unloaded");
+        for(boolean first:new boolean[]{true,false}){
+            int extent=first?info.end1Extent:info.end2Extent;Vec3 axis=first?info.axis1:info.axis2;BlockPos pos=first?info.pos1:info.pos2;BlockState shaped=first?source:state2;
+            for(int i=0;i<(info.curve==null?extent:extent+1);i++){
+                BlockPos at=pos.offset(BlockPos.containing(axis.scale(i)));
+                if(!LoadedLevelAccess.isLoaded(level,at))return info.withMessage("unloaded");
+                var existing=desired.getOrDefault(at,LoadedLevelAccess.blockState(level,at));
+                if(existing.getOptionalValue(TrackBlock.HAS_BE).orElse(false)&&!(TrackBlockEntityAccess.existing(level,at) instanceof TrackBlockEntity))return info.withMessage("unloaded");
+                var placed=info.trackMaterial.getBlock().defaultBlockState().setValue(TrackBlock.SHAPE,shaped.getValue(TrackBlock.SHAPE));
+                if(existing.getBlock() instanceof ITrackBlock track){
+                    var requested=placed;placed=track.overlay(level,at,existing,placed);
+                    if(placed==existing&&!track.getTrackAxes(level,at,existing).containsAll(((ITrackBlock)requested.getBlock()).getTrackAxes(level,at,requested)))return info.withMessage("blocked");
+                    // An incompatible existing line may not silently swallow a connection endpoint.
+                    if(existing.getBlock()!=placed.getBlock())return info.withMessage("blocked");
+                }else if(!existing.canBeReplaced() && !existing.is(net.minecraft.tags.BlockTags.FLOWERS))return info.withMessage("blocked");
+                if(!level.mayInteract(player,at)||!level.isInValidBounds(at))return info.withMessage("forbidden");
+                desired.put(at,placed.setValue(TrackBlock.WATERLOGGED,existing.getFluidState().getType()==Fluids.WATER));
+            }
+        }
+        if(info.curve!=null){
+            for(var endpoint:info.curve.bePositions){
+                if(!LoadedLevelAccess.isLoaded(level,endpoint))return info.withMessage("unloaded");
+                if(level instanceof ServerLevel server&&TrackConnectionCleanup.isPendingEndpoint(server,endpoint))return info.withMessage("unloaded");
+                var shaped=desired.getOrDefault(endpoint,LoadedLevelAccess.blockState(level,endpoint));
+                if(!(shaped.getBlock() instanceof ITrackBlock)||!shaped.hasProperty(TrackBlock.HAS_BE))return info.withMessage("blocked");
+                desired.put(endpoint,shaped.setValue(TrackBlock.HAS_BE,true));
+            }
+            var existing=TrackBlockEntityAccess.existing(level,info.curve.bePositions.getFirst());
+            if(existing instanceof TrackBlockEntity track){
+                var same=track.getConnections().get(info.curve.getKey());
+                if(same!=null && (!same.equalsSansMaterial(info.curve)||same.getMaterial()!=info.curve.getMaterial()))return info.withMessage("blocked");
+                if(same==null)info.requiredTracks+=info.curve.getTrackItemCost();else curveExists=true;
+            }else info.requiredTracks+=info.curve.getTrackItemCost();
+        }
+        for(var entry:desired.entrySet())if(!(LoadedLevelAccess.blockState(level,entry.getKey()).getBlock() instanceof ITrackBlock))info.requiredTracks++;
+        info.desiredTracks=Collections.unmodifiableMap(new LinkedHashMap<>(desired));
+        TrackPaver.Plan pavement=new TrackPaver.Plan(Map.of(),Set.of(),0);BlockItem paveItem;
+        try{paveItem=TrackPaver.pavingItem(level,info.pos1,player.getOffhandItem());if(paveItem!=null)pavement=TrackPaver.plan(level,info,paveItem.getBlock());}
+        catch(UnloadedTrackException unavailable){return info.withMessage("unloaded");}
+        info.pavingItem=paveItem==null?null:paveItem;
+        info.requiredPavement=pavement.items();
+        if(paveItem!=null&&paveItem.getBlock()==com.simibubi.create.AllBlocks.METAL_GIRDER&&curveExists&&info.curve!=null)info.requiredPavement-=info.curve.getGirderItemCost();
+        int extraGirders=info.curve!=null&&info.curve.hasGirder&&!curveExists&&(paveItem==null||paveItem.getBlock()!=com.simibubi.create.AllBlocks.METAL_GIRDER)?info.curve.getGirderItemCost():0;
+        info.requiredGirders=paveItem!=null&&paveItem.getBlock()==com.simibubi.create.AllBlocks.METAL_GIRDER?info.requiredPavement:extraGirders;
+        info.desiredPavement=pavement.blocks();
+        var allDesired=new LinkedHashMap<>(pavement.blocks());
+        for(var entry:desired.entrySet()){var previous=allDesired.putIfAbsent(entry.getKey(),entry.getValue());if(previous!=null&&previous!=entry.getValue())return info.withMessage("blocked");}
+        var checkedChunks=new HashSet<Long>();
+        for(var at:allDesired.keySet()){
+            if(!level.mayInteract(player,at)||!level.isInValidBounds(at))return info.withMessage("forbidden");
+            // Native placement/neighbor callbacks inspect these real cells; unavailable terrain is not air.
+            for(int x:new int[]{-2,2})for(int z:new int[]{-2,2}){var neighbor=at.offset(x,0,z);long chunk=net.minecraft.world.level.ChunkPos.pack(neighbor.getX()>>4,neighbor.getZ()>>4);if(level.isInValidBounds(neighbor)&&checkedChunks.add(chunk)&&!LoadedLevelAccess.isLoaded(level,neighbor))return info.withMessage("unloaded");}
+        }
+        var inventory=player.getInventory();var payment=payment(inventory,held.getItem(),info.requiredTracks,info.pavingItem,info.requiredPavement,extraGirders,!simulate);
+        info.hasRequiredTracks=player.isCreative()||payment.tracks();info.hasRequiredPavement=player.isCreative()||payment.pavement();info.hasRequiredGirders=player.isCreative()||(paveItem!=null&&paveItem.getBlock()==com.simibubi.create.AllBlocks.METAL_GIRDER?payment.pavement():payment.girders());
+        if(!info.hasRequiredTracks)return info.withMessage("not_enough_tracks");if(!info.hasRequiredPavement||!info.hasRequiredGirders)return info.withMessage("not_enough_pavement");
+        if(level instanceof ServerLevel server)try{TrackPropagator.preflightChanges(server,allDesired.keySet());}catch(UnloadedTrackException unavailable){return info.withMessage("unloaded");}
+        if(simulate)return info;
+        if(!payment.unchanged(inventory))return info.withMessage("blocked");
+        var before=new LinkedHashMap<BlockPos,Snapshot>();
+        for(var at:allDesired.keySet()){var be=TrackBlockEntityAccess.existing(level,at);before.put(at,new Snapshot(LoadedLevelAccess.blockState(level,at),be==null?null:be.saveWithFullMetadata(level.registryAccess())));}
+        try{
+            for(var entry:allDesired.entrySet())if(LoadedLevelAccess.blockState(level,entry.getKey())!=entry.getValue()){
+                if(!level.setBlock(entry.getKey(),entry.getValue(),Block.UPDATE_ALL)||LoadedLevelAccess.blockState(level,entry.getKey()).getBlock()!=entry.getValue().getBlock()||(desired.containsKey(entry.getKey())&&LoadedLevelAccess.blockState(level,entry.getKey())!=entry.getValue()))throw new IllegalStateException("Track/pavement world placement refused at "+entry.getKey());
+            }
+            if(info.curve!=null){
+                if(!(LoadedLevelAccess.blockEntity(level,info.curve.bePositions.getFirst()) instanceof TrackBlockEntity first)||!(LoadedLevelAccess.blockEntity(level,info.curve.bePositions.getSecond()) instanceof TrackBlockEntity second))throw new IllegalStateException("Native conditional curve BE creation failed");
+                first.addConnection(info.curve);second.addConnection(info.curve.secondary());
+            }
+            if(!player.isCreative())payment.apply(inventory);
+        }catch(RuntimeException error){
+            if(info.curve!=null&&!curveExists)TrackCurveCoverage.update(level,info.curve,true);
+            for(var entry:before.entrySet())if(LoadedLevelAccess.blockEntity(level,entry.getKey()) instanceof TrackBlockEntity be)be.suppressRemovalForRollback();
+            for(var entry:before.entrySet()){
+                var at=entry.getKey();var snapshot=entry.getValue();level.setBlock(at,snapshot.state(),Block.UPDATE_ALL);level.removeBlockEntity(at);
+                if(snapshot.blockEntity()!=null){var restored=BlockEntity.loadStatic(at,snapshot.state(),snapshot.blockEntity(),level.registryAccess());if(restored==null)throw new IllegalStateException("Cannot restore original track/pavement BE "+at,error);level.setBlockEntity(restored);}
+            }
+            for(var entry:before.entrySet())if(LoadedLevelAccess.blockState(level,entry.getKey())!=entry.getValue().state())throw new IllegalStateException("Cannot restore original native track/pavement state "+entry.getKey(),error);
+            return info.withMessage("blocked");
+        }
+        info.hasRequiredTracks=true;
+        if(info.curve!=null){if(LoadedLevelAccess.blockEntity(level,info.curve.bePositions.getFirst()) instanceof TrackBlockEntity first)first.tilt.tryApplySmoothing();if(LoadedLevelAccess.blockEntity(level,info.curve.bePositions.getSecond()) instanceof TrackBlockEntity second)second.tilt.tryApplySmoothing();}
+        return info;
+    }
+    private record Payment(Map<Integer,ItemStack> before,Map<Integer,ItemStack> after,boolean tracks,boolean pavement,boolean girders){
+        boolean unchanged(Inventory inventory){for(var entry:before.entrySet()){var actual=inventory.getItem(entry.getKey());if(actual.getCount()!=entry.getValue().getCount()||!ItemStack.isSameItemSameComponents(actual,entry.getValue()))return false;}return true;}
+        void apply(Inventory inventory){if(!unchanged(inventory))throw new IllegalStateException("Actual source inventory changed during native world placement");if(after.containsKey(inventory.getSelectedSlot()))inventory.getSelectedItem().remove(AllDataComponents.TRACK_CONNECTING_FROM);for(var entry:after.entrySet())inventory.setItem(entry.getKey(),entry.getValue());inventory.setChanged();}
+    }
+    /** Pinned source spends other native main slots, then the selected stack, then actual offhand. */
+    private static Payment payment(Inventory inventory,Item track,int requiredTracks,Item pavement,int requiredPavement,int requiredGirders,boolean capture){
+        var order=new ArrayList<Integer>();int selected=inventory.getSelectedSlot();for(int i=0;i<inventory.getNonEquipmentItems().size();i++)if(i!=selected)order.add(i);order.add(selected);order.add(Inventory.SLOT_OFFHAND);
+        var before=new LinkedHashMap<Integer,ItemStack>();var after=new LinkedHashMap<Integer,ItemStack>();int tracks=requiredTracks,paving=requiredPavement,girders=requiredGirders;
+        for(int slot:order){var actual=inventory.getItem(slot);if(capture)before.put(slot,actual.copy());if(actual.isEmpty())continue;int debit=0;
+            if(actual.is(track)){debit=Math.min(tracks,actual.getCount());tracks-=debit;}
+            else if(pavement!=null&&actual.is(pavement)){debit=Math.min(paving,actual.getCount());paving-=debit;}
+            else if(actual.is(com.simibubi.create.AllBlocks.METAL_GIRDER.asItem())){debit=Math.min(girders,actual.getCount());girders-=debit;}
+            if(debit>0&&capture){var next=actual.copy();if(slot==selected)next.remove(AllDataComponents.TRACK_CONNECTING_FROM);next.setCount(actual.getCount()-debit);after.put(slot,next);}
+        }
+        return new Payment(before,after,tracks==0,paving==0,girders==0);
+    }
+    private TrackPlacement(){}
 }

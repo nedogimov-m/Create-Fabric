@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "package": "net.createmod.ponder.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "client.PonderClientPacketAccessor",
+    "client.PonderParticleEngineAccessor",
+    "client.PonderParticleAccessor",
+    "client.PonderParrotAccessor",
+    "client.PonderTimerAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

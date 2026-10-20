@@ -1,0 +1,8 @@
+{
+  "type": "create:emptying",
+  "ingredients": ["minecraft:poppy"],
+  "results": [
+    {"id": "minecraft:stick"},
+    {"fluid": "minecraft:water", "amount": 20250, "components": {"minecraft:custom_name": {"text": "Flower water"}}}
+  ]
+}

@@ -1,128 +1,48 @@
 package com.simibubi.create.content.equipment.tool;
-
-import java.util.function.Consumer;
-
-import com.simibubi.create.AllItems;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.foundation.item.render.SimpleCustomRenderer;
-
-import net.createmod.catnip.platform.CatnipServices;
+import com.simibubi.create.*;
+import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import net.fabricmc.fabric.api.item.v1.EnchantmentEvents;
+import net.fabricmc.fabric.api.networking.v1.*;
+import net.fabricmc.fabric.api.util.TriState;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.*;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.EntityTypeTags;
 import net.minecraft.util.Mth;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.effect.MobEffectInstance;
-import net.minecraft.world.effect.MobEffects;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.*;
+import net.minecraft.world.effect.*;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.SwordItem;
-import net.minecraft.world.item.enchantment.Enchantment;
-import net.minecraft.world.item.enchantment.EnchantmentHelper;
-import net.minecraft.world.item.enchantment.Enchantments;
-import net.minecraft.world.item.enchantment.ItemEnchantments;
-
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.bus.api.EventPriority;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.LogicalSide;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
-import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
-
-@EventBusSubscriber
-public class CardboardSwordItem extends SwordItem {
-
-	public CardboardSwordItem(Properties pProperties) {
-		super(AllToolMaterials.CARDBOARD, pProperties);
-	}
-
-	@Override
-	public boolean supportsEnchantment(ItemStack stack, Holder<Enchantment> enchantment) {
-		return enchantment.getKey() == Enchantments.KNOCKBACK;
-	}
-
-	@Override
-	public boolean isBookEnchantable(ItemStack stack, ItemStack book) {
-		ItemEnchantments enchants = book.getOrDefault(DataComponents.STORED_ENCHANTMENTS, ItemEnchantments.EMPTY);
-		for (Holder<Enchantment> enchantment : enchants.keySet()) {
-			if (enchantment.getKey() != Enchantments.KNOCKBACK)
-				return false;
-		}
-		return true;
-	}
-
-	@SubscribeEvent
-	public static void cardboardSwordsMakeNoiseOnClick(PlayerInteractEvent.LeftClickBlock event) {
-		ItemStack itemStack = event.getItemStack();
-		if (!AllItems.CARDBOARD_SWORD.isIn(itemStack))
-			return;
-		if (event.getAction() != PlayerInteractEvent.LeftClickBlock.Action.START)
-			return;
-		if (event.getSide() == LogicalSide.CLIENT)
-			AllSoundEvents.CARDBOARD_SWORD.playAt(event.getLevel(), event.getPos(), 0.5f, 1.85f, false);
-		else
-			AllSoundEvents.CARDBOARD_SWORD.play(event.getLevel(), event.getEntity(), event.getPos(), 0.5f, 1.85f);
-	}
-
-	// We set priority to highest just so we catch this before anyone does anything else
-	@SubscribeEvent(priority = EventPriority.HIGHEST)
-	public static void cardboardSwordsCannotHurtYou(AttackEntityEvent event) {
-		Player attacker = event.getEntity();
-		if (!(event.getTarget() instanceof LivingEntity target) || target.getType().is(EntityTypeTags.ARTHROPOD))
-			return;
-		ItemStack stack = attacker.getItemInHand(InteractionHand.MAIN_HAND);
-		if (!(AllItems.CARDBOARD_SWORD.isIn(stack)))
-			return;
-
-		AllSoundEvents.CARDBOARD_SWORD.playFrom(attacker, 0.75f, 1.85f);
-
-		event.setCanceled(true);
-
-		// Reference player.attack()
-		// This section replicates knockback behaviour without hurting the target
-
-		float knockbackStrength = (float) (attacker.getAttributeValue(Attributes.ATTACK_KNOCKBACK) + 2);
-		if (attacker.level() instanceof ServerLevel serverLevel)
-			knockbackStrength = EnchantmentHelper.modifyKnockback(serverLevel, stack, target, serverLevel.damageSources().playerAttack(attacker), knockbackStrength);
-		if (attacker.isSprinting() && attacker.getAttackStrengthScale(0.5f) > 0.9f)
-			++knockbackStrength;
-
-		if (knockbackStrength <= 0)
-			return;
-
-		float yRot = attacker.getYRot();
-		knockback(target, knockbackStrength, yRot);
-
-		boolean targetIsPlayer = target instanceof Player;
-		MobCategory targetType = target.getClassification(false);
-
-		if (target instanceof ServerPlayer sp)
-			CatnipServices.NETWORK.sendToClient(sp, new KnockbackPacket(yRot, (float) knockbackStrength));
-
-		if ((targetType == MobCategory.MISC || targetType == MobCategory.CREATURE) && !targetIsPlayer)
-			target.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, 60, 9, true, false, false));
-
-		attacker.setDeltaMovement(attacker.getDeltaMovement()
-			.multiply(0.6D, 1.0D, 0.6D));
-		attacker.setSprinting(false);
-	}
-
-	public static void knockback(LivingEntity target, double knockbackStrength, float yRot) {
-		target.stopRiding();
-		target.knockback(knockbackStrength * 0.5F, Mth.sin(yRot * Mth.DEG_TO_RAD), -Mth.cos(yRot * Mth.DEG_TO_RAD));
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void initializeClient(Consumer<IClientItemExtensions> consumer) {
-		consumer.accept(SimpleCustomRenderer.create(this, new CardboardSwordItemRenderer()));
-	}
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.enchantment.*;
+/** Actual native sword components plus the original harmless nonarthropod knockback interaction. */
+public final class CardboardSwordItem extends Item {
+ public CardboardSwordItem(Properties properties){super(properties.sword(AllToolMaterials.CARDBOARD,3,1).stacksTo(1)
+  // MAX_DAMAGE's modern codec requires positive values. Source durability0 means no wear.
+  // This declares native item defaults; no component is removed from a player's actual stack.
+  .component(DataComponents.MAX_DAMAGE,null).component(DataComponents.DAMAGE,null)
+  .component(DataComponents.COOKING_FUEL,com.simibubi.create.foundation.item.CreateCookingFuels.component("cardboard_sword")));}
+ public boolean supportsEnchantment(ItemStack stack,Holder<Enchantment> enchantment){return enchantment.is(Enchantments.KNOCKBACK);}
+ public boolean isBookEnchantable(ItemStack stack,ItemStack book){var enchantments=book.getOrDefault(DataComponents.STORED_ENCHANTMENTS,ItemEnchantments.EMPTY);for(var enchantment:enchantments.keySet())if(!enchantment.is(Enchantments.KNOCKBACK))return false;return true;}
+ public static boolean cardboardSwordsCannotHurtYou(Player attacker,Entity entity){
+  if(!(entity instanceof LivingEntity target)||target.getType().builtInRegistryHolder().is(EntityTypeTags.ARTHROPOD))return false;
+  var stack=attacker.getItemInHand(InteractionHand.MAIN_HAND);if(!(stack.getItem() instanceof CardboardSwordItem))return false;
+  attacker.level().playSound(null,attacker.blockPosition(),AllSoundEvents.CARDBOARD_SWORD,SoundSource.PLAYERS,.75f,1.85f);
+  float strength=(float)(attacker.getAttributeValue(Attributes.ATTACK_KNOCKBACK)+2);
+  if(attacker.level() instanceof ServerLevel server)strength=EnchantmentHelper.modifyKnockback(server,stack,target,server.damageSources().playerAttack(attacker),strength);
+  if(attacker.isSprinting()&&attacker.getAttackStrengthScale(.5f)>.9f)strength++;
+  if(strength<=0)return true;float yaw=attacker.getYRot();knockback(target,strength,yaw,attacker.damageSources().playerAttack(attacker));
+  if(target instanceof ServerPlayer player)ServerPlayNetworking.send(player,new KnockbackPacket(yaw,strength));
+  var category=target.getType().getCategory();if(!(target instanceof Player)&&(category==MobCategory.MISC||category==MobCategory.CREATURE))target.addEffect(new MobEffectInstance(MobEffects.SLOWNESS,60,9,true,false,false));
+  attacker.setDeltaMovement(attacker.getDeltaMovement().multiply(.6,1,.6));attacker.setSprinting(false);return true;
+ }
+ public static void knockback(LivingEntity target,double strength,float yaw){knockback(target,strength,yaw,target.damageSources().generic());}
+ private static void knockback(LivingEntity target,double strength,float yaw,net.minecraft.world.damagesource.DamageSource source){target.stopRiding();target.knockback(strength*.5,Mth.sin(yaw*Mth.DEG_TO_RAD),-Mth.cos(yaw*Mth.DEG_TO_RAD),source,0);}
+ public static void register(){
+  PayloadTypeRegistry.clientboundPlay().register(KnockbackPacket.TYPE,KnockbackPacket.CODEC);
+  EnchantmentEvents.ALLOW_ENCHANTING.register((enchantment,stack,context)->stack.getItem() instanceof CardboardSwordItem sword?TriState.of(sword.supportsEnchantment(stack,enchantment)):TriState.DEFAULT);
+  AttackBlockCallback.EVENT.register((player,level,hand,pos,face)->{if(player.getItemInHand(hand).getItem() instanceof CardboardSwordItem)level.playSound(level.isClientSide()?player:null,pos,AllSoundEvents.CARDBOARD_SWORD,SoundSource.PLAYERS,.5f,1.85f);return InteractionResult.PASS;});
+ }
 }

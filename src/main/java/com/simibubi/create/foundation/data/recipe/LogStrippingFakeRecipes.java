@@ -1,72 +1,58 @@
 package com.simibubi.create.foundation.data.recipe;
 
-import java.util.ArrayList;
-import java.util.List;
-
+import com.google.gson.*;
+import com.mojang.serialization.JsonOps;
 import com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe;
-import com.simibubi.create.content.kinetics.deployer.ManualApplicationRecipe;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.processing.recipe.ProcessingOutput;
 import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import net.createmod.catnip.registry.RegisteredObjectsHelper;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.tags.ItemTags;
-import net.minecraft.world.item.AxeItem;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
+import java.util.*;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.component.*;
+import net.minecraft.core.registries.*;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.*;
+import net.minecraft.tags.*;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.component.ItemAttributeModifiers;
-import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.item.component.BlockTransformers;
+import net.minecraft.world.item.crafting.*;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.levelgen.feature.stateproviders.*;
+import net.minecraft.world.level.levelgen.blockpredicates.*;
 
-/**
- * Just in case players don't know about that vanilla feature
- */
-public class LogStrippingFakeRecipes {
-
-	public static List<RecipeHolder<ManualApplicationRecipe>> createRecipes() {
-		List<RecipeHolder<ManualApplicationRecipe>> recipes = new ArrayList<>();
-		if (!AllConfigs.server().recipes.displayLogStrippingRecipes.get())
-			return recipes;
-
-		ItemStack axe = new ItemStack(Items.IRON_AXE);
-		axe.set(DataComponents.ATTRIBUTE_MODIFIERS, ItemAttributeModifiers.EMPTY);
-		axe.set(DataComponents.CUSTOM_NAME, CreateLang.translateDirect("recipe.item_application.any_axe")
-			.withStyle(style -> style.withItalic(false)));
-		BuiltInRegistries.ITEM.getTagOrEmpty(ItemTags.LOGS)
-				.forEach(stack -> process(stack.value(), recipes, axe));
-		return recipes;
-	}
-
-	private static void process(Item item, List<RecipeHolder<ManualApplicationRecipe>> list, ItemStack axe) {
-		if (!(item instanceof BlockItem blockItem))
-			return;
-		BlockState state = blockItem.getBlock()
-			.defaultBlockState();
-		BlockState strippedState = AxeItem.getAxeStrippingState(state);
-		if (strippedState == null)
-			return;
-		Item resultItem = strippedState.getBlock()
-			.asItem();
-		if (resultItem == null)
-			return;
-		list.add(create(item, resultItem, axe));
-	}
-
-	private static RecipeHolder<ManualApplicationRecipe> create(Item fromItem, Item toItem, ItemStack axe) {
-		ResourceLocation rn = RegisteredObjectsHelper.getKeyOrThrow(toItem);
-		ResourceLocation id = ResourceLocation.fromNamespaceAndPath(rn.getNamespace(), rn.getPath() + "_via_vanilla_stripping");
-		ManualApplicationRecipe recipe = new ItemApplicationRecipe.Builder<>(ManualApplicationRecipe::new, id)
-				.require(fromItem)
-				.require(Ingredient.of(axe))
-				.output(toItem)
-				.build();
-
-		return new RecipeHolder<>(id, recipe);
-	}
-
+/** Display-only source recipes from26.3's real axe-transform registry; never installed as crafting recipes. */
+public final class LogStrippingFakeRecipes {
+ public static ItemStack displayAxe(){var axe=new ItemStack(Items.IRON_AXE);axe.set(DataComponents.ATTRIBUTE_MODIFIERS,ItemAttributeModifiers.EMPTY);axe.set(DataComponents.CUSTOM_NAME,Component.translatable("create.recipe.item_application.any_axe").withStyle(style->style.withItalic(false)));return axe;}
+ public static List<RecipeHolder<ItemApplicationRecipe>> createRecipes(HolderLookup.Provider registries){
+  if(!AllConfigs.server().recipes.displayLogStrippingRecipes.get())return List.of();
+  var transformer=registries.lookupOrThrow(Registries.BLOCK_TRANSFORMER).getOrThrow(BlockTransformers.AXE).value();
+  var output=new LinkedHashMap<Identifier,RecipeHolder<ItemApplicationRecipe>>();
+  for(var holder:BuiltInRegistries.ITEM.getTagOrEmpty(ItemTags.LOGS)){
+   if(!(holder.value() instanceof BlockItem item))continue;Block target=null;
+   for(var transform:transformer.transforms()){target=stripped(transform.blockStateProvider().value(),item.getBlock(),registries);if(target!=null)break;}
+   if(target==null||target.asItem()==Items.AIR)continue;var result=target.asItem();var key=BuiltInRegistries.ITEM.getKey(result);var id=Identifier.fromNamespaceAndPath(key.getNamespace(),key.getPath()+"_via_vanilla_stripping");
+   var recipe=new ItemApplicationRecipe(List.of(Ingredient.of(item),Ingredient.of(Items.IRON_AXE)),List.of(new ProcessingOutput(result,1,DataComponentPatch.EMPTY,1)),false,false);output.putIfAbsent(id,new RecipeHolder<>(ResourceKey.create(Registries.RECIPE,id),recipe));
+  }
+  return List.copyOf(output.values());
+ }
+ private static Block stripped(BlockStateProvider provider,Block input,HolderLookup.Provider registries){
+  if(!(provider instanceof RuleBasedStateProvider rules))return null;
+  var ops=registries.createSerializationContext(JsonOps.INSTANCE);
+  for(var rule:rules.rules()){
+   if(!(rule.ifTrue() instanceof MatchingBlocksPredicate))continue;
+   var encoded=BlockPredicate.CODEC.encodeStart(ops,rule.ifTrue()).getOrThrow();if(!encoded.isJsonObject())continue;var predicate=encoded.getAsJsonObject();
+   if(predicate.has("offset")&&predicate.getAsJsonArray("offset").asList().stream().anyMatch(value->value.getAsInt()!=0))continue;
+   if(!matches(predicate.get("blocks"),input))continue;
+   var result=rule.then().value();while(result instanceof CopyPropertiesProvider copy)result=copy.source().value();
+   var state=BlockStateProvider.DIRECT_CODEC.encodeStart(ops,result).getOrThrow();if(!state.isJsonObject())return null;var data=state.getAsJsonObject();
+   if(data.has("state")&&data.get("state").isJsonObject())data=data.getAsJsonObject("state");if(!data.has("id"))return null;var id=Identifier.tryParse(data.get("id").getAsString());return id==null?null:BuiltInRegistries.BLOCK.getValue(id);
+  }return null;
+ }
+ private static boolean matches(JsonElement ids,Block input){
+  if(ids==null)return false;if(ids.isJsonArray()){for(var id:ids.getAsJsonArray())if(matches(id,input))return true;return false;}
+  if(!ids.isJsonPrimitive()||!ids.getAsJsonPrimitive().isString())return false;var text=ids.getAsString();
+  if(text.startsWith("#")){var id=Identifier.tryParse(text.substring(1));return id!=null&&input.builtInRegistryHolder().is(TagKey.create(Registries.BLOCK,id));}
+  return text.equals(BuiltInRegistries.BLOCK.getKey(input).toString());
+ }
+ private LogStrippingFakeRecipes(){}
 }

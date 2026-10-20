@@ -1,43 +1,31 @@
 package com.simibubi.create.content.trains.graph;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
 import com.simibubi.create.content.trains.track.BezierConnection;
-
+import java.util.*;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
 
-public class TrackGraphBounds {
+/** Real per-dimension graph bounds, including curve excursions beyond their endpoint box. */
+public final class TrackGraphBounds {
+  public AABB box;
+  public final List<BezierConnection> beziers;
 
-	public AABB box;
-	public List<BezierConnection> beziers;
-
-	public TrackGraphBounds(TrackGraph graph, ResourceKey<Level> dimension) {
-		beziers = new ArrayList<>();
-		box = null;
-
-		for (TrackNode node : graph.nodes.values()) {
-			if (node.location.dimension != dimension)
-				continue;
-			include(node);
-			Map<TrackNode, TrackEdge> connections = graph.getConnectionsFrom(node);
-			for (TrackEdge edge : connections.values())
-				if (edge.turn != null && edge.turn.isPrimary())
-					beziers.add(edge.turn);
-		}
-
-		if (box != null)
-			box = box.inflate(2);
-	}
-
-	private void include(TrackNode node) {
-		Vec3 v = node.location.getLocation();
-		AABB aabb = new AABB(v, v);
-		box = box == null ? aabb : box.minmax(aabb);
-	}
-
+  public TrackGraphBounds(TrackGraph graph, ResourceKey<Level> dimension) {
+    var curves = new ArrayList<BezierConnection>();
+    for (var location : graph.getNodes()) {
+      if (!Objects.equals(location.dimension, dimension)) continue;
+      var node = graph.locateNode(location);
+      var point = node.location.getLocation();
+      var cell = new AABB(point, point);
+      box = box == null ? cell : box.minmax(cell);
+      for (var edge : graph.getConnectionsFrom(node).values())
+        if (edge.isTurn() && edge.getTurn().isPrimary()) {
+          curves.add(edge.getTurn());
+          box = box.minmax(edge.getTurn().getBounds());
+        }
+    }
+    if (box != null) box = box.inflate(2);
+    beziers = List.copyOf(curves);
+  }
 }

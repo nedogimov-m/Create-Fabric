@@ -1,217 +1,64 @@
 package com.simibubi.create.content.logistics.factoryBoard;
 
-import java.util.EnumMap;
-import java.util.List;
-import java.util.UUID;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.content.logistics.factoryBoard.FactoryPanelBlock.PanelSlot;
+import com.simibubi.create.*;
 import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
 import com.simibubi.create.content.logistics.packager.repackager.RepackagerBlockEntity;
-import com.simibubi.create.foundation.advancement.AdvancementBehaviour;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.HolderLookup;
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.fabricmc.fabric.api.blockgetter.v2.RenderDataBlockEntity;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.Mth;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.SoundType;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.Shapes;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.storage.*;
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
 
-public class FactoryPanelBlockEntity extends SmartBlockEntity {
-	public EnumMap<PanelSlot, FactoryPanelBehaviour> panels;
+public final class FactoryPanelBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements BlockEntityBehaviour.Provider,RenderDataBlockEntity {
+    public final com.simibubi.create.foundation.advancement.PrerequisiteAdvancements.Owner sourceAdvancements=new com.simibubi.create.foundation.advancement.PrerequisiteAdvancements.Owner(this,"factory_gauge");
+    public final EnumMap<FactoryPanelBlock.PanelSlot,FactoryPanelBehaviour> panels=new EnumMap<>(FactoryPanelBlock.PanelSlot.class);
+    public boolean restocker;
+    private int lazy=10;
+    private VoxelShape shape;
+    public record PanelRenderData(int activeMask,int requestedMask,boolean restocker) {}
+    public FactoryPanelBlockEntity(BlockPos pos,BlockState state) { super(AllBlockEntityTypes.FACTORY_PANEL,pos,state);for(var slot:FactoryPanelBlock.PanelSlot.values())panels.put(slot,new FactoryPanelBehaviour(this,slot)); }
+    @Override public Object getRenderData() { int active=0,requested=0;for(var panel:panels.values())if(panel.active){active|=1<<panel.slot.ordinal();if(panel.count!=0)requested|=1<<panel.slot.ordinal();}return new PanelRenderData(active,requested,restocker); }
+    public boolean addPanel(FactoryPanelBlock.PanelSlot slot,UUID frequency) { var panel=panels.get(slot);if(panel.active)return false;panel.active=true;if(frequency!=null)panel.network=frequency;notifyUpdate();return true; }
+    public boolean removePanel(FactoryPanelBlock.PanelSlot slot) { var panel=panels.get(slot);if(!panel.active)return false;panel.disable();notifyUpdate();return true; }
+    public int activePanels() { return (int)panels.values().stream().filter(panel->panel.active).count(); }
+    public void refreshRestocker() { if(level==null||level.isClientSide())return;var attached=LoadedLevelAccess.blockEntity(level,worldPosition.relative(FactoryPanelBlock.connectedDirection(getBlockState()).getOpposite()));boolean value=attached instanceof PackagerBlockEntity&&!(attached instanceof RepackagerBlockEntity);if(value!=restocker){restocker=value;notifyUpdate();} }
+    public PackagerBlockEntity getRestockedPackager() { if(!restocker||level==null)return null;var pos=worldPosition.relative(FactoryPanelBlock.connectedDirection(getBlockState()).getOpposite());return LoadedLevelAccess.blockEntity(level,pos) instanceof PackagerBlockEntity packager&&!(packager instanceof RepackagerBlockEntity)?packager:null; }
+    public static void tick(Level level,BlockPos pos,BlockState state,FactoryPanelBlockEntity gauge) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, gauge)) {
+            if (!createTick.shouldTick()) return;
 
-	public boolean redraw;
-	public boolean restocker;
-	public VoxelShape lastShape;
-
-	public AdvancementBehaviour advancements;
-
-	public FactoryPanelBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		restocker = false;
-	}
-
-	@Override
-	protected AABB createRenderBoundingBox() {
-		return new AABB(worldPosition).inflate(8);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		panels = new EnumMap<>(PanelSlot.class);
-		redraw = true;
-		for (PanelSlot slot : PanelSlot.values()) {
-			FactoryPanelBehaviour e = new FactoryPanelBehaviour(this, slot);
-			panels.put(slot, e);
-			behaviours.add(e);
-		}
-
-		behaviours.add(advancements = new AdvancementBehaviour(this, AllAdvancements.FACTORY_GAUGE));
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		if (level.isClientSide())
-			return;
-
-		if (activePanels() == 0)
-			level.setBlockAndUpdate(worldPosition, Blocks.AIR.defaultBlockState());
-
-		if (AllBlocks.FACTORY_GAUGE.has(getBlockState())) {
-			boolean shouldBeRestocker = AllBlocks.PACKAGER
-				.has(level.getBlockState(worldPosition.relative(FactoryPanelBlock.connectedDirection(getBlockState())
-					.getOpposite())));
-			if (restocker == shouldBeRestocker)
-				return;
-			restocker = shouldBeRestocker;
-			redraw = true;
-			sendData();
-		}
-	}
-
-	@Nullable
-	public PackagerBlockEntity getRestockedPackager() {
-		BlockState state = getBlockState();
-		if (!restocker || !AllBlocks.FACTORY_GAUGE.has(state))
-			return null;
-		BlockPos packagerPos = worldPosition.relative(FactoryPanelBlock.connectedDirection(state)
-			.getOpposite());
-		if (!level.isLoaded(packagerPos))
-			return null;
-		BlockEntity be = level.getBlockEntity(packagerPos);
-		if (be == null || !(be instanceof PackagerBlockEntity pbe))
-			return null;
-		if (pbe instanceof RepackagerBlockEntity)
-			return null;
-		return pbe;
-	}
-
-	public int activePanels() {
-		int result = 0;
-		for (FactoryPanelBehaviour panelBehaviour : panels.values())
-			if (panelBehaviour.isActive())
-				result++;
-		return result;
-	}
-
-	@Override
-	public void remove() {
-		for (FactoryPanelBehaviour panelBehaviour : panels.values())
-			if (panelBehaviour.isActive())
-				panelBehaviour.disconnectAll();
-		super.remove();
-	}
-
-	@Override
-	public void destroy() {
-		super.destroy();
-		int panelCount = activePanels();
-		if (panelCount > 1)
-			Block.popResource(level, worldPosition, AllBlocks.FACTORY_GAUGE.asStack(panelCount - 1));
-	}
-
-	public boolean addPanel(PanelSlot slot, UUID frequency) {
-		FactoryPanelBehaviour behaviour = panels.get(slot);
-		if (behaviour != null && !behaviour.isActive()) {
-			behaviour.enable();
-			if (frequency != null)
-				behaviour.setNetwork(frequency);
-			redraw = true;
-			lastShape = null;
-
-			if (activePanels() > 1) {
-				SoundType soundType = getBlockState().getSoundType();
-				level.playSound(null, worldPosition, soundType.getPlaceSound(), SoundSource.BLOCKS,
-					(soundType.getVolume() + 1.0F) / 2.0F, soundType.getPitch() * 0.8F);
-			}
-
-			return true;
-		}
-		return false;
-	}
-
-	public boolean removePanel(PanelSlot slot) {
-		FactoryPanelBehaviour behaviour = panels.get(slot);
-		if (behaviour != null && behaviour.isActive()) {
-			behaviour.disable();
-			redraw = true;
-			lastShape = null;
-
-			if (activePanels() > 0) {
-				SoundType soundType = getBlockState().getSoundType();
-				level.playSound(null, worldPosition, soundType.getBreakSound(), SoundSource.BLOCKS,
-					(soundType.getVolume() + 1.0F) / 2.0F, soundType.getPitch() * 0.8F);
-			}
-
-			return true;
-		}
-		return false;
-	}
-
-	public VoxelShape getShape() {
-		if (lastShape != null)
-			return lastShape;
-
-		float xRot = Mth.RAD_TO_DEG * FactoryPanelBlock.getXRot(getBlockState()) + 90;
-		float yRot = Mth.RAD_TO_DEG * FactoryPanelBlock.getYRot(getBlockState());
-		Direction connectedDirection = FactoryPanelBlock.connectedDirection(getBlockState());
-		Vec3 inflateAxes = VecHelper.axisAlingedPlaneOf(connectedDirection);
-
-		lastShape = Shapes.empty();
-
-		for (FactoryPanelBehaviour behaviour : panels.values()) {
-			if (!behaviour.isActive())
-				continue;
-			FactoryPanelPosition panelPosition = behaviour.getPanelPosition();
-			Vec3 vec =
-				new Vec3(.25 + panelPosition.slot().xOffset * .5, 1 / 16f, .25 + panelPosition.slot().yOffset * .5);
-			vec = VecHelper.rotateCentered(vec, 180, Axis.Y);
-			vec = VecHelper.rotateCentered(vec, xRot, Axis.X);
-			vec = VecHelper.rotateCentered(vec, yRot, Axis.Y);
-			AABB bb = new AABB(vec, vec).inflate(1 / 16f)
-				.inflate(inflateAxes.x * 3 / 16f, inflateAxes.y * 3 / 16f, inflateAxes.z * 3 / 16f);
-			lastShape = Shapes.or(lastShape, Shapes.create(bb));
-		}
-
-		return lastShape;
-	}
-
-	@Override
-	protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(tag, registries, clientPacket);
-		restocker = tag.getBoolean("Restocker");
-		if (clientPacket && tag.contains("Redraw")) {
-			lastShape = null;
-			level.sendBlockUpdated(getBlockPos(), getBlockState(), getBlockState(), 16);
-		}
-	}
-
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-		tag.putBoolean("Restocker", restocker);
-		if (clientPacket && redraw) {
-			NBTHelper.putMarker(tag, "Redraw");
-			redraw = false;
-		}
-	}
+        
+        if(!level.isClientSide()&&--gauge.lazy<=0){gauge.lazy=10;if(gauge.activePanels()==0){level.setBlockAndUpdate(pos,Blocks.AIR.defaultBlockState());return;}gauge.refreshRestocker();}
+        
+    
+        }
+    }
+    public VoxelShape getShape() {
+        if(shape!=null)return shape;shape=Shapes.empty();var direction=FactoryPanelBlock.connectedDirection(getBlockState());
+        for(var panel:panels.values())if(panel.active){var center=FactoryPanelTransform.point(getBlockState(),new Vec3(.25+panel.slot.xOffset*.5,1/16d,.25+panel.slot.yOffset*.5));var box=new AABB(center,center).inflate(1/16d).inflate(direction.getAxis()==Direction.Axis.X?0:3/16d,direction.getAxis()==Direction.Axis.Y?0:3/16d,direction.getAxis()==Direction.Axis.Z?0:3/16d);shape=Shapes.or(shape,Shapes.create(box));}return shape;
+    }
+    public void notifyUpdate() { shape=null;setChanged();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS); }
+    @Override public void preRemoveSideEffects(BlockPos pos,BlockState state) { if(level!=null&&!level.isClientSide()){int count=activePanels();if(count>1)Block.popResource(level,pos,new net.minecraft.world.item.ItemStack(AllBlocks.FACTORY_GAUGE,count-1));}super.preRemoveSideEffects(pos,state); }
+    @Override protected void write(ValueOutput out, boolean clientPacket) { super.write(out, clientPacket);out.putBoolean("Restocker",restocker); }
+    @Override protected void read(ValueInput in, boolean clientPacket) { super.read(in, clientPacket);restocker=in.getBooleanOr("Restocker",false);shape=null;if(level!=null&&level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS); }
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket() { return ClientboundBlockEntityDataPacket.create(this); }
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+        var out=TagValueOutput.createWithContext(net.minecraft.util.ProblemReporter.DISCARDING,registries);write(out, true);var tag=out.buildResult();
+        for(var slot:FactoryPanelBlock.PanelSlot.values())tag.getCompound(slot.getSerializedName()).ifPresent(panel->panel.remove("Promises"));
+        return tag;
+    }
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (panels != null) behaviours.addAll(panels.values());
+    }
+    @Override protected com.simibubi.create.foundation.advancement.AdvancementBehaviour.OwnerStorage nativeAdvancementOwnerStorage() {return sourceAdvancements;}
 }

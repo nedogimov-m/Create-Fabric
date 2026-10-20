@@ -1,0 +1,13 @@
+{
+  "type": "create:deploying",
+  "ingredients": [
+    "minecraft:waxed_oxidized_copper_door",
+    "#minecraft:axes"
+  ],
+  "keep_held_item": true,
+  "results": [
+    {
+      "id": "minecraft:oxidized_copper_door"
+    }
+  ]
+}

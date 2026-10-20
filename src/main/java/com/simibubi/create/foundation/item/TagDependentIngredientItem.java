@@ -5,20 +5,19 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 
+/** Source ingredient visibility follows the real bound ore tag, including datapack changes. */
 public class TagDependentIngredientItem extends Item {
+    private final TagKey<Item> tag;
 
-	private TagKey<Item> tag;
+    public TagDependentIngredientItem(Properties properties, TagKey<Item> tag) {
+        super(properties);
+        this.tag = tag;
+    }
 
-	public TagDependentIngredientItem(Properties properties, TagKey<Item> tag) {
-		super(properties);
-		this.tag = tag;
-	}
-
-	public boolean shouldHide() {
-		for (Holder<Item> ignored : BuiltInRegistries.ITEM.getTagOrEmpty(this.tag)) {
-			return false; // at least 1 present
-		}
-		return true; // none present
-	}
-
+    public boolean shouldHide() {
+        for (Holder<Item> ignored : BuiltInRegistries.ITEM.getTagOrEmpty(tag)) {
+            return false;
+        }
+        return true;
+    }
 }

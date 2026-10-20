@@ -1,487 +1,212 @@
 package com.simibubi.create.content.contraptions.actors.roller;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.function.BiConsumer;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.AllTags;
+import com.simibubi.create.Create;
+import com.simibubi.create.api.registry.CreateBuiltInRegistries;
+import com.simibubi.create.content.contraptions.ContraptionSettings;
 import com.simibubi.create.content.contraptions.actors.roller.RollerBlockEntity.RollingMode;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
-import com.simibubi.create.content.contraptions.pulley.PulleyContraption;
-import com.simibubi.create.content.contraptions.render.ActorVisual;
-import com.simibubi.create.content.contraptions.render.ContraptionMatrices;
 import com.simibubi.create.content.kinetics.base.BlockBreakingMovementBehaviour;
-import com.simibubi.create.content.logistics.filter.FilterItemStack;
-import com.simibubi.create.content.trains.bogey.StandardBogeyBlock;
-import com.simibubi.create.content.trains.entity.Carriage;
-import com.simibubi.create.content.trains.entity.CarriageBogey;
-import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
-import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.content.trains.entity.TravellingPoint;
-import com.simibubi.create.content.trains.entity.TravellingPoint.ITrackSelector;
-import com.simibubi.create.content.trains.entity.TravellingPoint.SteerDirection;
-import com.simibubi.create.content.trains.graph.TrackEdge;
-import com.simibubi.create.content.trains.graph.TrackGraph;
-import com.simibubi.create.foundation.damageTypes.CreateDamageSources;
-import com.simibubi.create.foundation.item.ItemHelper;
-import com.simibubi.create.foundation.utility.BlockHelper;
-import com.simibubi.create.foundation.virtualWorld.VirtualRenderWorld;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import dev.engine_room.flywheel.api.visualization.VisualizationContext;
-import dev.engine_room.flywheel.api.visualization.VisualizationManager;
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.Iterate;
+import com.simibubi.create.content.trains.bogey.AbstractBogeyBlock;
+import com.simibubi.create.content.trains.entity.*;
+import com.simibubi.create.content.trains.graph.*;
+import com.simibubi.create.foundation.utility.*;
+import java.util.*;
 import net.createmod.catnip.data.Pair;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.tags.BlockTags;
+import net.createmod.catnip.data.Couple;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
+import net.minecraft.core.*;
+import net.minecraft.core.registries.*;
+import net.minecraft.resources.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.*;
 import net.minecraft.util.Mth;
-import net.minecraft.world.damagesource.DamageSource;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.damagesource.*;
+import net.minecraft.world.item.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.FallingBlock;
-import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.SlabType;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
+import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.phys.Vec3;
 
+/** Source normal/profile paving algorithms, with Fabric transactional material extraction. */
 public class RollerMovementBehaviour extends BlockBreakingMovementBehaviour {
-
-	@Override
-	public boolean isActive(MovementContext context) {
-		return super.isActive(context) && !(context.contraption instanceof PulleyContraption)
-			&& VecHelper.isVecPointingTowards(context.relativeMotion, context.state.getValue(RollerBlock.FACING));
-	}
-
-	@Override
-	public boolean disableBlockEntityRendering() {
-		return true;
-	}
-
-	@Nullable
-	@Override
-	public ActorVisual createVisual(VisualizationContext visualizationContext, VirtualRenderWorld simulationWorld,
-		MovementContext movementContext) {
-		return new RollerActorVisual(visualizationContext, simulationWorld, movementContext);
-	}
-
-	@Override
-	public void renderInContraption(MovementContext context, VirtualRenderWorld renderWorld,
-		ContraptionMatrices matrices, MultiBufferSource buffers) {
-		if (!VisualizationManager.supportsVisualization(context.world))
-			RollerRenderer.renderInContraption(context, renderWorld, matrices, buffers);
-	}
-
-	@Override
-	public Vec3 getActiveAreaOffset(MovementContext context) {
-		return Vec3.atLowerCornerOf(context.state.getValue(RollerBlock.FACING)
-			.getNormal())
-			.scale(.45)
-			.subtract(0, 2, 0);
-	}
-
-	@Override
-	protected float getBlockBreakingSpeed(MovementContext context) {
-		return Mth.clamp(super.getBlockBreakingSpeed(context) * 1.5f, 1 / 128f, 16f);
-	}
-
-	@Override
-	public boolean canBreak(Level world, BlockPos breakingPos, BlockState state) {
-		for (Direction side : Iterate.directions)
-			if (world.getBlockState(breakingPos.relative(side))
-				.is(BlockTags.PORTALS))
-				return false;
-
-		return super.canBreak(world, breakingPos, state) && !state.getCollisionShape(world, breakingPos)
-			.isEmpty() && !AllTags.AllBlockTags.TRACKS.matches(state);
-	}
-
-	@Override
-	protected DamageSource getDamageSource(Level level) {
-		return CreateDamageSources.roller(level);
-	}
-
-	@Override
-	public void visitNewPosition(MovementContext context, BlockPos pos) {
-		Level world = context.world;
-		BlockState stateVisited = world.getBlockState(pos);
-		if (!stateVisited.isRedstoneConductor(world, pos))
-			damageEntities(context, pos, world);
-		if (world.isClientSide)
-			return;
-
-		List<BlockPos> positionsToBreak = getPositionsToBreak(context, pos);
-		if (positionsToBreak.isEmpty()) {
-			triggerPaver(context, pos);
-			return;
-		}
-
-		BlockPos argMax = null;
-		double max = -1;
-		for (BlockPos toBreak : positionsToBreak) {
-			float hardness = context.world.getBlockState(toBreak)
-				.getDestroySpeed(world, toBreak);
-			if (hardness < max)
-				continue;
-			max = hardness;
-			argMax = toBreak;
-		}
-
-		if (argMax == null) {
-			triggerPaver(context, pos);
-			return;
-		}
-
-		context.data.put("ReferencePos", NbtUtils.writeBlockPos(pos));
-		context.data.put("BreakingPos", NbtUtils.writeBlockPos(argMax));
-		context.stall = true;
-	}
-
-	@Override
-	protected void onBlockBroken(MovementContext context, BlockPos pos, BlockState brokenState) {
-		super.onBlockBroken(context, pos, brokenState);
-		if (!context.data.contains("ReferencePos"))
-			return;
-
-		BlockPos referencePos = NBTHelper.readBlockPos(context.data, "ReferencePos");
-		for (BlockPos otherPos : getPositionsToBreak(context, referencePos))
-			if (!otherPos.equals(pos))
-				destroyBlock(context, otherPos);
-
-		triggerPaver(context, referencePos);
-		context.data.remove("ReferencePos");
-	}
-
-	@Override
-	protected void destroyBlock(MovementContext context, BlockPos breakingPos) {
-		BlockState blockState = context.world.getBlockState(breakingPos);
-		boolean noHarvest = blockState.is(BlockTags.NEEDS_IRON_TOOL) || blockState.is(BlockTags.NEEDS_STONE_TOOL)
-			|| blockState.is(BlockTags.NEEDS_DIAMOND_TOOL);
-
-		BlockHelper.destroyBlock(context.world, breakingPos, 1f, stack -> {
-			if (noHarvest || context.world.random.nextBoolean())
-				return;
-			this.collectOrDropItem(context, stack);
-		});
-
-		super.destroyBlock(context, breakingPos);
-	}
-
-	RollerTravellingPoint rollerScout = new RollerTravellingPoint();
-
-	protected List<BlockPos> getPositionsToBreak(MovementContext context, BlockPos visitedPos) {
-		ArrayList<BlockPos> positions = new ArrayList<>();
-
-		RollingMode mode = getMode(context);
-		if (mode != RollingMode.TUNNEL_PAVE)
-			return positions;
-
-		int startingY = 1;
-		if (!getStateToPaveWith(context).isAir()) {
-			FilterItemStack filter = context.getFilterFromBE();
-			if (!ItemHelper
-				.extract(context.contraption.getStorage().getAllItems(),
-					stack -> filter.test(context.world, stack), 1, true)
-				.isEmpty())
-				startingY = 0;
-		}
-
-		// Train
-		PaveTask profileForTracks = createHeightProfileForTracks(context);
-		if (profileForTracks != null) {
-			for (Couple<Integer> coords : profileForTracks.keys()) {
-				float height = profileForTracks.get(coords);
-				BlockPos targetPosition = BlockPos.containing(coords.getFirst(), height, coords.getSecond());
-				boolean shouldPlaceSlab = height > Math.floor(height) + .45;
-				if (startingY == 1 && shouldPlaceSlab && context.world.getBlockState(targetPosition.above())
-					.getOptionalValue(SlabBlock.TYPE)
-					.orElse(SlabType.DOUBLE) == SlabType.BOTTOM)
-					startingY = 2;
-				for (int i = startingY; i <= (shouldPlaceSlab ? 3 : 2); i++)
-					if (testBreakerTarget(context, targetPosition.above(i), i))
-						positions.add(targetPosition.above(i));
-			}
-			return positions;
-		}
-
-		// Otherwise
-		for (int i = startingY; i <= 2; i++)
-			if (testBreakerTarget(context, visitedPos.above(i), i))
-				positions.add(visitedPos.above(i));
-
-		return positions;
-	}
-
-	protected boolean testBreakerTarget(MovementContext context, BlockPos target, int columnY) {
-		BlockState stateToPaveWith = getStateToPaveWith(context);
-		BlockState stateToPaveWithAsSlab = getStateToPaveWithAsSlab(context);
-		BlockState stateAbove = context.world.getBlockState(target);
-		if (columnY == 0 && stateAbove.is(stateToPaveWith.getBlock()))
-			return false;
-		if (stateToPaveWithAsSlab != null && columnY == 1 && stateAbove.is(stateToPaveWithAsSlab.getBlock()))
-			return false;
-		return canBreak(context.world, target, stateAbove);
-	}
-
-	@Nullable
-	protected PaveTask createHeightProfileForTracks(MovementContext context) {
-		if (context.contraption == null)
-			return null;
-		if (!(context.contraption.entity instanceof CarriageContraptionEntity cce))
-			return null;
-		Carriage carriage = cce.getCarriage();
-		if (carriage == null)
-			return null;
-		Train train = carriage.train;
-		if (train == null || train.graph == null)
-			return null;
-
-		CarriageBogey mainBogey = carriage.bogeys.getFirst();
-		TravellingPoint point = mainBogey.trailing();
-
-		rollerScout.node1 = point.node1;
-		rollerScout.node2 = point.node2;
-		rollerScout.edge = point.edge;
-		rollerScout.position = point.position;
-
-		Axis axis = Axis.X;
-		StructureBlockInfo info = context.contraption.getBlocks()
-			.get(BlockPos.ZERO);
-		if (info != null && info.state().hasProperty(StandardBogeyBlock.AXIS))
-			axis = info.state().getValue(StandardBogeyBlock.AXIS);
-
-		Direction orientation = cce.getInitialOrientation();
-		Direction rollerFacing = context.state.getValue(RollerBlock.FACING);
-
-		int step = orientation.getAxisDirection()
-			.getStep();
-		double widthWiseOffset = axis.choose(-context.localPos.getZ(), 0, -context.localPos.getX()) * step;
-		double lengthWiseOffset = axis.choose(-context.localPos.getX(), 0, context.localPos.getZ()) * step - 1;
-
-		if (rollerFacing == orientation.getClockWise())
-			lengthWiseOffset += 1;
-
-		double distanceToTravel = 2;
-		PaveTask heightProfile = new PaveTask(widthWiseOffset, widthWiseOffset);
-		ITrackSelector steering = rollerScout.steer(SteerDirection.NONE, new Vec3(0, 1, 0));
-
-		rollerScout.traversalCallback = (edge, coords) -> {
-		};
-		rollerScout.travel(train.graph, lengthWiseOffset + 1, steering);
-
-		rollerScout.traversalCallback = (edge, coords) -> {
-			if (edge == null)
-				return;
-			if (edge.isInterDimensional())
-				return;
-			if (edge.node1.getLocation().dimension != context.world.dimension())
-				return;
-			TrackPaverV2.pave(heightProfile, train.graph, edge, coords.getFirst(), coords.getSecond());
-		};
-		rollerScout.travel(train.graph, distanceToTravel, steering);
-
-		for (Couple<Integer> entry : heightProfile.keys())
-			heightProfile.put(entry.getFirst(), entry.getSecond(), context.localPos.getY() + heightProfile.get(entry));
-
-		return heightProfile;
-	}
-
-	protected void triggerPaver(MovementContext context, BlockPos pos) {
-		BlockState stateToPaveWith = getStateToPaveWith(context);
-		BlockState stateToPaveWithAsSlab = getStateToPaveWithAsSlab(context);
-		RollingMode mode = getMode(context);
-
-		if (mode != RollingMode.TUNNEL_PAVE && stateToPaveWith.isAir())
-			return;
-
-		Vec3 directionVec = Vec3.atLowerCornerOf(context.state.getValue(RollerBlock.FACING)
-			.getClockWise()
-			.getNormal());
-		directionVec = context.rotation.apply(directionVec);
-		PaveResult paveResult = PaveResult.PASS;
-		int yOffset = 0;
-
-		List<Pair<BlockPos, Boolean>> paveSet = new ArrayList<>();
-		PaveTask profileForTracks = createHeightProfileForTracks(context);
-		if (profileForTracks == null)
-			paveSet.add(Pair.of(pos, false));
-		else
-			for (Couple<Integer> coords : profileForTracks.keys()) {
-				float height = profileForTracks.get(coords);
-				boolean shouldPlaceSlab = height > Math.floor(height) + .45;
-				BlockPos targetPosition = BlockPos.containing(coords.getFirst(), height, coords.getSecond());
-				paveSet.add(Pair.of(targetPosition, shouldPlaceSlab));
-			}
-
-		if (paveSet.isEmpty())
-			return;
-
-		while (paveResult == PaveResult.PASS) {
-			if (yOffset > AllConfigs.server().kinetics.rollerFillDepth.get()) {
-				paveResult = PaveResult.FAIL;
-				break;
-			}
-
-			Set<Pair<BlockPos, Boolean>> currentLayer = new HashSet<>();
-			if (mode == RollingMode.WIDE_FILL) {
-				for (Pair<BlockPos, Boolean> anchor : paveSet) {
-					int radius = (yOffset + 1) / 2;
-					for (int i = -radius; i <= radius; i++)
-						for (int j = -radius; j <= radius; j++)
-							if (BlockPos.ZERO.distManhattan(new BlockPos(i, 0, j)) <= radius)
-								currentLayer.add(Pair.of(anchor.getFirst()
-									.offset(i, -yOffset, j), anchor.getSecond()));
-				}
-			} else
-				for (Pair<BlockPos, Boolean> anchor : paveSet)
-					currentLayer.add(Pair.of(anchor.getFirst()
-						.below(yOffset), anchor.getSecond()));
-
-			boolean completelyBlocked = true;
-			boolean anyBlockPlaced = false;
-
-			for (Pair<BlockPos, Boolean> currentPos : currentLayer) {
-				if (stateToPaveWithAsSlab != null && yOffset == 0 && currentPos.getSecond())
-					tryFill(context, currentPos.getFirst()
-						.above(), stateToPaveWithAsSlab);
-				paveResult = tryFill(context, currentPos.getFirst(), stateToPaveWith);
-				if (paveResult != PaveResult.FAIL)
-					completelyBlocked = false;
-				if (paveResult == PaveResult.SUCCESS)
-					anyBlockPlaced = true;
-			}
-
-			if (anyBlockPlaced)
-				paveResult = PaveResult.SUCCESS;
-			else if (!completelyBlocked || yOffset == 0)
-				paveResult = PaveResult.PASS;
-
-			if (paveResult == PaveResult.SUCCESS && stateToPaveWith.getBlock() instanceof FallingBlock)
-				paveResult = PaveResult.PASS;
-			if (paveResult != PaveResult.PASS)
-				break;
-			if (mode == RollingMode.TUNNEL_PAVE)
-				break;
-
-			yOffset++;
-		}
-
-		if (paveResult == PaveResult.SUCCESS) {
-			context.data.putInt("WaitingTicks", 2);
-			context.data.put("LastPos", NbtUtils.writeBlockPos(pos));
-			context.stall = true;
-		}
-	}
-
-	public static BlockState getStateToPaveWith(ItemStack itemStack) {
-		if (itemStack.getItem()instanceof BlockItem bi) {
-			BlockState defaultBlockState = bi.getBlock()
-				.defaultBlockState();
-			if (defaultBlockState.hasProperty(SlabBlock.TYPE))
-				defaultBlockState = defaultBlockState.setValue(SlabBlock.TYPE, SlabType.DOUBLE);
-			return defaultBlockState;
-		}
-		return Blocks.AIR.defaultBlockState();
-	}
-
-	protected BlockState getStateToPaveWith(MovementContext context) {
-		return getStateToPaveWith(ItemStack.parseOptional(context.world.registryAccess(), context.blockEntityData.getCompound("Filter")));
-	}
-
-	protected BlockState getStateToPaveWithAsSlab(MovementContext context) {
-		BlockState stateToPaveWith = getStateToPaveWith(context);
-		if (stateToPaveWith.hasProperty(SlabBlock.TYPE))
-			return stateToPaveWith.setValue(SlabBlock.TYPE, SlabType.BOTTOM);
-
-		Block block = stateToPaveWith.getBlock();
-		if (block == null)
-			return null;
-
-		ResourceLocation rl = BuiltInRegistries.BLOCK.getKey(block);
-		String namespace = rl.getNamespace();
-		String blockName = rl.getPath();
-		int nameLength = blockName.length();
-
-		List<String> possibleSlabLocations = new ArrayList<>();
-		possibleSlabLocations.add(blockName + "_slab");
-
-		if (blockName.endsWith("s") && nameLength > 1)
-			possibleSlabLocations.add(blockName.substring(0, nameLength - 1) + "_slab");
-		if (blockName.endsWith("planks") && nameLength > 7)
-			possibleSlabLocations.add(blockName.substring(0, nameLength - 7) + "_slab");
-
-		for (String locationAttempt : possibleSlabLocations) {
-			Optional<Block> result = BuiltInRegistries.BLOCK.getOptional(ResourceLocation.fromNamespaceAndPath(namespace, locationAttempt));
-			if (result.isEmpty())
-				continue;
-			return result.get()
-				.defaultBlockState();
-		}
-
-		return null;
-	}
-
-	protected RollingMode getMode(MovementContext context) {
-		return RollingMode.values()[context.blockEntityData.getInt("ScrollValue")];
-	}
-
-	private final class RollerTravellingPoint extends TravellingPoint {
-
-		public BiConsumer<TrackEdge, Couple<Double>> traversalCallback;
-
-		@Override
-		protected Double edgeTraversedFrom(TrackGraph graph, boolean forward, IEdgePointListener edgePointListener,
-			ITurnListener turnListener, double prevPos, double totalDistance) {
-			double from = forward ? prevPos : position;
-			double to = forward ? position : prevPos;
-			traversalCallback.accept(edge, Couple.create(from, to));
-			return super.edgeTraversedFrom(graph, forward, edgePointListener, turnListener, prevPos, totalDistance);
-		}
-
-	}
-
-	private enum PaveResult {
-		FAIL, PASS, SUCCESS;
-	}
-
-	protected PaveResult tryFill(MovementContext context, BlockPos targetPos, BlockState toPlace) {
-		Level level = context.world;
-		if (!level.isLoaded(targetPos))
-			return PaveResult.FAIL;
-		BlockState existing = level.getBlockState(targetPos);
-		if (existing.is(toPlace.getBlock()))
-			return PaveResult.PASS;
-		if (!existing.is(BlockTags.LEAVES) && !existing.canBeReplaced()
-			&& (!existing.getCollisionShape(level, targetPos)
-				.isEmpty()
-				|| existing.is(BlockTags.PORTALS)))
-			return PaveResult.FAIL;
-
-		FilterItemStack filter = context.getFilterFromBE();
-		ItemStack held = ItemHelper.extract(context.contraption.getStorage().getAllItems(),
-			stack -> filter.test(context.world, stack), 1, false);
-		if (held.isEmpty())
-			return PaveResult.FAIL;
-
-		level.setBlockAndUpdate(targetPos, toPlace);
-		return PaveResult.SUCCESS;
-	}
-
+    public static final ResourceKey<DamageType> ROLLER_DAMAGE = ResourceKey.create(Registries.DAMAGE_TYPE, Create.asResource("mechanical_roller"));
+    private static final TagKey<Block> TRACKS = TagKey.create(Registries.BLOCK, Create.asResource("tracks"));
+    @Override public boolean isActive(MovementContext context) {
+        var type = CreateBuiltInRegistries.CONTRAPTION_TYPE.getKey(context.contraption.getType());
+        return super.isActive(context) && !Create.asResource("pulley").equals(type)
+            && context.relativeMotion.normalize().dot(context.state.getValue(RollerBlock.FACING).getUnitVec3()) > .125;
+    }
+    @Override public boolean disableBlockEntityRendering() { return true; }
+    @Override public net.minecraft.world.phys.Vec3 getActiveAreaOffset(MovementContext context) { return context.state.getValue(RollerBlock.FACING).getUnitVec3().scale(.45).subtract(0, 2, 0); }
+    @Override protected float getBlockBreakingSpeed(MovementContext context) { return Mth.clamp(super.getBlockBreakingSpeed(context) * 1.5f, 1 / 128f, 16); }
+    @Override public boolean canBreak(Level level, BlockPos pos, BlockState state) {
+        if (!LoadedLevelAccess.isLoaded(level, pos)) return false;
+        for (var side : Direction.values()) if (!LoadedLevelAccess.isLoaded(level, pos.relative(side)) || LoadedLevelAccess.blockState(level, pos.relative(side)).is(BlockTags.PORTALS)) return false;
+        return super.canBreak(level, pos, state) && !state.getCollisionShape(level, pos).isEmpty() && !state.is(TRACKS);
+    }
+    @Override protected DamageSource getDamageSource(Level level) { return new DamageSource(level.registryAccess().lookupOrThrow(Registries.DAMAGE_TYPE).getOrThrow(ROLLER_DAMAGE)); }
+    @Override public void visitNewPosition(MovementContext context, BlockPos pos) {
+        var level = context.world; if (!LoadedLevelAccess.isLoaded(level, pos)) return;
+        if (!LoadedLevelAccess.blockState(level, pos).isRedstoneConductor(level, pos)) damageEntities(context, pos, level);
+        if (level.isClientSide()) return;
+        var targets = getPositionsToBreak(context, pos); BlockPos hardest = null; float hardness = -1;
+        for (var target : targets) { float value = LoadedLevelAccess.blockState(level, target).getDestroySpeed(level, target); if (value >= hardness) { hardest = target; hardness = value; } }
+        if (hardest == null) { triggerPaver(context, pos); return; }
+        context.data.store("ReferencePos", BlockPos.CODEC, pos); context.data.store("BreakingPos", BlockPos.CODEC, hardest); context.stall = true;
+    }
+    @Override protected void onBlockBroken(MovementContext context, BlockPos pos, BlockState state) {
+        super.onBlockBroken(context, pos, state);
+        var reference = context.data.read("ReferencePos", BlockPos.CODEC).orElse(null); if (reference == null) return;
+        for (var target : getPositionsToBreak(context, reference)) if (!target.equals(pos)) destroyBlock(context, target);
+        triggerPaver(context, reference); context.data.remove("ReferencePos");
+    }
+    @Override public void cancelStall(MovementContext context) { super.cancelStall(context); if (!context.world.isClientSide()) context.data.remove("ReferencePos"); }
+    @Override protected void destroyBlock(MovementContext context, BlockPos pos) {
+        if (!(context.world instanceof ServerLevel level) || !LoadedLevelAccess.isLoaded(level, pos)) return;
+        var state = LoadedLevelAccess.blockState(level, pos);
+        boolean noHarvest = state.is(BlockTags.NEEDS_IRON_TOOL) || state.is(BlockTags.NEEDS_STONE_TOOL) || state.is(BlockTags.NEEDS_DIAMOND_TOOL);
+        BlockHelper.destroyBlock(level, pos, 1, stack -> { if (!noHarvest && !level.getRandom().nextBoolean()) collectOrDropItem(context, stack); });
+        super.destroyBlock(context, pos);
+    }
+    protected List<BlockPos> getPositionsToBreak(MovementContext context, BlockPos visited) {
+        var result = new ArrayList<BlockPos>(); if (getMode(context) != RollingMode.TUNNEL_PAVE) return result;
+        int start = hasMaterial(context) && !getStateToPaveWith(context).isAir() ? 0 : 1;
+        var profile = createHeightProfileForTracks(context);
+        if (profile == null) { for (int i = start; i <= 2; i++) if (testBreakerTarget(context, visited.above(i), i)) result.add(visited.above(i)); return result; }
+        for (var coords : profile.keys()) {
+            float height = profile.get(coords); var target = BlockPos.containing(coords.getFirst(), height, coords.getSecond()); boolean slab = height > Math.floor(height) + .45;
+            int first = start;
+            if (first == 1 && slab && LoadedLevelAccess.blockState(context.world, target.above()).getOptionalValue(SlabBlock.TYPE).orElse(SlabType.DOUBLE) == SlabType.BOTTOM) first = 2;
+            for (int i = first; i <= (slab ? 3 : 2); i++) if (testBreakerTarget(context, target.above(i), i)) result.add(target.above(i));
+        }
+        return result;
+    }
+    protected boolean testBreakerTarget(MovementContext context, BlockPos target, int columnY) {
+        if (!LoadedLevelAccess.isLoaded(context.world, target)) return false;
+        var existing = LoadedLevelAccess.blockState(context.world, target); var slab = getStateToPaveWithAsSlab(context);
+        if (columnY == 0 && existing.is(getStateToPaveWith(context).getBlock()) || slab != null && columnY == 1 && existing.is(slab.getBlock())) return false;
+        return canBreak(context.world, target, existing);
+    }
+    protected PaveTask createHeightProfileForTracks(MovementContext context) {
+        if (context.contraption == null) return null;
+        if (!(context.contraption.entity instanceof CarriageContraptionEntity owner))
+            return context.contraption instanceof CarriageContraption ? new PaveTask(0, 0) : null;
+        // A real carriage which is not currently owned must never turn into the ordinary flat paver.
+        // Empty train profiles perform no terrain/material operation and retain no retired owner.
+        var empty = new PaveTask(0, 0);
+        var carriage = owner.getCarriage();
+        if (owner.isRemoved() || owner.level() != context.world || owner.getContraption() != context.contraption
+            || !owner.hasOwnedStructure() || carriage == null || carriage.train == null)
+            return empty;
+        var train = carriage.train;
+        if (train.graph == null || train.invalid || train.derailed || train.isRestoring()
+            || !owner.isGloballyManaged() || !(context.world instanceof ServerLevel server)
+            || server.getEntity(owner.getUUID()) != owner)
+            return empty;
+        var point = carriage.bogeys.getFirst().trailing();
+        var scout = new RollerTravellingPoint();
+        scout.node1 = point.node1;
+        scout.node2 = point.node2;
+        scout.edge = point.edge;
+        scout.position = point.position;
+        if (!scout.resolve(train.graph)) return empty;
+
+        Direction.Axis axis = Direction.Axis.X;
+        var info = context.contraption.getBlocks().get(BlockPos.ZERO);
+        if (info != null && info.state().hasProperty(AbstractBogeyBlock.AXIS))
+            axis = info.state().getValue(AbstractBogeyBlock.AXIS);
+        Direction orientation = owner.getInitialOrientation();
+        Direction rollerFacing = context.state.getValue(RollerBlock.FACING);
+        int step = orientation.getAxisDirection().getStep();
+        double widthWiseOffset = axis.choose(-context.localPos.getZ(), 0, -context.localPos.getX()) * step;
+        double lengthWiseOffset = axis.choose(-context.localPos.getX(), 0, context.localPos.getZ()) * step - 1;
+        if (rollerFacing == orientation.getClockWise()) lengthWiseOffset += 1;
+
+        var profile = new PaveTask(widthWiseOffset, widthWiseOffset);
+        var steering = scout.steer(TravellingPoint.SteerDirection.NONE, new Vec3(0, 1, 0));
+        scout.traversalCallback = (edge, coordinates) -> {};
+        scout.travel(train.graph, lengthWiseOffset + 1, steering);
+        scout.traversalCallback = (edge, coordinates) -> {
+            if (edge == null || edge.isInterDimensional()
+                || !edge.node1.getLocation().dimension.equals(context.world.dimension())) return;
+            TrackPaverV2.pave(profile, train.graph, edge, coordinates.getFirst(), coordinates.getSecond());
+        };
+        scout.travel(train.graph, 2, steering);
+        for (var coordinates : profile.keys())
+            profile.put(coordinates.getFirst(), coordinates.getSecond(), context.localPos.getY() + profile.get(coordinates));
+        return profile;
+    }
+
+    private static final class RollerTravellingPoint extends TravellingPoint {
+        java.util.function.BiConsumer<TrackEdge, Couple<Double>> traversalCallback;
+        @Override protected Double edgeTraversedFrom(TrackGraph graph, boolean forward,
+            IEdgePointListener edgePointListener, ITurnListener turnListener, double previousPosition, double totalDistance) {
+            double from = forward ? previousPosition : position;
+            double to = forward ? position : previousPosition;
+            traversalCallback.accept(edge, Couple.create(from, to));
+            return super.edgeTraversedFrom(graph, forward, edgePointListener, turnListener, previousPosition, totalDistance);
+        }
+    }
+    protected void triggerPaver(MovementContext context, BlockPos pos) {
+        var toPlace = getStateToPaveWith(context); var slab = getStateToPaveWithAsSlab(context); var mode = getMode(context);
+        if (mode != RollingMode.TUNNEL_PAVE && toPlace.isAir()) return;
+        var anchors = new ArrayList<Pair<BlockPos, Boolean>>(); var profile = createHeightProfileForTracks(context);
+        if (profile == null) anchors.add(Pair.of(pos, false));
+        else for (var coords : profile.keys()) { float height = profile.get(coords); anchors.add(Pair.of(BlockPos.containing(coords.getFirst(), height, coords.getSecond()), height > Math.floor(height) + .45)); }
+        if (anchors.isEmpty()) return;
+        PaveResult result = PaveResult.PASS;
+        for (int depth = 0; result == PaveResult.PASS && depth <= Math.max(1, ContraptionSettings.rollerFillDepth); depth++) {
+            var layer = new HashSet<Pair<BlockPos, Boolean>>();
+            for (var anchor : anchors) {
+                int radius = mode == RollingMode.WIDE_FILL ? (depth + 1) / 2 : 0;
+                for (int x = -radius; x <= radius; x++) for (int z = -radius; z <= radius; z++)
+                    if (Math.abs(x) + Math.abs(z) <= radius) layer.add(Pair.of(anchor.getFirst().offset(x, -depth, z), anchor.getSecond()));
+            }
+            boolean blocked = true, placed = false;
+            for (var target : layer) {
+                if (slab != null && depth == 0 && target.getSecond()) tryFill(context, target.getFirst().above(), slab);
+                result = tryFill(context, target.getFirst(), toPlace); if (result != PaveResult.FAIL) blocked = false; if (result == PaveResult.SUCCESS) placed = true;
+            }
+            if (placed) result = PaveResult.SUCCESS; else if (!blocked || depth == 0) result = PaveResult.PASS;
+            if (result == PaveResult.SUCCESS && toPlace.getBlock() instanceof FallingBlock) result = PaveResult.PASS;
+            if (result != PaveResult.PASS || mode == RollingMode.TUNNEL_PAVE) break;
+        }
+        if (result == PaveResult.SUCCESS) { context.data.putInt("WaitingTicks", 2); context.data.store("LastPos", BlockPos.CODEC, pos); context.stall = true; }
+    }
+    public static BlockState getStateToPaveWith(ItemStack stack) {
+        if (!(stack.getItem() instanceof BlockItem item)) return Blocks.AIR.defaultBlockState();
+        var state = item.getBlock().defaultBlockState(); return state.hasProperty(SlabBlock.TYPE) ? state.setValue(SlabBlock.TYPE, SlabType.DOUBLE) : state;
+    }
+    protected BlockState getStateToPaveWith(MovementContext context) {
+        var input = TagValueInput.create(net.minecraft.util.ProblemReporter.DISCARDING, context.world.registryAccess(), context.blockEntityData);
+        return getStateToPaveWith(input.read("Filter", ItemStack.OPTIONAL_CODEC).orElse(ItemStack.EMPTY));
+    }
+    protected BlockState getStateToPaveWithAsSlab(MovementContext context) {
+        var state = getStateToPaveWith(context); if (state.hasProperty(SlabBlock.TYPE)) return state.setValue(SlabBlock.TYPE, SlabType.BOTTOM);
+        var id = BuiltInRegistries.BLOCK.getKey(state.getBlock()); String name = id.getPath(); var names = new ArrayList<String>(); names.add(name + "_slab");
+        if (name.endsWith("s") && name.length() > 1) names.add(name.substring(0, name.length() - 1) + "_slab");
+        if (name.endsWith("planks") && name.length() > 7) names.add(name.substring(0, name.length() - 7) + "_slab");
+        for (var candidate : names) { var block = BuiltInRegistries.BLOCK.getOptional(Identifier.fromNamespaceAndPath(id.getNamespace(), candidate)); if (block.isPresent()) return block.get().defaultBlockState(); }
+        return null;
+    }
+    protected RollingMode getMode(MovementContext context) { return RollingMode.values()[Math.clamp(context.blockEntityData.getIntOr("ScrollValue", 0), 0, 2)]; }
+    private boolean hasMaterial(MovementContext context) { try (var tx = Transaction.openOuter()) { return extractMaterial(context, tx); } }
+    private boolean extractMaterial(MovementContext context, net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext tx) {
+        var filter = context.getFilterFromBE();
+        for (var view : context.contraption.getStorage().getAllItems()) if (!view.isResourceBlank() && view.getAmount() > 0 && filter.test(context.world, view.getResource().toStack()) && view.extract(view.getResource(), 1, tx) == 1) return true;
+        return false;
+    }
+    protected enum PaveResult { FAIL, PASS, SUCCESS }
+    protected PaveResult tryFill(MovementContext context, BlockPos target, BlockState toPlace) {
+        var level = context.world;
+        if (level.isOutsideBuildHeight(target) || !LoadedLevelAccess.isLoaded(level, target)) return PaveResult.FAIL;
+        var existing = LoadedLevelAccess.blockState(level, target); if (existing.is(toPlace.getBlock())) return PaveResult.PASS;
+        if (!existing.is(BlockTags.LEAVES) && !existing.canBeReplaced() && (!existing.getCollisionShape(level, target).isEmpty() || existing.is(BlockTags.PORTALS))) return PaveResult.FAIL;
+        try (var tx = Transaction.openOuter()) {
+            if (!extractMaterial(context, tx) || !level.setBlockAndUpdate(target, toPlace)) return PaveResult.FAIL;
+            tx.commit(); return PaveResult.SUCCESS;
+        }
+    }
 }

@@ -1,254 +1,104 @@
 package com.simibubi.create.content.kinetics.saw;
 
-import java.util.List;
-import java.util.function.Predicate;
-
-import javax.annotation.ParametersAreNonnullByDefault;
-
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.kinetics.base.DirectionalAxisKineticBlock;
+import com.simibubi.create.*;
+import com.simibubi.create.content.kinetics.base.*;
 import com.simibubi.create.content.kinetics.drill.DrillBlock;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.damageTypes.CreateDamageSources;
-
-import net.createmod.catnip.placement.IPlacementHelper;
-import net.createmod.catnip.placement.PlacementHelpers;
-import net.createmod.catnip.placement.PlacementOffset;
-import net.minecraft.MethodsReturnNonnullByDefault;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.Direction.AxisDirection;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.core.*;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.*;
+import net.minecraft.world.damagesource.DamageType;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Mirror;
-import net.minecraft.world.level.block.Rotation;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.material.PushReaction;
-import net.minecraft.world.level.pathfinder.PathComputationType;
-import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.redstone.Orientation;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.*;
 
-@ParametersAreNonnullByDefault
-@MethodsReturnNonnullByDefault
-public class SawBlock extends DirectionalAxisKineticBlock implements IBE<SawBlockEntity> {
-	public static final BooleanProperty FLIPPED = BooleanProperty.create("flipped");
+public final class SawBlock extends KineticBlock {
+    public static final EnumProperty<Direction> FACING = BlockStateProperties.FACING;
+    public static final BooleanProperty AXIS_ALONG_FIRST_COORDINATE = BooleanProperty.create("axis_along_first"), FLIPPED = BooleanProperty.create("flipped");
+    public static final ResourceKey<DamageType> SAW_DAMAGE = ResourceKey.create(Registries.DAMAGE_TYPE, Create.asResource("mechanical_saw"));
+    public SawBlock(Properties properties) { super(properties); registerDefaultState(stateDefinition.any().setValue(FACING, Direction.UP).setValue(AXIS_ALONG_FIRST_COORDINATE, false).setValue(FLIPPED, false)); }
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { builder.add(FACING, AXIS_ALONG_FIRST_COORDINATE, FLIPPED); }
+    @Override public Direction.Axis getRotationAxis(BlockState state) { return state.getValue(FACING).getAxis().isHorizontal() ? state.getValue(FACING).getAxis() : state.getValue(AXIS_ALONG_FIRST_COORDINATE) ? Direction.Axis.X : Direction.Axis.Z; }
+    @Override public boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face) { return state.getValue(FACING).getAxis().isHorizontal() ? face == state.getValue(FACING).getOpposite() : face.getAxis() == getRotationAxis(state); }
+    @Override protected RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
+    @Override protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) { return DrillBlock.casingShape(state.getValue(FACING)); }
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context) {
+        Direction facing = context.getNearestLookingDirection().getOpposite(); if (context.getPlayer() != null && context.getPlayer().isShiftKeyDown()) facing = facing.getOpposite();
+        boolean alongFirst = context.getHorizontalDirection().getAxis() == Direction.Axis.X;
+        if (facing.getAxis().isVertical()) {
+            Direction preferred = null;
+            for (var side : Direction.Plane.HORIZONTAL) {
+                var next = context.getClickedPos().relative(side); var neighbor = context.getLevel().getBlockState(next);
+                if (neighbor.getBlock() instanceof IRotate rotate && rotate.hasShaftTowards(context.getLevel(), next, neighbor, side.getOpposite())) {
+                    if (preferred != null && preferred.getAxis() != side.getAxis()) { preferred = null; break; } preferred = side;
+                }
+            }
+            if (preferred != null) alongFirst = preferred.getAxis() == Direction.Axis.X;
+        } else alongFirst = facing.getAxis() == Direction.Axis.Z;
+        return defaultBlockState().setValue(FACING, facing).setValue(AXIS_ALONG_FIRST_COORDINATE, alongFirst).setValue(FLIPPED, facing.getAxis().isVertical() && context.getHorizontalDirection().getAxisDirection() == Direction.AxisDirection.POSITIVE);
+    }
+    @Override protected BlockState rotate(BlockState state, Rotation rotation) {
+        var original = state;
+        if (rotation == Rotation.CLOCKWISE_90 || rotation == Rotation.COUNTERCLOCKWISE_90) state = state.cycle(AXIS_ALONG_FIRST_COORDINATE);
+        state = state.setValue(FACING, rotation.rotate(state.getValue(FACING)));
+        if (original.getValue(FACING).getAxis().isVertical()) {
+            if (rotation == Rotation.CLOCKWISE_180 || (rotation == Rotation.CLOCKWISE_90 || rotation == Rotation.COUNTERCLOCKWISE_90)
+                    && (rotation == Rotation.CLOCKWISE_90) != original.getValue(AXIS_ALONG_FIRST_COORDINATE)) state = state.cycle(FLIPPED);
+        }
+        return state;
+    }
+    @Override protected BlockState mirror(BlockState state, Mirror mirror) {
+        var facing = mirror.mirror(state.getValue(FACING)); state = state.setValue(FACING, facing);
+        if (facing.getAxis().isVertical() && (state.getValue(AXIS_ALONG_FIRST_COORDINATE) && mirror == Mirror.FRONT_BACK || !state.getValue(AXIS_ALONG_FIRST_COORDINATE) && mirror == Mirror.LEFT_RIGHT)) state = state.cycle(FLIPPED);
+        return state;
+    }
+    @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new SawBlockEntity(pos, state); }
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) { return createTickerHelper(type, AllBlockEntityTypes.SAW, SawBlockEntity::tick); }
+    @Override protected void neighborChanged(BlockState state, Level level, BlockPos pos, Block neighbor, Orientation orientation, boolean moved) { super.neighborChanged(state, level, pos, neighbor, orientation, moved); if (level.getBlockEntity(pos) instanceof SawBlockEntity saw) saw.destroyNextTick(); }
+    @Override protected void entityInside(BlockState state, Level level, BlockPos pos, Entity entity, InsideBlockEffectApplier effects, boolean inside) { if (level.getBlockEntity(pos) instanceof SawBlockEntity saw) DrillBlock.hurtInside(level, pos, entity, saw.getSpeed(), SAW_DAMAGE); }
+    @Override protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+        if (player.isSpectator() || state.getValue(FACING) != Direction.UP) return InteractionResult.PASS;
+        if (!level.isClientSide() && level.getBlockEntity(pos) instanceof SawBlockEntity saw) {
+            if (player.isShiftKeyDown()) saw.getFilteringBehaviour().applyPlayerSample(player, InteractionHand.MAIN_HAND);
+            else saw.inventory.collect().forEach(stack -> player.getInventory().placeItemBackInInventory(stack, net.minecraft.util.Prediction.SERVER_ONLY));
+        }
+        return InteractionResult.SUCCESS;
+    }
+    @Override protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+        if (!player.isShiftKeyDown() && player.mayBuild() && stack.getItem() instanceof SawBlockItem sawItem) {
+            var directions = java.util.Arrays.stream(Direction.values()).filter(side -> side.getAxis() != state.getValue(FACING).getAxis())
+                    .filter(side -> level.isLoaded(pos.relative(side)) && level.getBlockState(pos.relative(side)).canBeReplaced())
+                    .sorted(java.util.Comparator.comparingDouble(side -> hit.getLocation().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos).add(side.getStepX() * 0.5, side.getStepY() * 0.5, side.getStepZ() * 0.5)))).toList();
+            if (!directions.isEmpty()) {
+                var target = pos.relative(directions.getFirst());
+                var result = sawItem.place(new SawBlockItem.RowPlacement(player, hand, stack, new BlockHitResult(net.minecraft.world.phys.Vec3.atCenterOf(target), hit.getDirection(), target, false), state));
+                if (result.consumesAction()) return result;
+            }
+        }
+        if (player.isShiftKeyDown() && player.mayBuild() && !stack.is(AllItems.WRENCH) && state.getValue(FACING) == Direction.UP) {
+            if (!level.isClientSide() && level.getBlockEntity(pos) instanceof SawBlockEntity saw) saw.getFilteringBehaviour().applyPlayerSample(player, hand);
+            return InteractionResult.SUCCESS;
+        }
+        return InteractionResult.PASS;
+    }
 
-	private static final int placementHelperId = PlacementHelpers.register(new PlacementHelper());
-
-	public SawBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(FLIPPED));
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		BlockState stateForPlacement = super.getStateForPlacement(context);
-		Direction facing = stateForPlacement.getValue(FACING);
-		return stateForPlacement.setValue(FLIPPED, facing.getAxis() == Axis.Y && context.getHorizontalDirection()
-			.getAxisDirection() == AxisDirection.POSITIVE);
-	}
-
-	@Override
-	public BlockState getRotatedBlockState(BlockState originalState, Direction targetedFace) {
-		BlockState newState = super.getRotatedBlockState(originalState, targetedFace);
-		if (newState.getValue(FACING)
-			.getAxis() != Axis.Y)
-			return newState;
-		if (targetedFace.getAxis() != Axis.Y)
-			return newState;
-		if (!originalState.getValue(AXIS_ALONG_FIRST_COORDINATE))
-			newState = newState.cycle(FLIPPED);
-		return newState;
-	}
-
-	@Override
-	public BlockState rotate(BlockState state, Rotation rot) {
-		BlockState newState = super.rotate(state, rot);
-		if (state.getValue(FACING)
-			.getAxis() != Axis.Y)
-			return newState;
-
-		if (rot.ordinal() % 2 == 1 && (rot == Rotation.CLOCKWISE_90) != state.getValue(AXIS_ALONG_FIRST_COORDINATE))
-			newState = newState.cycle(FLIPPED);
-		if (rot == Rotation.CLOCKWISE_180)
-			newState = newState.cycle(FLIPPED);
-
-		return newState;
-	}
-
-	@Override
-	public BlockState mirror(BlockState state, Mirror mirrorIn) {
-		BlockState newState = super.mirror(state, mirrorIn);
-		if (state.getValue(FACING)
-			.getAxis() != Axis.Y)
-			return newState;
-
-		boolean alongX = state.getValue(AXIS_ALONG_FIRST_COORDINATE);
-		if (alongX && mirrorIn == Mirror.FRONT_BACK)
-			newState = newState.cycle(FLIPPED);
-		if (!alongX && mirrorIn == Mirror.LEFT_RIGHT)
-			newState = newState.cycle(FLIPPED);
-
-		return newState;
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		return AllShapes.CASING_12PX.get(state.getValue(FACING));
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		IPlacementHelper placementHelper = PlacementHelpers.get(placementHelperId);
-		if (!player.isShiftKeyDown() && player.mayBuild()) {
-			if (placementHelper.matchesItem(stack) && placementHelper.getOffset(player, level, state, pos, hitResult)
-				.placeInWorld(level, (BlockItem) stack.getItem(), player, hand, hitResult)
-				.consumesAction())
-				return ItemInteractionResult.SUCCESS;
-		}
-
-		if (player.isSpectator() || !stack.isEmpty())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		if (state.getOptionalValue(FACING)
-			.orElse(Direction.WEST) != Direction.UP)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		return onBlockEntityUseItemOn(level, pos, be -> {
-			for (int i = 0; i < be.inventory.getSlots(); i++) {
-				ItemStack heldItemStack = be.inventory.getStackInSlot(i);
-				if (!level.isClientSide && !heldItemStack.isEmpty())
-					player.getInventory()
-						.placeItemBackInInventory(heldItemStack);
-			}
-			be.inventory.clear();
-			be.notifyUpdate();
-			return ItemInteractionResult.SUCCESS;
-		});
-	}
-
-	@Override
-	public void entityInside(BlockState state, Level worldIn, BlockPos pos, Entity entityIn) {
-		if (entityIn instanceof ItemEntity)
-			return;
-		if (!new AABB(pos).deflate(.1f)
-			.intersects(entityIn.getBoundingBox()))
-			return;
-		withBlockEntityDo(worldIn, pos, be -> {
-			if (be.getSpeed() == 0)
-				return;
-			entityIn.hurt(CreateDamageSources.saw(worldIn), (float) DrillBlock.getDamage(be.getSpeed()));
-		});
-	}
-
-	@Override
-	public void updateEntityAfterFallOn(BlockGetter worldIn, Entity entityIn) {
-		super.updateEntityAfterFallOn(worldIn, entityIn);
-		if (!(entityIn instanceof ItemEntity))
-			return;
-		if (entityIn.level().isClientSide)
-			return;
-
-		BlockPos pos = entityIn.blockPosition();
-		withBlockEntityDo(entityIn.level(), pos, be -> {
-			if (be.getSpeed() == 0)
-				return;
-			be.insertItem((ItemEntity) entityIn);
-		});
-	}
-
-	@Override
-	public PushReaction getPistonPushReaction(BlockState state) {
-		return PushReaction.NORMAL;
-	}
-
-	public static boolean isHorizontal(BlockState state) {
-		return state.getValue(FACING)
-			.getAxis()
-			.isHorizontal();
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return isHorizontal(state) ? state.getValue(FACING)
-			.getAxis() : super.getRotationAxis(state);
-	}
-
-	@Override
-	public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-		return isHorizontal(state) ? face == state.getValue(FACING)
-			.getOpposite() : super.hasShaftTowards(world, pos, state, face);
-	}
-
-	@Override
-	public Class<SawBlockEntity> getBlockEntityClass() {
-		return SawBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends SawBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.SAW.get();
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@MethodsReturnNonnullByDefault
-	private static class PlacementHelper implements IPlacementHelper {
-
-		@Override
-		public Predicate<ItemStack> getItemPredicate() {
-			return AllBlocks.MECHANICAL_SAW::isIn;
-		}
-
-		@Override
-		public Predicate<BlockState> getStatePredicate() {
-			return state -> AllBlocks.MECHANICAL_SAW.has(state);
-		}
-
-		@Override
-		public PlacementOffset getOffset(Player player, Level world, BlockState state, BlockPos pos,
-			BlockHitResult ray) {
-			List<Direction> directions = IPlacementHelper.orderedByDistanceExceptAxis(pos, ray.getLocation(),
-				state.getValue(FACING)
-					.getAxis(),
-				dir -> world.getBlockState(pos.relative(dir))
-					.canBeReplaced());
-
-			if (directions.isEmpty())
-				return PlacementOffset.fail();
-			else {
-				return PlacementOffset.success(pos.relative(directions.get(0)),
-					s -> s.setValue(FACING, state.getValue(FACING))
-					.setValue(AXIS_ALONG_FIRST_COORDINATE, state.getValue(AXIS_ALONG_FIRST_COORDINATE))
-					.setValue(FLIPPED, state.getValue(FLIPPED)));
-			}
-		}
-
-	}
-
+    public static BlockState wrenchRotation(BlockState state, Direction targetedFace) {
+        var original = state;
+        if (state.getValue(FACING).getAxis() == targetedFace.getAxis()) state = state.cycle(AXIS_ALONG_FIRST_COORDINATE);
+        else {
+            state = state.setValue(FACING, state.getValue(FACING).getClockWise(targetedFace.getAxis()));
+            if (targetedFace.getAxis().isVertical()) state = state.cycle(AXIS_ALONG_FIRST_COORDINATE);
+        }
+        if (state.getValue(FACING).getAxis().isVertical() && targetedFace.getAxis().isVertical() && !original.getValue(AXIS_ALONG_FIRST_COORDINATE)) state = state.cycle(FLIPPED);
+        return state;
+    }
 }

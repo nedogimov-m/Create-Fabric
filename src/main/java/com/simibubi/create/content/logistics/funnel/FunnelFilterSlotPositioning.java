@@ -1,103 +1,15 @@
 package com.simibubi.create.content.logistics.funnel;
 
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.simibubi.create.content.logistics.funnel.BeltFunnelBlock.Shape;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.math.AngleHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.core.*;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.*;
 
-public class FunnelFilterSlotPositioning extends ValueBoxTransform.Sided {
-
-	@Override
-	public Vec3 getLocalOffset(LevelAccessor level, BlockPos pos, BlockState state) {
-		Direction side = getSide();
-		float horizontalAngle = AngleHelper.horizontalAngle(side);
-		Direction funnelFacing = FunnelBlock.getFunnelFacing(state);
-		float stateAngle = AngleHelper.horizontalAngle(funnelFacing);
-
-		if (state.getBlock() instanceof BeltFunnelBlock) {
-			switch (state.getValue(BeltFunnelBlock.SHAPE)) {
-
-			case EXTENDED:
-				return VecHelper.rotateCentered(VecHelper.voxelSpace(8, 15.5f, 13), stateAngle, Axis.Y);
-			case PULLING:
-			case PUSHING:
-				return VecHelper.rotateCentered(VecHelper.voxelSpace(8, 12.0f, 8.675f), horizontalAngle, Axis.Y);
-			default:
-			case RETRACTED:
-				return VecHelper.rotateCentered(VecHelper.voxelSpace(8, 13, 7.5f), horizontalAngle, Axis.Y);
-			}
-		}
-
-		if (!funnelFacing.getAxis()
-			.isHorizontal()) {
-			Vec3 southLocation = VecHelper.voxelSpace(8, funnelFacing == Direction.DOWN ? 14 : 2, 15.5f);
-			return VecHelper.rotateCentered(southLocation, horizontalAngle, Axis.Y);
-		}
-
-		return VecHelper.rotateCentered(VecHelper.voxelSpace(8, 12.2, 8.55f), horizontalAngle, Axis.Y);
-	}
-
-	@Override
-	public void rotate(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms) {
-		Direction facing = FunnelBlock.getFunnelFacing(state);
-
-		if (facing.getAxis()
-			.isVertical()) {
-			super.rotate(level, pos, state, ms);
-			return;
-		}
-
-		boolean isBeltFunnel = state.getBlock() instanceof BeltFunnelBlock;
-		if (isBeltFunnel && state.getValue(BeltFunnelBlock.SHAPE) != Shape.EXTENDED) {
-			Shape shape = state.getValue(BeltFunnelBlock.SHAPE);
-			super.rotate(level, pos, state, ms);
-			if (shape == Shape.PULLING || shape == Shape.PUSHING)
-				TransformStack.of(ms)
-					.rotateXDegrees(-22.5f);
-			return;
-		}
-
-		if (state.getBlock() instanceof FunnelBlock) {
-			super.rotate(level, pos, state, ms);
-			TransformStack.of(ms)
-				.rotateXDegrees(-22.5f);
-			return;
-		}
-
-		float yRot = AngleHelper.horizontalAngle(AbstractFunnelBlock.getFunnelFacing(state))
-			+ (facing == Direction.DOWN ? 180 : 0);
-		TransformStack.of(ms)
-			.rotateYDegrees(yRot)
-			.rotateXDegrees(facing == Direction.DOWN ? -90 : 90);
-	}
-
-	@Override
-	protected boolean isSideActive(BlockState state, Direction direction) {
-		Direction facing = FunnelBlock.getFunnelFacing(state);
-
-		if (facing == null)
-			return false;
-		if (facing.getAxis()
-			.isVertical())
-			return direction.getAxis()
-				.isHorizontal();
-		if (state.getBlock() instanceof BeltFunnelBlock && state.getValue(BeltFunnelBlock.SHAPE) == Shape.EXTENDED)
-			return direction == Direction.UP;
-		return direction == facing;
-	}
-
-	@Override
-	protected Vec3 getSouthLocation() {
-		return Vec3.ZERO;
-	}
-
+public final class FunnelFilterSlotPositioning {
+    public static boolean activeSide(BlockState state,Direction side){var facing=AbstractFunnelBlock.getFunnelFacing(state);if(facing==null)return false;if(facing.getAxis().isVertical())return side.getAxis().isHorizontal();return state.getBlock() instanceof BeltFunnelBlock&&state.getValue(BeltFunnelBlock.SHAPE)==BeltFunnelBlock.Shape.EXTENDED?side==Direction.UP:side==facing;}
+    public static Vec3 position(BlockState state,Direction side){var facing=AbstractFunnelBlock.getFunnelFacing(state);double y,z;Direction rotation=side;
+        if(state.getBlock() instanceof BeltFunnelBlock){switch(state.getValue(BeltFunnelBlock.SHAPE)){case EXTENDED->{y=15.5;z=13;rotation=facing;}case PULLING,PUSHING->{y=12;z=8.675;}default->{y=13;z=7.5;}}}else if(facing.getAxis().isVertical()){y=facing==Direction.DOWN?14:2;z=15.5;}else{y=12.2;z=8.55;}
+        double d=(z-8)/16;return new Vec3(0.5+rotation.getStepX()*d,y/16,0.5+rotation.getStepZ()*d);
+    }
+    public static boolean testHit(BlockState state,BlockPos pos,BlockHitResult hit){return activeSide(state,hit.getDirection())&&position(state,hit.getDirection()).distanceTo(hit.getLocation().subtract(Vec3.atLowerCornerOf(pos)))<0.25;}
+    private FunnelFilterSlotPositioning(){}
 }

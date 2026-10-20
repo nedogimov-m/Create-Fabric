@@ -8,6 +8,10 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 public class ClutchBlockEntity extends SplitShaftBlockEntity {
 
+	public ClutchBlockEntity(BlockPos pos, BlockState state) {
+		this(com.simibubi.create.AllBlockEntityTypes.CLUTCH, pos, state);
+	}
+
 	public ClutchBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
 		super(type, pos, state);
 	}

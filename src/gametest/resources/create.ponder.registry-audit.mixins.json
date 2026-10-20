@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "package": "net.createmod.ponder.test.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "PonderViewportExtractionAuditMixin",
+    "PonderViewportSubmissionAuditMixin",
+    "PonderNativeBlitAuditMixin",
+    "PonderSceneScheduleAuditAccessor",
+    "PonderWorldParticlesAuditAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

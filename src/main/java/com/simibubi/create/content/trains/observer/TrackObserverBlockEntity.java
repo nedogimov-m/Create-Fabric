@@ -1,161 +1,57 @@
 package com.simibubi.create.content.trains.observer;
 
-import java.util.List;
-import java.util.UUID;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.Create;
 import com.simibubi.create.api.contraption.transformable.TransformableBlockEntity;
-import com.simibubi.create.compat.Mods;
-import com.simibubi.create.compat.computercraft.AbstractComputerBehaviour;
-import com.simibubi.create.compat.computercraft.ComputerCraftProxy;
-import com.simibubi.create.compat.computercraft.events.TrainPassEvent;
 import com.simibubi.create.content.contraptions.StructureTransform;
-import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock;
-import com.simibubi.create.content.trains.graph.EdgePointType;
-import com.simibubi.create.content.trains.track.TrackTargetingBehaviour;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
+import com.simibubi.create.content.trains.signal.TrackEdgePoint;
+import com.simibubi.create.content.trains.track.*;
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
 import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import dan200.computercraft.api.peripheral.PeripheralCapability;
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.minecraft.core.BlockPos;
+import net.minecraft.core.*;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.world.Clearable;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.*;
 
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
+/** True native detector owner, shared source filter interaction and actual redstone/display output. */
+public final class TrackObserverBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements TransformableBlockEntity,Clearable,
+    TrackEdgePoint.MigrationReceiver,TrackTargetingBlockItem.Target,BlockEntityBehaviour.Provider {
+  private final TrackTargetingBehaviour<TrackObserver> targeting=new TrackTargetingBehaviour<>(this,ObserverEdgePoints.OBSERVER,this::sync);
+  public final FilteringBehaviour filtering=new FilteringBehaviour(this).setLabel(Component.translatable("create.logistics.train_observer.cargo_filter")).withCallback(this::onFilterChanged);
+  public TrackObserverBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.TRACK_OBSERVER,pos,state);}
+  @Override public TrackTargetingBehaviour<TrackObserver> targeting(){return targeting;}
+  @Override public boolean setTarget(TrackTargetingSelection selected){boolean accepted=targeting.configure(selected);if(accepted)targeting.resolveTick();return accepted;}
+  public TrackObserver getObserver(){return targeting.getEdgePoint();}
+  public ItemStack getFilter(){return filtering.getFilter();}
+  public boolean isBlockPowered(){return getBlockState().getValue(TrackObserverBlock.POWERED);}
+  private void onFilterChanged(ItemStack filter){if(level==null||level.isClientSide())return;var observer=getObserver();if(observer!=null)observer.setFilterAndNotify(level,filter);}
+  private void sync(){setChanged();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS);}
+  public static void tick(Level level,BlockPos pos,BlockState state,TrackObserverBlockEntity entity){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, entity)) {
+            if (!createTick.shouldTick()) return;
 
-public class TrackObserverBlockEntity extends SmartBlockEntity implements TransformableBlockEntity, Clearable {
-	public TrackTargetingBehaviour<TrackObserver> edgePoint;
-
-	private FilteringBehaviour filtering;
-
-	public AbstractComputerBehaviour computerBehaviour;
-	public @org.jetbrains.annotations.Nullable UUID passingTrainUUID;
-
-	public TrackObserverBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		if (Mods.COMPUTERCRAFT.isLoaded()) {
-			event.registerBlockEntity(
-				PeripheralCapability.get(),
-				AllBlockEntityTypes.TRACK_OBSERVER.get(),
-				(be, context) -> be.computerBehaviour.getPeripheralCapability()
-			);
-		}
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(edgePoint = new TrackTargetingBehaviour<>(this, EdgePointType.OBSERVER));
-		behaviours.add(filtering = createFilter().withCallback(this::onFilterChanged));
-		behaviours.add(computerBehaviour = ComputerCraftProxy.behaviour(this));
-		filtering.setLabel(CreateLang.translateDirect("logistics.train_observer.cargo_filter"));
-	}
-
-	private void onFilterChanged(ItemStack newFilter) {
-		if (level.isClientSide())
-			return;
-		TrackObserver observer = getObserver();
-		if (observer != null)
-			observer.setFilterAndNotify(level, newFilter);
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		if (level.isClientSide())
-			return;
-
-		boolean shouldBePowered = false;
-		TrackObserver observer = getObserver();
-		if (observer != null)
-			shouldBePowered = observer.isActivated();
-		if (isBlockPowered() == shouldBePowered)
-			return;
-
-		if (observer != null && computerBehaviour.hasAttachedComputer()) {
-			if (shouldBePowered)
-				passingTrainUUID = observer.getCurrentTrain();
-			if (passingTrainUUID != null) {
-				computerBehaviour.prepareComputerEvent(
-						new TrainPassEvent(Create.RAILWAYS.trains.get(passingTrainUUID), shouldBePowered));
-				if (!shouldBePowered)
-					passingTrainUUID = null;
-			}
-		}
-
-		BlockState blockState = getBlockState();
-		if (blockState.hasProperty(TrackObserverBlock.POWERED))
-			level.setBlock(worldPosition, blockState.setValue(TrackObserverBlock.POWERED, shouldBePowered), Block.UPDATE_ALL);
-		DisplayLinkBlock.notifyGatherers(level, worldPosition);
-	}
-
-	@Nullable
-	public TrackObserver getObserver() {
-		return edgePoint.getEdgePoint();
-	}
-
-	public ItemStack getFilter() {
-		return filtering.getFilter();
-	}
-
-	public boolean isBlockPowered() {
-		return getBlockState().getOptionalValue(TrackObserverBlock.POWERED)
-			.orElse(false);
-	}
-
-	@Override
-	protected AABB createRenderBoundingBox() {
-		return new AABB(Vec3.atLowerCornerOf(worldPosition), Vec3.atLowerCornerOf(edgePoint.getGlobalPosition())).inflate(2);
-	}
-
-	@Override
-	public void transform(BlockEntity be, StructureTransform transform) {
-		edgePoint.transform(be, transform);
-	}
-
-	public FilteringBehaviour createFilter() {
-		return new FilteringBehaviour(this, new ValueBoxTransform() {
-
-			@Override
-			public void rotate(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms) {
-				TransformStack.of(ms)
-					.rotateXDegrees(90);
-			}
-
-			@Override
-			public Vec3 getLocalOffset(LevelAccessor level, BlockPos pos, BlockState state) {
-				return new Vec3(0.5, 15.5 / 16d, 0.5);
-			}
-
-		});
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		computerBehaviour.removePeripheral();
-	}
-
-	@Override
-	public void clearContent() {
-		filtering.setFilter(ItemStack.EMPTY);
-	}
+    var observer=entity.targeting.getEdgePoint();if(level.isClientSide())return;
+    boolean powered=observer!=null&&observer.isActivated();
+    if(powered==entity.isBlockPowered())return;
+    level.setBlock(pos,state.setValue(TrackObserverBlock.POWERED,powered),Block.UPDATE_ALL);
+    com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock.notifyGatherers(level,pos);
+  
+        }
+    }
+  @Override public void clearContent(){filtering.setFilter(ItemStack.EMPTY);}
+  @Override public void transform(BlockEntity entity,StructureTransform transform){targeting.transform(entity,transform);}
+  @Override public void invalidateEdgePoint(CompoundTag source){targeting.invalidateEdgePoint(source);}
+  @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){return super.getUpdateTag(registries);}
+  @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        if (targeting != null) behaviours.add(targeting);
+        super.addNativeBehaviours(behaviours);
+        if (filtering != null) behaviours.add(filtering);
+    }
 }

@@ -1,376 +1,102 @@
 package com.simibubi.create.content.logistics.tableCloth;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllItems;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.AllTags.AllBlockTags;
-import com.simibubi.create.api.contraption.transformable.TransformableBlockEntity;
-import com.simibubi.create.compat.Mods;
-import com.simibubi.create.compat.computercraft.AbstractComputerBehaviour;
-import com.simibubi.create.compat.computercraft.ComputerCraftProxy;
-import com.simibubi.create.content.contraptions.StructureTransform;
+import com.simibubi.create.*;
 import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.packager.InventorySummary;
 import com.simibubi.create.content.logistics.redstoneRequester.AutoRequestData;
-import com.simibubi.create.content.logistics.stockTicker.StockTickerBlockEntity;
-import com.simibubi.create.content.logistics.tableCloth.ShoppingListItem.ShoppingList;
-import com.simibubi.create.foundation.blockEntity.RemoveBlockEntityPacket;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import com.simibubi.create.content.logistics.stockTicker.*;
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
 import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import dan200.computercraft.api.peripheral.PeripheralCapability;
-import net.createmod.catnip.codecs.CatnipCodecUtils;
-import net.createmod.catnip.data.IntAttached;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.createmod.catnip.platform.CatnipServices;
-import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.Mth;
-import net.minecraft.world.Containers;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.ItemInteractionResult;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.sounds.*;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.*;
+import net.minecraft.world.phys.*;
 
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
+public final class TableClothBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements BlockEntityBehaviour.Provider,Clearable {
+    public InventorySummary clientStock=new InventorySummary();
+    public AutoRequestData requestData=new AutoRequestData();
+    public final List<ItemStack> manuallyAddedItems=new ArrayList<>();
+    public final TableClothFilteringBehaviour priceTag=new TableClothFilteringBehaviour(this);
+    public UUID owner;
+    public Direction facing=Direction.SOUTH;
+    public boolean sideOccluded;
+    private int lazyTicks;
+    public TableClothBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.TABLE_CLOTH,pos,state);}
+    public boolean isShop(){return !requestData.encodedRequest().isEmpty();}
+    public ItemStack getPaymentItem(){return priceTag.getFilter();}
+    public int getPaymentAmount(){return getPaymentItem().isEmpty()?1:priceTag.count;}
+    public List<ItemStack> getItemsForRender(){return isShop()?requestData.encodedRequest().stacks().stream().limit(4).map(entry->entry.stack).toList():List.copyOf(manuallyAddedItems);}
+    public StockTickerBlockEntity getTicker(){
+        if(level==null||!requestData.isValid()||!requestData.targetOffset().closerThan(BlockPos.ZERO,128)||!requestData.targetDim().equals(level.dimension().identifier().toString()))return null;
+        return LoadedLevelAccess.blockEntity(level,worldPosition.offset(requestData.targetOffset())) instanceof StockTickerBlockEntity ticker?ticker:null;
+    }
+    public void tick(){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, worldPosition, getBlockState(), this)) {
+            if (!createTick.shouldTick()) return;
 
-public class TableClothBlockEntity extends SmartBlockEntity implements TransformableBlockEntity {
-
-	public AbstractComputerBehaviour computerBehaviour;
-
-	public AutoRequestData requestData;
-	public List<ItemStack> manuallyAddedItems;
-	public UUID owner;
-
-	public Direction facing;
-	public boolean sideOccluded;
-	public FilteringBehaviour priceTag;
-
-	private List<ItemStack> renderedItemsForShop;
-
-	public TableClothBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		manuallyAddedItems = new ArrayList<>();
-		requestData = new AutoRequestData();
-		owner = null;
-		facing = Direction.SOUTH;
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		if (Mods.COMPUTERCRAFT.isLoaded()) {
-			event.registerBlockEntity(
-				PeripheralCapability.get(),
-				AllBlockEntityTypes.TABLE_CLOTH.get(),
-				(be, context) -> be.computerBehaviour.getPeripheralCapability()
-			);
-		}
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(priceTag = new TableClothFilteringBehaviour(this));
-		behaviours.add(computerBehaviour = ComputerCraftProxy.behaviour(this));
-	}
-
-	public List<ItemStack> getItemsForRender() {
-		if (isShop()) {
-			if (renderedItemsForShop == null)
-				renderedItemsForShop = requestData.encodedRequest().stacks()
-					.stream()
-					.map(b -> b.stack)
-					.limit(4)
-					.toList();
-			return renderedItemsForShop;
-		}
-
-		return manuallyAddedItems;
-	}
-
-	public void invalidateItemsForRender() {
-		renderedItemsForShop = null;
-	}
-
-	public void notifyShopUpdate() {
-		if (level instanceof ServerLevel serverLevel)
-			CatnipServices.NETWORK.sendToClientsTrackingChunk(serverLevel, new ChunkPos(worldPosition), new ShopUpdatePacket(worldPosition));
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		BlockPos relativePos = worldPosition.relative(facing);
-		sideOccluded = AllBlockTags.TABLE_CLOTHS.matches(level.getBlockState(relativePos))
-			|| Block.isFaceFull(level.getBlockState(relativePos.below())
-			.getOcclusionShape(level, relativePos.below()), facing.getOpposite());
-	}
-
-	@Override
-	protected AABB createRenderBoundingBox() {
-		return super.createRenderBoundingBox().inflate(1);
-	}
-
-	public boolean isShop() {
-		return !requestData.encodedRequest().isEmpty();
-	}
-
-	public ItemInteractionResult use(Player player, BlockHitResult ray) {
-		if (isShop())
-			return useShop(player);
-
-		ItemStack heldItem = player.getItemInHand(InteractionHand.MAIN_HAND);
-
-		if (heldItem.isEmpty()) {
-			if (manuallyAddedItems.isEmpty())
-				return ItemInteractionResult.SUCCESS;
-			player.setItemInHand(InteractionHand.MAIN_HAND, manuallyAddedItems.remove(manuallyAddedItems.size() - 1));
-			level.playSound(null, worldPosition, SoundEvents.ITEM_FRAME_REMOVE_ITEM, SoundSource.BLOCKS, 0.5f, 1f);
-
-			if (manuallyAddedItems.isEmpty() && !computerBehaviour.hasAttachedComputer()) {
-				level.setBlock(worldPosition, getBlockState().setValue(TableClothBlock.HAS_BE, false), Block.UPDATE_ALL);
-				if (level instanceof ServerLevel serverLevel)
-					CatnipServices.NETWORK.sendToClientsTrackingChunk(serverLevel, new ChunkPos(worldPosition), new RemoveBlockEntityPacket(worldPosition));
-			} else
-				notifyUpdate();
-
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		if (manuallyAddedItems.size() >= 4)
-			return ItemInteractionResult.SUCCESS;
-
-		level.playSound(null, worldPosition, SoundEvents.ITEM_FRAME_ADD_ITEM, SoundSource.BLOCKS, 0.5f, 1f);
-		manuallyAddedItems.add(heldItem.copyWithCount(1));
-		facing = player.getDirection()
-			.getOpposite();
-		heldItem.shrink(1);
-		if (heldItem.isEmpty())
-			player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
-		notifyUpdate();
-		return ItemInteractionResult.SUCCESS;
-	}
-
-	public boolean targetsPriceTag(Player player, BlockHitResult ray) {
-		return priceTag != null && priceTag.mayInteract(player) && priceTag.getSlotPositioning()
-			.testHit(level, worldPosition, getBlockState(), ray.getLocation()
-				.subtract(Vec3.atLowerCornerOf(worldPosition)));
-	}
-
-	public ItemInteractionResult useShop(Player player) {
-		ItemStack itemInHand = player.getItemInHand(InteractionHand.MAIN_HAND);
-		ItemStack prevListItem = ItemStack.EMPTY;
-		boolean addOntoList = false;
-
-		// Remove other lists from inventory
-		for (int i = 0; i < 9; i++) {
-			ItemStack item = player.getInventory()
-				.getItem(i);
-			if (!AllItems.SHOPPING_LIST.isIn(item))
-				continue;
-			prevListItem = item;
-			addOntoList = true;
-			player.getInventory()
-				.setItem(i, ItemStack.EMPTY);
-		}
-
-		// add onto existing list if in hand
-		if (AllItems.SHOPPING_LIST.isIn(itemInHand)) {
-			prevListItem = itemInHand;
-			addOntoList = true;
-		}
-
-		if (!itemInHand.isEmpty() && !addOntoList) {
-			CreateLang.translate("stock_keeper.shopping_list_empty_hand")
-				.sendStatus(player);
-			AllSoundEvents.DENY.playOnServer(level, worldPosition, 0.5f, 1);
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		if (getPaymentItem().isEmpty()) {
-			CreateLang.translate("stock_keeper.no_price_set")
-				.sendStatus(player);
-			AllSoundEvents.DENY.playOnServer(level, worldPosition, 0.5f, 1);
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		UUID tickerID = null;
-		BlockPos tickerPos = requestData.targetOffset().offset(worldPosition);
-		if (level.getBlockEntity(tickerPos) instanceof StockTickerBlockEntity stbe && stbe.isKeeperPresent())
-			tickerID = stbe.behaviour.freqId;
-
-		int stockLevel = getStockLevelForTrade(ShoppingListItem.getList(prevListItem));
-
-		if (tickerID == null) {
-			CreateLang.translate("stock_keeper.keeper_missing")
-				.style(ChatFormatting.RED)
-				.sendStatus(player);
-			AllSoundEvents.DENY.playOnServer(level, worldPosition, 0.5f, 1);
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		if (stockLevel == 0) {
-			CreateLang.translate("stock_keeper.out_of_stock")
-				.style(ChatFormatting.RED)
-				.sendStatus(player);
-			AllSoundEvents.DENY.playOnServer(level, worldPosition, 0.5f, 1);
-			if (!prevListItem.isEmpty()) {
-				if (player.getItemInHand(InteractionHand.MAIN_HAND)
-					.isEmpty())
-					player.setItemInHand(InteractionHand.MAIN_HAND, prevListItem);
-				else
-					player.getInventory()
-						.placeItemBackInInventory(prevListItem);
-			}
-
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		ShoppingList list = new ShoppingList(new ArrayList<>(), owner, tickerID);
-
-		if (addOntoList) {
-			ShoppingList prevList = ShoppingListItem.getList(prevListItem).duplicate();
-			if (owner.equals(prevList.shopOwner()) && tickerID.equals(prevList.shopNetwork()))
-				list = prevList;
-			else
-				addOntoList = false;
-		}
-
-		if (list.getPurchases(worldPosition) >= stockLevel) {
-			for (IntAttached<BlockPos> entry : list.purchases())
-				if (worldPosition.equals(entry.getValue()))
-					entry.setFirst(Math.min(stockLevel, entry.getFirst()));
-
-			CreateLang.translate("stock_keeper.limited_stock")
-				.style(ChatFormatting.RED)
-				.sendStatus(player);
-		} else {
-			AllSoundEvents.CONFIRM_2.playOnServer(level, worldPosition, 0.5f, 1.0f);
-
-			ShoppingList.Mutable mutable = new ShoppingList.Mutable(list);
-			mutable.addPurchases(worldPosition, 1);
-			list = mutable.toImmutable();
-
-			if (!addOntoList)
-				CreateLang.translate("stock_keeper.use_list_to_add_purchases")
-					.color(0xeeeeee)
-					.sendStatus(player);
-			if (!addOntoList)
-				level.playSound(null, worldPosition, SoundEvents.BOOK_PAGE_TURN, SoundSource.BLOCKS, 1, 1.5f);
-		}
-
-		ItemStack newListItem =
-			ShoppingListItem.saveList(AllItems.SHOPPING_LIST.asStack(), list, requestData.encodedTargetAddress());
-
-		if (player.getItemInHand(InteractionHand.MAIN_HAND)
-			.isEmpty())
-			player.setItemInHand(InteractionHand.MAIN_HAND, newListItem);
-		else
-			player.getInventory()
-				.placeItemBackInInventory(newListItem);
-
-		return ItemInteractionResult.SUCCESS;
-	}
-
-	public int getStockLevelForTrade(@Nullable ShoppingList otherPurchases) {
-		BlockPos tickerPos = requestData.targetOffset().offset(worldPosition);
-		if (!(level.getBlockEntity(tickerPos) instanceof StockTickerBlockEntity stbe))
-			return 0;
-
-		InventorySummary recentSummary = null;
-
-		if (level.isClientSide()) {
-			if (stbe.getTicksSinceLastUpdate() > 15)
-				stbe.refreshClientStockSnapshot();
-			recentSummary = stbe.getLastClientsideStockSnapshotAsSummary();
-		} else
-			recentSummary = stbe.getRecentSummary();
-
-		if (recentSummary == null)
-			return 0;
-
-		InventorySummary modifierSummary = new InventorySummary();
-		if (otherPurchases != null)
-			modifierSummary = otherPurchases.bakeEntries(level, worldPosition)
-				.getFirst();
-
-		int smallestQuotient = Integer.MAX_VALUE;
-		for (BigItemStack entry : requestData.encodedRequest().stacks())
-			if (entry.count > 0)
-				smallestQuotient = Math.min(smallestQuotient,
-					(recentSummary.getCountOf(entry.stack) - modifierSummary.getCountOf(entry.stack)) / entry.count);
-
-		return smallestQuotient;
-	}
-
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-		tag.put("Items", NBTHelper.writeItemList(manuallyAddedItems, registries));
-		tag.putInt("Facing", facing.get2DDataValue());
-		tag.put("RequestData", CatnipCodecUtils.encode(AutoRequestData.CODEC, registries, requestData).orElseThrow());
-		if (owner != null)
-			tag.putUUID("OwnerUUID", owner);
-	}
-
-	@Override
-	protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(tag, registries, clientPacket);
-		manuallyAddedItems = NBTHelper.readItemList(tag.getList("Items", Tag.TAG_COMPOUND), registries);
-		requestData = CatnipCodecUtils.decode(AutoRequestData.CODEC, registries, tag.get("RequestData"))
-			.orElse(new AutoRequestData());
-		owner = tag.contains("OwnerUUID") ? tag.getUUID("OwnerUUID") : null;
-		facing = Direction.from2DDataValue(Mth.positiveModulo(tag.getInt("Facing"), 4));
-	}
-
-	@Override
-	public void destroy() {
-		super.destroy();
-		manuallyAddedItems.forEach(stack -> Containers.dropItemStack(level, worldPosition.getX(), worldPosition.getY(),
-			worldPosition.getZ(), stack));
-		manuallyAddedItems.clear();
-	}
-
-	public ItemStack getPaymentItem() {
-		return priceTag.getFilter();
-	}
-
-	public int getPaymentAmount() {
-		return priceTag.getFilter()
-			.isEmpty() ? 1 : priceTag.count;
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		computerBehaviour.removePeripheral();
-	}
-
-	public void transform(BlockEntity blockEntity, StructureTransform transform) {
-		facing = transform.mirrorFacing(facing);
-		if (transform.rotationAxis == Direction.Axis.Y)
-			facing = transform.rotateFacing(facing);
-		notifyUpdate();
-	}
+        if(!getBlockState().getValue(TableClothBlock.HAS_BE)){level.removeBlockEntity(worldPosition);return;}
+        if(lazyTicks--<=0){lazyTicks=10;var neighbor=worldPosition.relative(facing);var state=LoadedLevelAccess.blockState(level,neighbor);var support=LoadedLevelAccess.blockState(level,neighbor.below());sideOccluded=state.getBlock() instanceof TableClothBlock||Block.isFaceFull(support.getOcclusionShape(),facing.getOpposite());}
+    
+        }
+    }
+    public Vec3 pricePosition(){
+        var local=sideOccluded?new Vec3(8/16.,.75/16,15.25/16):new Vec3(12/16.,-2.75/16,16.75/16);
+        return local.subtract(.5,.5,.5).yRot((float)Math.toRadians(-facing.toYRot())).add(.5,.5,.5);
+    }
+    public boolean targetsPriceTag(BlockHitResult hit){return isShop()&&hit.getLocation().subtract(Vec3.atLowerCornerOf(worldPosition)).distanceTo(pricePosition())<.25;}
+    public boolean use(Player player){
+        if(isShop())return useShop(player);var held=player.getMainHandItem();
+        if(held.isEmpty()){
+            if(manuallyAddedItems.isEmpty())return true;player.setItemInHand(InteractionHand.MAIN_HAND,manuallyAddedItems.removeLast());
+            level.playSound(null,worldPosition,SoundEvents.ITEM_FRAME_REMOVE_ITEM,SoundSource.BLOCKS,.5f,1);
+            if(manuallyAddedItems.isEmpty()){level.setBlockAndUpdate(worldPosition,getBlockState().setValue(TableClothBlock.HAS_BE,false));level.removeBlockEntity(worldPosition);}else notifyUpdate();return true;
+        }
+        if(manuallyAddedItems.size()>=4)return true;manuallyAddedItems.add(held.copyWithCount(1));held.shrink(1);facing=player.getDirection().getOpposite();
+        level.playSound(null,worldPosition,SoundEvents.ITEM_FRAME_ADD_ITEM,SoundSource.BLOCKS,.5f,1);notifyUpdate();return true;
+    }
+    private boolean deny(Player player,String key){player.sendOverlayMessage(Component.translatable("create.stock_keeper."+key).withStyle(net.minecraft.ChatFormatting.RED));level.playSound(null,worldPosition,AllSoundEvents.DENY,SoundSource.BLOCKS,.5f,1);return true;}
+    public boolean useShop(Player player){
+        var held=player.getMainHandItem();int slot=-1;ItemStack previous=held.is(AllItems.SHOPPING_LIST)?held:ItemStack.EMPTY;
+        if(previous.isEmpty())for(int i=0;i<9;i++)if(player.getInventory().getItem(i).is(AllItems.SHOPPING_LIST)){slot=i;previous=player.getInventory().getItem(i);}
+        if(!held.isEmpty()&&previous.isEmpty())return deny(player,"shopping_list_empty_hand");
+        if(getPaymentItem().isEmpty())return deny(player,"no_price_set");var ticker=getTicker();if(ticker==null||!ticker.isKeeperPresent()||owner==null)return deny(player,"keeper_missing");
+        var list=ShoppingListItem.getList(previous);boolean compatible=list!=null&&owner.equals(list.shopOwner())&&ticker.behaviour.freqId.equals(list.shopNetwork());
+        if(!compatible)list=new ShoppingListItem.ShoppingList(List.of(),owner,ticker.behaviour.freqId);
+        int stock=getStockLevelForTrade(list);if(stock<=0)return deny(player,"out_of_stock");int before=list.getPurchases(worldPosition);if(before==0&&list.purchases().size()>=1024)return deny(player,"limited_stock");int amount=before>=stock?stock:before+1;
+        if(before>=stock)deny(player,"limited_stock");else level.playSound(null,worldPosition,AllSoundEvents.CONFIRM_2,SoundSource.BLOCKS,.5f,1);
+        if(!compatible){level.playSound(null,worldPosition,SoundEvents.BOOK_PAGE_TURN,SoundSource.BLOCKS,1,1.5f);player.sendOverlayMessage(Component.translatable("create.stock_keeper.use_list_to_add_purchases"));}
+        var result=ShoppingListItem.saveList(new ItemStack(AllItems.SHOPPING_LIST),list.withPurchases(worldPosition,amount),requestData.encodedTargetAddress());
+        if(slot>=0){if(compatible)player.getInventory().setItem(slot,ItemStack.EMPTY);}
+        if(held.isEmpty()||held.is(AllItems.SHOPPING_LIST)){if(!compatible&&!held.isEmpty())player.getInventory().placeItemBackInInventory(held.copy(),net.minecraft.util.Prediction.SERVER_ONLY);player.setItemInHand(InteractionHand.MAIN_HAND,result);}else player.getInventory().placeItemBackInInventory(result,net.minecraft.util.Prediction.SERVER_ONLY);
+        return true;
+    }
+    public int getStockLevelForTrade(ShoppingListItem.ShoppingList other){
+        var ticker=getTicker();if(ticker==null)return 0;var summary=level.isClientSide()?clientStock:ticker.getRecentSummary();var used=new InventorySummary();
+        if(other!=null&&owner!=null&&owner.equals(other.shopOwner())&&ticker.behaviour.freqId.equals(other.shopNetwork())){var baked=other.bakeEntries(level,worldPosition);if(!baked.valid())return 0;used=baked.goods();}
+        var perOrder=new InventorySummary();for(var entry:requestData.encodedRequest().stacks()){if(entry.count<=0)return 0;perOrder.add(entry);}
+        int available=BigItemStack.INF;for(var entry:perOrder.getStacksByCount())available=Math.min(available,Math.max(0,summary.getCountOf(entry.stack)-used.getCountOf(entry.stack))/entry.count);
+        return perOrder.isEmpty()?0:available;
+    }
+    public void notifyUpdate(){setChanged();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS);}
+    @Override public void clearContent(){manuallyAddedItems.clear();}
+    @Override public void preRemoveSideEffects(BlockPos pos,BlockState state){for(var item:manuallyAddedItems)Containers.dropItemStack(level,pos.getX(),pos.getY(),pos.getZ(),item);clearContent();super.preRemoveSideEffects(pos,state);}
+    @Override protected void write(ValueOutput output, boolean clientPacket){super.write(output, clientPacket);output.store("Items",ItemStack.OPTIONAL_CODEC.listOf(),manuallyAddedItems);output.store("RequestData",AutoRequestData.CODEC,requestData);output.putInt("Facing",facing.get2DDataValue());if(owner!=null)output.store("OwnerUUID",UUIDUtil.CODEC,owner);}
+    @Override protected void read(ValueInput input, boolean clientPacket){super.read(input, clientPacket);manuallyAddedItems.clear();manuallyAddedItems.addAll(input.read("Items",ItemStack.OPTIONAL_CODEC.listOf()).orElse(List.of()).stream().filter(item->!item.isEmpty()).limit(4).map(item->item.copyWithCount(1)).toList());requestData=input.read("RequestData",AutoRequestData.CODEC).orElse(new AutoRequestData());owner=input.read("OwnerUUID",UUIDUtil.CODEC).orElse(null);facing=Direction.from2DDataValue(Math.floorMod(input.getIntOr("Facing",0),4));}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){var output=TagValueOutput.createWithContext(net.minecraft.util.ProblemReporter.DISCARDING,registries);write(output, true);return output.buildResult();}
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (priceTag != null) behaviours.add(priceTag);
+    }
 }

@@ -1,0 +1,11 @@
+{
+  "type": "create:haunting",
+  "ingredients": [
+    "minecraft:mossy_stone_bricks"
+  ],
+  "results": [
+    {
+      "id": "minecraft:infested_mossy_stone_bricks"
+    }
+  ]
+}

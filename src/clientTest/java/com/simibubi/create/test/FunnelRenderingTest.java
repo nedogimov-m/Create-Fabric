@@ -1,0 +1,48 @@
+package com.simibubi.create.test;
+
+import com.mojang.blaze3d.platform.InputConstants;
+import com.simibubi.create.*;
+import com.simibubi.create.content.logistics.funnel.*;
+import com.simibubi.create.foundation.blockEntity.behaviour.FilterAmountScreen;
+import java.util.concurrent.atomic.*;
+import net.fabricmc.fabric.api.client.gametest.v1.context.*;
+import net.minecraft.core.*;
+import net.minecraft.world.item.*;
+import net.minecraft.world.phys.*;
+
+final class FunnelRenderingTest {
+    private static final BlockPos P=new BlockPos(930,4,5);
+    static void run(ClientGameTestContext context,TestSingleplayerContext world){
+        var server=world.getServer();var oldHud=new AtomicBoolean();context.runOnClient(client->{oldHud.set(client.gui.hud.isHidden());if(oldHud.get())client.gui.hud.toggle();});
+        server.runCommand("gamemode spectator @p");server.runCommand("tp @p 930 7 10");context.waitFor(client->Math.abs(client.player.getX()-930.5)<.1&&client.level.isLoaded(P),300);
+        server.runCommand("fill 925 3 0 944 3 12 minecraft:smooth_quartz");server.runCommand("setblock 930 4 4 minecraft:chest");server.runCommand("setblock 930 4 5 create:brass_funnel[facing=south,extracting=true]");
+        server.runCommand("setblock 934 4 5 create:andesite_funnel[facing=south,extracting=false]");server.runCommand("setblock 936 4 5 create:brass_funnel[facing=up]");
+        server.runCommand("setblock 939 4 5 create:depot");server.runCommand("setblock 939 5 5 create:brass_belt_funnel[facing=south,shape=pushing]");
+        server.runCommand("gamemode survival @p");server.runCommand("tp @p 930 4 8");server.runCommand("item replace entity @p weapon.mainhand with minecraft:apple 8");context.waitFor(client->client.player.getMainHandItem().is(Items.APPLE)&&!client.player.isSpectator()&&client.level.getBlockEntity(P) instanceof FunnelBlockEntity,200);
+        look(context);context.getInput().pressKey(options->options.keyUse);context.waitFor(client->client.level.getBlockEntity(P) instanceof FunnelBlockEntity funnel&&funnel.filtering.getFilter().is(Items.APPLE),200);
+        context.runOnClient(client->{if(client.player.getMainHandItem().getCount()!=8)throw new AssertionError("Ordinary filter sample consumed actual apples");});
+        open(context);var coordinate=coordinate(context,1,17);context.getInput().setCursorPos(coordinate.x,coordinate.y);context.waitTicks(3);context.takeScreenshot("create-vulkan-funnel-exact-board");context.getInput().releaseKey(options->options.keyUse);context.waitFor(client->client.gui.screen()==null&&((FunnelBlockEntity)client.level.getBlockEntity(P)).filtering.count==17&&!((FunnelBlockEntity)client.level.getBlockEntity(P)).filtering.upTo,200);
+        com.simibubi.create.content.logistics.tunnel.ValueBoxNativeFrameProbe.filterCount(context,P);
+        open(context);context.getInput().pressKey(InputConstants.KEY_ESCAPE);context.getInput().releaseKey(options->options.keyUse);context.waitFor(client->client.gui.screen()==null,200);
+        context.runOnClient(client->{if(((FunnelBlockEntity)client.level.getBlockEntity(P)).filtering.count!=17)throw new AssertionError("Escape saved an amount");checkMesh(client,P);checkMesh(client,new BlockPos(939,5,5));var vertical=client.getBlockEntityRenderDispatcher().tryExtractRenderState(client.level.getBlockEntity(new BlockPos(936,4,5)),.5f,null,false);if(!(vertical instanceof FunnelRenderer.State state)||state.hasFlap)throw new AssertionError("Vertical funnel has an animated flap");});
+        server.runOnServer(ignored->{var level=world.getConnection().getServerLevel();((FunnelBlockEntity)level.getBlockEntity(P)).flap(true);});context.waitTicks(5);world.getConnection().waitForChunksRender();context.runOnClient(client->client.gui.hud.getChat().clearMessages(false));context.waitTicks(2);context.takeScreenshot("create-vulkan-funnel-flaps-and-filter");
+        var before=new AtomicReference<Object>();context.runOnClient(client->before.set(((FunnelRenderer.State)client.getBlockEntityRenderDispatcher().tryExtractRenderState(client.level.getBlockEntity(P),.5f,null,false)).flaps.mesh));var reload=context.computeOnClient(client->client.reloadResourcePacks());context.waitFor(client->reload.isDone()&&client.gui.overlay()==null,600);context.runOnClient(client->{checkMesh(client,P);if(((FunnelRenderer.State)client.getBlockEntityRenderDispatcher().tryExtractRenderState(client.level.getBlockEntity(P),.5f,null,false)).flaps.mesh==before.get())throw new AssertionError("Flap retained old mesh after resource reload");});
+        // Holding to edit never removes a real installed filter.
+        server.runCommand("item replace entity @p weapon.mainhand with create:filter");context.waitFor(client->client.player.getMainHandItem().is(AllItems.FILTER),200);look(context);context.getInput().pressKey(options->options.keyUse);context.waitFor(client->((FunnelBlockEntity)client.level.getBlockEntity(P)).filtering.getFilter().is(AllItems.FILTER)&&client.player.getMainHandItem().isEmpty(),200);
+        open(context);context.getInput().pressKey(InputConstants.KEY_ESCAPE);context.getInput().releaseKey(options->options.keyUse);context.waitFor(client->client.gui.screen()==null,200);context.runOnClient(client->{if(!((FunnelBlockEntity)client.level.getBlockEntity(P)).filtering.getFilter().is(AllItems.FILTER))throw new AssertionError("Hold removed installed filter before opening board");});
+        server.runCommand("gamemode spectator @p");chunkUnload(context,world);context.runOnClient(client->{if(client.gui.hud.isHidden()!=oldHud.get())client.gui.hud.toggle();});
+    }
+    private static void checkMesh(net.minecraft.client.Minecraft client,BlockPos pos){var extracted=client.getBlockEntityRenderDispatcher().tryExtractRenderState(client.level.getBlockEntity(pos),.5f,null,false);if(!(extracted instanceof FunnelRenderer.State state)||!state.hasFlap||state.flaps.mesh==null||state.flaps.mesh.size()==0)throw new AssertionError("Native flap mesh missing at "+pos);}
+    private static void look(ClientGameTestContext context){
+        var rotation=context.computeOnClient(client->{var target=FunnelFilterSlotPositioning.position(client.level.getBlockState(P),Direction.SOUTH).add(Vec3.atLowerCornerOf(P));var delta=target.subtract(client.player.getEyePosition());return new Vec2((float)Math.toDegrees(Math.atan2(-delta.x,delta.z)),(float)-Math.toDegrees(Math.atan2(delta.y,Math.hypot(delta.x,delta.z))));});context.getInput().lookAt(rotation.x,rotation.y);context.waitFor(client->client.hitResult instanceof BlockHitResult hit&&hit.getBlockPos().equals(P)&&FunnelFilterSlotPositioning.testHit(client.level.getBlockState(P),P,hit),200);
+    }
+    private static void open(ClientGameTestContext context){look(context);context.getInput().holdKey(options->options.keyUse);context.waitFor(client->client.gui.screen() instanceof FilterAmountScreen,200);}
+    private static Vec2 coordinate(ClientGameTestContext context,int row,int amount){return context.computeOnClient(client->{var point=((FilterAmountScreen)client.gui.screen()).getCoordinateOfValue(row,amount);float scaleX=(float)client.getWindow().getScreenWidth()/client.getWindow().getGuiScaledWidth();float scaleY=(float)client.getWindow().getScreenHeight()/client.getWindow().getGuiScaledHeight();return new Vec2(point.x*scaleX,point.y*scaleY);});}
+    private static void chunkUnload(ClientGameTestContext context,TestSingleplayerContext world){
+        var server=world.getServer();var source=new BlockPos(959,4,5);var funnel=new BlockPos(960,4,5);server.runCommand("tp @p 960 7 10");context.waitFor(client->Math.abs(client.player.getX()-960.5)<.1&&client.level.isLoaded(source),300);server.runCommand("setblock 959 4 5 minecraft:chest");server.runCommand("setblock 960 4 5 create:brass_funnel[facing=east,extracting=true]");
+        server.runOnServer(ignored->{var level=world.getConnection().getServerLevel();var be=(FunnelBlockEntity)level.getBlockEntity(funnel);be.filtering.setAmount(19,false);level.getChunkSource().addTicket(new net.minecraft.server.level.Ticket(net.minecraft.server.level.TicketType.FORCED,33),new net.minecraft.world.level.ChunkPos(funnel.getX()>>4,funnel.getZ()>>4));});
+        server.runCommand("tp @p 5000 10 5000");var unloaded=new AtomicBoolean();for(int attempt=0;attempt<120&&!unloaded.get();attempt++){context.waitTicks(5);server.runOnServer(ignored->{var level=world.getConnection().getServerLevel();var be=(FunnelBlockEntity)com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,funnel);if(be!=null)for(int tick=0;tick<20;tick++)FunnelBlockEntity.tick(level,funnel,be.getBlockState(),be);unloaded.set(!level.isLoaded(source));});}if(!unloaded.get())throw new AssertionError("Funnel lookup kept source chunk loaded");context.waitTicks(20);
+        server.runOnServer(ignored->{var level=world.getConnection().getServerLevel();var be=(FunnelBlockEntity)com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,funnel);for(int tick=0;tick<200;tick++)FunnelBlockEntity.tick(level,funnel,be.getBlockState(),be);if(!level.isLoaded(funnel)||level.isLoaded(source))throw new AssertionError("Source chunk reloaded while funnel continued ticking");});
+        server.runCommand("tp @p 960 7 10");context.waitFor(client->Math.abs(client.player.getX()-960.5)<.1&&client.level.getBlockEntity(funnel) instanceof FunnelBlockEntity be&&be.filtering.count==19,400);server.runOnServer(ignored->world.getConnection().getServerLevel().getChunkSource().removeTicketWithRadius(net.minecraft.server.level.TicketType.FORCED,new net.minecraft.world.level.ChunkPos(funnel.getX()>>4,funnel.getZ()>>4),0));
+    }
+}

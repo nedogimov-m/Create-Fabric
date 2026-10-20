@@ -1,0 +1,24 @@
+{
+  "type": "create:crushing",
+  "ingredients": [
+    "exnihilosequentia:crushed_netherrack"
+  ],
+  "processing_time": 100,
+  "results": [
+    {
+      "id": "create:cinder_flour"
+    },
+    {
+      "chance": 0.5,
+      "id": "create:cinder_flour"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "exnihilosequentia"
+      ]
+    }
+  ]
+}

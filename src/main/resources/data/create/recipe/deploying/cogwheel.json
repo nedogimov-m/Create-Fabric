@@ -1,0 +1,12 @@
+{
+  "type": "create:deploying",
+  "ingredients": [
+    "create:shaft",
+    "#minecraft:planks"
+  ],
+  "results": [
+    {
+      "id": "create:cogwheel"
+    }
+  ]
+}

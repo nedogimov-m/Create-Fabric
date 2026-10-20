@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/experience_nugget",
+    "particle": "create:item/experience_nugget"
+  }
+}

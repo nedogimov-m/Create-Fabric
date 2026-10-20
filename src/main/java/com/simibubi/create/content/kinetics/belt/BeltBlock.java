@@ -1,748 +1,199 @@
 package com.simibubi.create.content.kinetics.belt;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Set;
-
-import org.apache.commons.lang3.mutable.MutableBoolean;
-
 import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.AllItems;
-import com.simibubi.create.api.contraption.transformable.TransformableBlock;
-import com.simibubi.create.api.schematic.requirement.SpecialBlockItemRequirement;
-import com.simibubi.create.content.contraptions.StructureTransform;
-import com.simibubi.create.content.equipment.armor.DivingBootsItem;
-import com.simibubi.create.content.fluids.transfer.GenericItemEmptying;
-import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.content.kinetics.belt.BeltBlockEntity.CasingType;
-import com.simibubi.create.content.kinetics.belt.BeltSlicer.Feedback;
-import com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour.TransportedResult;
-import com.simibubi.create.content.kinetics.belt.transport.BeltMovementHandler.TransportedEntityInfo;
-import com.simibubi.create.content.kinetics.belt.transport.BeltTunnelInteractionHandler;
-import com.simibubi.create.content.logistics.box.PackageEntity;
-import com.simibubi.create.content.logistics.box.PackageItem;
-import com.simibubi.create.content.logistics.funnel.FunnelBlock;
-import com.simibubi.create.content.logistics.tunnel.BeltTunnelBlock;
-import com.simibubi.create.content.schematics.requirement.ItemRequirement;
-import com.simibubi.create.content.schematics.requirement.ItemRequirement.ItemUseType;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.block.ProperWaterloggedBlock;
-import com.simibubi.create.foundation.block.render.MultiPosDestructionHandler;
-import com.simibubi.create.foundation.block.render.ReducedDestroyEffects;
-import com.simibubi.create.foundation.item.ItemHelper;
-
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.Direction.AxisDirection;
+import com.simibubi.create.content.kinetics.base.KineticBlock;
+import com.simibubi.create.content.kinetics.KineticNetworks;
+import net.minecraft.core.*;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.Mob;
-import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.util.RandomSource;
+import net.minecraft.util.Prediction;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.DyeColor;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.LevelEvent;
-import net.minecraft.world.level.block.RenderShape;
-import net.minecraft.world.level.block.Rotation;
-import net.minecraft.world.level.block.SoundType;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.block.state.properties.EnumProperty;
-import net.minecraft.world.level.block.state.properties.Property;
-import net.minecraft.world.level.levelgen.DebugLevelSource;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.level.pathfinder.PathComputationType;
-import net.minecraft.world.level.pathfinder.PathType;
+import net.minecraft.world.item.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.material.*;
 import net.minecraft.world.level.storage.loot.LootParams;
-import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.EntityCollisionContext;
-import net.minecraft.world.phys.shapes.Shapes;
-import net.minecraft.world.phys.shapes.VoxelShape;
-
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.common.Tags;
-import net.neoforged.neoforge.items.IItemHandler;
-
-public class BeltBlock extends HorizontalKineticBlock
-	implements IBE<BeltBlockEntity>, SpecialBlockItemRequirement, TransformableBlock, ProperWaterloggedBlock {
-
-	public static final Property<BeltSlope> SLOPE = EnumProperty.create("slope", BeltSlope.class);
-	public static final Property<BeltPart> PART = EnumProperty.create("part", BeltPart.class);
-	public static final BooleanProperty CASING = BooleanProperty.create("casing");
-
-	public BeltBlock(Properties properties) {
-		super(properties);
-		registerDefaultState(defaultBlockState().setValue(SLOPE, BeltSlope.HORIZONTAL)
-			.setValue(PART, BeltPart.START)
-			.setValue(CASING, false)
-			.setValue(WATERLOGGED, false));
-	}
-
-	@Override
-	protected boolean areStatesKineticallyEquivalent(BlockState oldState, BlockState newState) {
-		return super.areStatesKineticallyEquivalent(oldState, newState)
-			&& oldState.getValue(PART) == newState.getValue(PART);
-	}
-
-	@Override
-	public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-		if (face.getAxis() != getRotationAxis(state))
-			return false;
-		return getBlockEntityOptional(world, pos).map(BeltBlockEntity::hasPulley)
-			.orElse(false);
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		if (state.getValue(SLOPE) == BeltSlope.SIDEWAYS)
-			return Axis.Y;
-		return state.getValue(HORIZONTAL_FACING)
-			.getClockWise()
-			.getAxis();
-	}
-
-	@Override
-	public ItemStack getCloneItemStack(BlockState state, HitResult target, LevelReader level, BlockPos pos,
-									   Player player) {
-		return AllItems.BELT_CONNECTOR.asStack();
-	}
-
-	@SuppressWarnings("deprecation")
-	@Override
-	public List<ItemStack> getDrops(BlockState state, LootParams.Builder builder) {
-		List<ItemStack> drops = super.getDrops(state, builder);
-		BlockEntity blockEntity = builder.getOptionalParameter(LootContextParams.BLOCK_ENTITY);
-		if (blockEntity instanceof BeltBlockEntity && ((BeltBlockEntity) blockEntity).hasPulley())
-			drops.addAll(AllBlocks.SHAFT.getDefaultState()
-				.getDrops(builder));
-		return drops;
-	}
-
-	@Override
-	public void spawnAfterBreak(BlockState state, ServerLevel worldIn, BlockPos pos, ItemStack p_220062_4_, boolean b) {
-		BeltBlockEntity controllerBE = BeltHelper.getControllerBE(worldIn, pos);
-		if (controllerBE != null)
-			controllerBE.getInventory()
-				.ejectAll();
-	}
-
-	@Override
-	public boolean isFlammable(BlockState state, BlockGetter world, BlockPos pos, Direction face) {
-		return false;
-	}
-
-	@Override
-	public void updateEntityAfterFallOn(BlockGetter worldIn, Entity entityIn) {
-		super.updateEntityAfterFallOn(worldIn, entityIn);
-		BlockPos entityPosition = entityIn.blockPosition();
-		BlockPos beltPos = null;
-
-		if (AllBlocks.BELT.has(worldIn.getBlockState(entityPosition)))
-			beltPos = entityPosition;
-		else if (AllBlocks.BELT.has(worldIn.getBlockState(entityPosition.below())))
-			beltPos = entityPosition.below();
-		if (beltPos == null)
-			return;
-		if (!(worldIn instanceof Level))
-			return;
-
-		entityInside(worldIn.getBlockState(beltPos), (Level) worldIn, beltPos, entityIn);
-	}
-
-	@Override
-	public void entityInside(BlockState state, Level worldIn, BlockPos pos, Entity entityIn) {
-		if (!canTransportObjects(state))
-			return;
-		if (entityIn instanceof Player player) {
-			if (player.isShiftKeyDown() && !AllItems.CARDBOARD_BOOTS.isIn(player.getItemBySlot(EquipmentSlot.FEET)))
-				return;
-			if (player.getAbilities().flying)
-				return;
-		}
-
-		if (DivingBootsItem.isWornBy(entityIn))
-			return;
-
-		BeltBlockEntity belt = BeltHelper.getSegmentBE(worldIn, pos);
-		if (belt == null)
-			return;
-		ItemStack asItem = ItemHelper.fromItemEntity(entityIn);
-		if (!asItem.isEmpty()) {
-			if (worldIn.isClientSide)
-				return;
-			if (entityIn.getDeltaMovement().y > 0)
-				return;
-			Vec3 targetLocation = VecHelper.getCenterOf(pos)
-				.add(0, 5 / 16f, 0);
-			if (!PackageEntity.centerPackage(entityIn, targetLocation))
-				return;
-			if (BeltTunnelInteractionHandler.getTunnelOnPosition(worldIn, pos) != null)
-				return;
-			withBlockEntityDo(worldIn, pos, be -> {
-				IItemHandler handler = worldIn.getCapability(Capabilities.ItemHandler.BLOCK, pos, state, be, null);
-				if (handler == null)
-					return;
-				ItemStack remainder = handler.insertItem(0, asItem, false);
-				if (remainder.isEmpty())
-					entityIn.discard();
-				else if (entityIn instanceof ItemEntity itemEntity && remainder.getCount() != itemEntity.getItem().getCount())
-					itemEntity.setItem(remainder);
-			});
-			return;
-		}
-
-		BeltBlockEntity controller = BeltHelper.getControllerBE(worldIn, pos);
-		if (controller == null || controller.passengers == null)
-			return;
-		if (controller.passengers.containsKey(entityIn)) {
-			TransportedEntityInfo info = controller.passengers.get(entityIn);
-			if (info.getTicksSinceLastCollision() != 0 || pos.equals(entityIn.blockPosition()))
-				info.refresh(pos, state);
-		} else {
-			controller.passengers.put(entityIn, new TransportedEntityInfo(pos, state));
-			entityIn.setOnGround(true);
-		}
-	}
-
-	public static boolean canTransportObjects(BlockState state) {
-		if (!AllBlocks.BELT.has(state))
-			return false;
-		BeltSlope slope = state.getValue(SLOPE);
-		return slope != BeltSlope.VERTICAL && slope != BeltSlope.SIDEWAYS;
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (player.isShiftKeyDown() || !player.mayBuild())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		boolean isWrench = AllItems.WRENCH.isIn(stack);
-		boolean isConnector = AllItems.BELT_CONNECTOR.isIn(stack);
-		boolean isShaft = AllBlocks.SHAFT.isIn(stack);
-		boolean isDye = stack.is(Tags.Items.DYES);
-		boolean hasWater = GenericItemEmptying.emptyItem(level, stack, true)
-			.getFirst()
-			.getFluid()
-			.isSame(Fluids.WATER);
-		boolean isHand = stack.isEmpty() && hand == InteractionHand.MAIN_HAND;
-
-		if (isDye || hasWater)
-			return onBlockEntityUseItemOn(level, pos,
-				be -> be.applyColor(DyeColor.getColor(stack)) ? ItemInteractionResult.SUCCESS : ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION);
-
-		if (isConnector)
-			return BeltSlicer.useConnector(state, level, pos, player, hand, hitResult, new Feedback());
-		if (isWrench)
-			return BeltSlicer.useWrench(state, level, pos, player, hand, hitResult, new Feedback());
-
-		BeltBlockEntity belt = BeltHelper.getSegmentBE(level, pos);
-		if (belt == null)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		if (PackageItem.isPackage(stack)) {
-			ItemStack toInsert = stack.copy();
-			IItemHandler handler = level.getCapability(Capabilities.ItemHandler.BLOCK, belt.getBlockPos(), null);
-			if (handler == null)
-				return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-			ItemStack remainder = handler.insertItem(0, toInsert, false);
-			if (remainder.isEmpty()) {
-				stack.shrink(1);
-				return ItemInteractionResult.SUCCESS;
-			}
-		}
-
-		if (isHand) {
-			BeltBlockEntity controllerBelt = belt.getControllerBE();
-			if (controllerBelt == null)
-				return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-			if (level.isClientSide)
-				return ItemInteractionResult.SUCCESS;
-			MutableBoolean success = new MutableBoolean(false);
-			controllerBelt.getInventory()
-				.applyToEachWithin(belt.index + .5f, .55f, (transportedItemStack) -> {
-					player.getInventory()
-						.placeItemBackInInventory(transportedItemStack.stack);
-					success.setTrue();
-					return TransportedResult.removeItem();
-				});
-			if (success.isTrue())
-				level.playSound(null, pos, SoundEvents.ITEM_PICKUP, SoundSource.PLAYERS, .2f,
-					1f + level.random.nextFloat());
-		}
-
-		if (isShaft) {
-			if (state.getValue(PART) != BeltPart.MIDDLE)
-				return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-			if (level.isClientSide)
-				return ItemInteractionResult.SUCCESS;
-			if (!player.isCreative())
-				stack.shrink(1);
-			KineticBlockEntity.switchToBlockState(level, pos, state.setValue(PART, BeltPart.PULLEY));
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		if (AllBlocks.BRASS_CASING.isIn(stack)) {
-			withBlockEntityDo(level, pos, be -> be.setCasingType(CasingType.BRASS));
-			updateCoverProperty(level, pos, level.getBlockState(pos));
-
-			SoundType soundType = AllBlocks.BRASS_CASING.getDefaultState()
-				.getSoundType(level, pos, player);
-			level.playSound(null, pos, soundType.getPlaceSound(), SoundSource.BLOCKS,
-				(soundType.getVolume() + 1.0F) / 2.0F, soundType.getPitch() * 0.8F);
-
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		if (AllBlocks.ANDESITE_CASING.isIn(stack)) {
-			withBlockEntityDo(level, pos, be -> be.setCasingType(CasingType.ANDESITE));
-			updateCoverProperty(level, pos, level.getBlockState(pos));
-
-			SoundType soundType = AllBlocks.ANDESITE_CASING.getDefaultState()
-				.getSoundType(level, pos, player);
-			level.playSound(null, pos, soundType.getPlaceSound(), SoundSource.BLOCKS,
-				(soundType.getVolume() + 1.0F) / 2.0F, soundType.getPitch() * 0.8F);
-
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-	}
-
-	@Override
-	public InteractionResult onWrenched(BlockState state, UseOnContext context) {
-		Level world = context.getLevel();
-		Player player = context.getPlayer();
-		BlockPos pos = context.getClickedPos();
-
-		if (state.getValue(CASING)) {
-			if (world.isClientSide)
-				return InteractionResult.SUCCESS;
-			withBlockEntityDo(world, pos, be -> be.setCasingType(CasingType.NONE));
-			return InteractionResult.SUCCESS;
-		}
-
-		if (state.getValue(PART) == BeltPart.PULLEY) {
-			if (world.isClientSide)
-				return InteractionResult.SUCCESS;
-			KineticBlockEntity.switchToBlockState(world, pos, state.setValue(PART, BeltPart.MIDDLE));
-			if (player != null && !player.isCreative())
-				player.getInventory()
-					.placeItemBackInInventory(AllBlocks.SHAFT.asStack());
-			return InteractionResult.SUCCESS;
-		}
-
-		return InteractionResult.PASS;
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		builder.add(SLOPE, PART, CASING, WATERLOGGED);
-		super.createBlockStateDefinition(builder);
-	}
-
-	@Override
-	public PathType getBlockPathType(BlockState state, BlockGetter world, BlockPos pos, Mob entity) {
-		return PathType.RAIL;
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		return BeltShapes.getShape(state);
-	}
-
-	@Override
-	public VoxelShape getCollisionShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		if (state.getBlock() != this)
-			return Shapes.empty();
-
-		VoxelShape shape = getShape(state, worldIn, pos, context);
-		if (!(context instanceof EntityCollisionContext))
-			return shape;
-
-		return getBlockEntityOptional(worldIn, pos).map(be -> {
-				Entity entity = ((EntityCollisionContext) context).getEntity();
-				if (entity == null)
-					return shape;
-
-				BeltBlockEntity controller = be.getControllerBE();
-				if (controller == null)
-					return shape;
-				if (controller.passengers == null || !controller.passengers.containsKey(entity))
-					return BeltShapes.getCollisionShape(state);
-				return shape;
-
-			})
-			.orElse(shape);
-	}
-
-	@Override
-	public RenderShape getRenderShape(BlockState state) {
-		return state.getValue(CASING) ? RenderShape.MODEL : RenderShape.ENTITYBLOCK_ANIMATED;
-	}
-
-	public static void initBelt(Level world, BlockPos pos) {
-		if (world.isClientSide)
-			return;
-		if (world instanceof ServerLevel && ((ServerLevel) world).getChunkSource()
-			.getGenerator() instanceof DebugLevelSource)
-			return;
-
-		BlockState state = world.getBlockState(pos);
-		if (!AllBlocks.BELT.has(state))
-			return;
-		// Find controller
-		int limit = 1000;
-		BlockPos currentPos = pos;
-		while (limit-- > 0) {
-			BlockState currentState = world.getBlockState(currentPos);
-			if (!AllBlocks.BELT.has(currentState)) {
-				world.destroyBlock(pos, true);
-				return;
-			}
-			BlockPos nextSegmentPosition = nextSegmentPosition(currentState, currentPos, false);
-			if (nextSegmentPosition == null)
-				break;
-			if (!world.isLoaded(nextSegmentPosition))
-				return;
-			currentPos = nextSegmentPosition;
-		}
-
-		// Init belts
-		int index = 0;
-		List<BlockPos> beltChain = getBeltChain(world, currentPos);
-		if (beltChain.size() < 2) {
-			world.destroyBlock(currentPos, true);
-			return;
-		}
-
-		for (BlockPos beltPos : beltChain) {
-			BlockEntity blockEntity = world.getBlockEntity(beltPos);
-			BlockState currentState = world.getBlockState(beltPos);
-
-			if (blockEntity instanceof BeltBlockEntity be && AllBlocks.BELT.has(currentState)) {
-				be.setController(currentPos);
-				be.beltLength = beltChain.size();
-				be.index = index;
-				be.attachKinetics();
-				be.setChanged();
-				be.sendData();
-
-				if (be.isController() && !canTransportObjects(currentState))
-					be.getInventory()
-						.ejectAll();
-			} else {
-				world.destroyBlock(currentPos, true);
-				return;
-			}
-			index++;
-		}
-
-	}
-
-	@Override
-	public void onRemove(BlockState state, Level world, BlockPos pos, BlockState newState, boolean isMoving) {
-		super.onRemove(state, world, pos, newState, isMoving);
-
-		if (world.isClientSide)
-			return;
-		if (state.getBlock() == newState.getBlock())
-			return;
-		if (isMoving)
-			return;
-
-		// Destroy chain
-		for (boolean forward : Iterate.trueAndFalse) {
-			BlockPos currentPos = nextSegmentPosition(state, pos, forward);
-			if (currentPos == null)
-				continue;
-			BlockState currentState = world.getBlockState(currentPos);
-			if (!AllBlocks.BELT.has(currentState))
-				continue;
-
-			boolean hasPulley = false;
-			BlockEntity blockEntity = world.getBlockEntity(currentPos);
-			if (blockEntity instanceof BeltBlockEntity belt) {
-				if (belt.isController())
-					belt.getInventory()
-						.ejectAll();
-
-				hasPulley = belt.hasPulley();
-			}
-
-			world.removeBlockEntity(currentPos);
-			BlockState shaftState = AllBlocks.SHAFT.getDefaultState()
-				.setValue(BlockStateProperties.AXIS, getRotationAxis(currentState));
-			world.setBlock(currentPos, ProperWaterloggedBlock.withWater(world,
-				hasPulley ? shaftState : Blocks.AIR.defaultBlockState(), currentPos), Block.UPDATE_ALL);
-			world.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK, currentPos, Block.getId(currentState));
-		}
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction side, BlockState p_196271_3_, LevelAccessor world,
-								  BlockPos pos, BlockPos p_196271_6_) {
-		updateWater(world, state, pos);
-		if (side.getAxis()
-			.isHorizontal())
-			updateTunnelConnections(world, pos.above());
-		if (side == Direction.UP)
-			updateCoverProperty(world, pos, state);
-		return state;
-	}
-
-	public void updateCoverProperty(LevelAccessor world, BlockPos pos, BlockState state) {
-		if (world.isClientSide())
-			return;
-		if (state.getValue(CASING) && state.getValue(SLOPE) == BeltSlope.HORIZONTAL)
-			withBlockEntityDo(world, pos, bbe -> bbe.setCovered(isBlockCoveringBelt(world, pos.above())));
-	}
-
-	public static boolean isBlockCoveringBelt(LevelAccessor world, BlockPos pos) {
-		BlockState blockState = world.getBlockState(pos);
-		VoxelShape collisionShape = blockState.getCollisionShape(world, pos);
-		if (collisionShape.isEmpty())
-			return false;
-		AABB bounds = collisionShape.bounds();
-		if (bounds.getXsize() < .5f || bounds.getZsize() < .5f)
-			return false;
-		if (bounds.minY > 0)
-			return false;
-		if (AllBlocks.CRUSHING_WHEEL_CONTROLLER.has(blockState))
-			return false;
-		if (FunnelBlock.isFunnel(blockState) && FunnelBlock.getFunnelFacing(blockState) != Direction.UP)
-			return false;
-		if (blockState.getBlock() instanceof BeltTunnelBlock)
-			return false;
-		return true;
-	}
-
-	private void updateTunnelConnections(LevelAccessor world, BlockPos pos) {
-		Block tunnelBlock = world.getBlockState(pos)
-			.getBlock();
-		if (tunnelBlock instanceof BeltTunnelBlock)
-			((BeltTunnelBlock) tunnelBlock).updateTunnel(world, pos);
-	}
-
-	public static List<BlockPos> getBeltChain(LevelAccessor world, BlockPos controllerPos) {
-		List<BlockPos> positions = new LinkedList<>();
-
-		BlockState blockState = world.getBlockState(controllerPos);
-		if (!AllBlocks.BELT.has(blockState))
-			return positions;
-
-		int limit = 1000;
-		BlockPos current = controllerPos;
-		while (limit-- > 0 && current != null) {
-			BlockState state = world.getBlockState(current);
-			if (!AllBlocks.BELT.has(state))
-				break;
-			positions.add(current);
-			current = nextSegmentPosition(state, current, true);
-		}
-
-		return positions;
-	}
-
-	public static BlockPos nextSegmentPosition(BlockState state, BlockPos pos, boolean forward) {
-		Direction direction = state.getValue(HORIZONTAL_FACING);
-		BeltSlope slope = state.getValue(SLOPE);
-		BeltPart part = state.getValue(PART);
-
-		int offset = forward ? 1 : -1;
-
-		if (part == BeltPart.END && forward || part == BeltPart.START && !forward)
-			return null;
-		if (slope == BeltSlope.VERTICAL)
-			return pos.above(direction.getAxisDirection() == AxisDirection.POSITIVE ? offset : -offset);
-		pos = pos.relative(direction, offset);
-		if (slope != BeltSlope.HORIZONTAL && slope != BeltSlope.SIDEWAYS)
-			return pos.above(slope == BeltSlope.UPWARD ? offset : -offset);
-		return pos;
-	}
-
-	@Override
-	public Class<BeltBlockEntity> getBlockEntityClass() {
-		return BeltBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends BeltBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.BELT.get();
-	}
-
-	@Override
-	public ItemRequirement getRequiredItems(BlockState state, BlockEntity be) {
-		List<ItemStack> required = new ArrayList<>();
-		if (state.getValue(PART) != BeltPart.MIDDLE)
-			required.add(AllBlocks.SHAFT.asStack());
-		if (state.getValue(PART) == BeltPart.START)
-			required.add(AllItems.BELT_CONNECTOR.asStack());
-		if (required.isEmpty())
-			return ItemRequirement.NONE;
-		return new ItemRequirement(ItemUseType.CONSUME, required);
-	}
-
-	@Override
-	public BlockState rotate(BlockState state, Rotation rot) {
-		BlockState rotate = super.rotate(state, rot);
-
-		if (state.getValue(SLOPE) != BeltSlope.VERTICAL)
-			return rotate;
-		if (state.getValue(HORIZONTAL_FACING)
-			.getAxisDirection() != rotate.getValue(HORIZONTAL_FACING)
-			.getAxisDirection()) {
-			if (state.getValue(PART) == BeltPart.START)
-				return rotate.setValue(PART, BeltPart.END);
-			if (state.getValue(PART) == BeltPart.END)
-				return rotate.setValue(PART, BeltPart.START);
-		}
-
-		return rotate;
-	}
-
-	public BlockState transform(BlockState state, StructureTransform transform) {
-		if (transform.mirror != null) {
-			state = mirror(state, transform.mirror);
-		}
-
-		if (transform.rotationAxis == Direction.Axis.Y) {
-			return rotate(state, transform.rotation);
-		}
-		return transformInner(state, transform);
-	}
-
-	protected BlockState transformInner(BlockState state, StructureTransform transform) {
-		boolean halfTurn = transform.rotation == Rotation.CLOCKWISE_180;
-
-		Direction initialDirection = state.getValue(HORIZONTAL_FACING);
-		boolean diagonal =
-			state.getValue(SLOPE) == BeltSlope.DOWNWARD || state.getValue(SLOPE) == BeltSlope.UPWARD;
-
-		if (!diagonal) {
-			for (int i = 0; i < transform.rotation.ordinal(); i++) {
-				Direction direction = state.getValue(HORIZONTAL_FACING);
-				BeltSlope slope = state.getValue(SLOPE);
-				boolean vertical = slope == BeltSlope.VERTICAL;
-				boolean horizontal = slope == BeltSlope.HORIZONTAL;
-				boolean sideways = slope == BeltSlope.SIDEWAYS;
-
-				Direction newDirection = direction.getOpposite();
-				BeltSlope newSlope = BeltSlope.VERTICAL;
-
-				if (vertical) {
-					if (direction.getAxis() == transform.rotationAxis) {
-						newDirection = direction.getCounterClockWise();
-						newSlope = BeltSlope.SIDEWAYS;
-					} else {
-						newSlope = BeltSlope.HORIZONTAL;
-						newDirection = direction;
-						if (direction.getAxis() == Axis.Z)
-							newDirection = direction.getOpposite();
-					}
-				}
-
-				if (sideways) {
-					newDirection = direction;
-					if (direction.getAxis() == transform.rotationAxis)
-						newSlope = BeltSlope.HORIZONTAL;
-					else
-						newDirection = direction.getCounterClockWise();
-				}
-
-				if (horizontal) {
-					newDirection = direction;
-					if (direction.getAxis() == transform.rotationAxis)
-						newSlope = BeltSlope.SIDEWAYS;
-					else if (direction.getAxis() != Axis.Z)
-						newDirection = direction.getOpposite();
-				}
-
-				state = state.setValue(HORIZONTAL_FACING, newDirection);
-				state = state.setValue(SLOPE, newSlope);
-			}
-
-		} else if (initialDirection.getAxis() != transform.rotationAxis) {
-			for (int i = 0; i < transform.rotation.ordinal(); i++) {
-				Direction direction = state.getValue(HORIZONTAL_FACING);
-				Direction newDirection = direction.getOpposite();
-				BeltSlope slope = state.getValue(SLOPE);
-				boolean upward = slope == BeltSlope.UPWARD;
-				boolean downward = slope == BeltSlope.DOWNWARD;
-
-				// Rotate diagonal
-				if (direction.getAxisDirection() == AxisDirection.POSITIVE ^ downward ^ direction.getAxis() == Axis.Z) {
-					state = state.setValue(SLOPE, upward ? BeltSlope.DOWNWARD : BeltSlope.UPWARD);
-				} else {
-					state = state.setValue(HORIZONTAL_FACING, newDirection);
-				}
-			}
-
-		} else if (halfTurn) {
-			Direction direction = state.getValue(HORIZONTAL_FACING);
-			Direction newDirection = direction.getOpposite();
-			BeltSlope slope = state.getValue(SLOPE);
-			boolean vertical = slope == BeltSlope.VERTICAL;
-
-			if (diagonal) {
-				state = state.setValue(SLOPE, slope == BeltSlope.UPWARD ? BeltSlope.DOWNWARD
-					: slope == BeltSlope.DOWNWARD ? BeltSlope.UPWARD : slope);
-			} else if (vertical) {
-				state = state.setValue(HORIZONTAL_FACING, newDirection);
-			}
-		}
-
-		return state;
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	public FluidState getFluidState(BlockState pState) {
-		return fluidState(pState);
-	}
-
-	public static class RenderProperties extends ReducedDestroyEffects implements MultiPosDestructionHandler {
-		@Override
-		public Set<BlockPos> getExtraPositions(ClientLevel level, BlockPos pos, BlockState blockState, int progress) {
-			BlockEntity blockEntity = level.getBlockEntity(pos);
-			if (blockEntity instanceof BeltBlockEntity belt) {
-				return new HashSet<>(BeltBlock.getBeltChain(level, belt.getController()));
-			}
-			return null;
-		}
-	}
-
+import net.minecraft.world.phys.shapes.*;
+import java.util.*;
+
+public final class BeltBlock extends KineticBlock implements SimpleWaterloggedBlock {
+    public static final EnumProperty<Direction> HORIZONTAL_FACING = BlockStateProperties.HORIZONTAL_FACING;
+    public static final EnumProperty<BeltSlope> SLOPE = EnumProperty.create("slope", BeltSlope.class);
+    public static final EnumProperty<BeltPart> PART = EnumProperty.create("part", BeltPart.class);
+    public static final BooleanProperty CASING = BooleanProperty.create("casing");
+    public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
+    private static final Set<Level> DISMANTLING = Collections.newSetFromMap(new IdentityHashMap<>());
+    public static void editChain(Level level, Runnable edit) {
+        if (!DISMANTLING.add(level)) throw new IllegalStateException("Nested belt chain edit");
+        try { edit.run(); } finally { DISMANTLING.remove(level); }
+    }
+
+    public BeltBlock(Properties properties) {
+        super(properties.pushReaction(PushReaction.IMMOVEABLE));
+        registerDefaultState(stateDefinition.any().setValue(HORIZONTAL_FACING, Direction.SOUTH).setValue(SLOPE, BeltSlope.HORIZONTAL)
+                .setValue(PART, BeltPart.START).setValue(CASING, false).setValue(WATERLOGGED, false));
+    }
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { builder.add(HORIZONTAL_FACING, SLOPE, PART, CASING, WATERLOGGED); }
+    @Override public Direction.Axis getRotationAxis(BlockState state) { return state.getValue(SLOPE) == BeltSlope.SIDEWAYS ? Direction.Axis.Y : state.getValue(HORIZONTAL_FACING).getClockWise().getAxis(); }
+    @Override public boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face) { return state.getValue(PART) != BeltPart.MIDDLE && face.getAxis() == getRotationAxis(state); }
+    public static boolean canTransportObjects(BlockState state) { return state.getBlock() instanceof BeltBlock && state.getValue(SLOPE) != BeltSlope.VERTICAL && state.getValue(SLOPE) != BeltSlope.SIDEWAYS; }
+    @Override protected RenderShape getRenderShape(BlockState state) { return RenderShape.INVISIBLE; }
+    @Override protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) { return BeltShapes.getShape(state); }
+    @Override protected VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) { return BeltShapes.getCollisionShape(state); }
+    @Override protected FluidState getFluidState(BlockState state) { return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : super.getFluidState(state); }
+    @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new BeltBlockEntity(pos, state); }
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) { return createTickerHelper(type, AllBlockEntityTypes.BELT, BeltBlockEntity::tick); }
+    @Override protected ItemStack getCloneItemStack(LevelReader level, BlockPos pos, BlockState state, boolean includeData) { return new ItemStack(AllItems.BELT_CONNECTOR); }
+    @Override protected List<ItemStack> getDrops(BlockState state, LootParams.Builder context) {
+        var drops = new ArrayList<>(super.getDrops(state, context));
+        if (state.getValue(PART) != BeltPart.MIDDLE) drops.add(new ItemStack(AllBlocks.SHAFT));
+        return drops;
+    }
+    public static BlockPos nextSegmentPosition(BlockState state, BlockPos pos, boolean forward) {
+        var part = state.getValue(PART); var slope = state.getValue(SLOPE); var facing = state.getValue(HORIZONTAL_FACING);
+        if (forward && part == BeltPart.END || !forward && part == BeltPart.START) return null;
+        int step = forward ? 1 : -1;
+        if (slope == BeltSlope.VERTICAL) return pos.above(step * facing.getAxisDirection().getStep());
+        return pos.relative(facing, step).above(slope == BeltSlope.UPWARD ? step : slope == BeltSlope.DOWNWARD ? -step : 0);
+    }
+    public static boolean areConnected(BlockPos fromPos, BlockState from, BlockPos toPos, BlockState to) {
+        if (!(from.getBlock() instanceof BeltBlock) || !(to.getBlock() instanceof BeltBlock)
+                || from.getValue(SLOPE) != to.getValue(SLOPE) || from.getValue(HORIZONTAL_FACING) != to.getValue(HORIZONTAL_FACING)) return false;
+        return toPos.equals(nextSegmentPosition(from, fromPos, true)) && fromPos.equals(nextSegmentPosition(to, toPos, false))
+                || toPos.equals(nextSegmentPosition(from, fromPos, false)) && fromPos.equals(nextSegmentPosition(to, toPos, true));
+    }
+    public static List<BlockPos> getBeltChain(Level level, BlockPos first) {
+        var result = new ArrayList<BlockPos>();
+        BlockPos cursor = first;
+        var seen = new HashSet<BlockPos>();
+        BlockPos previous = null; BlockState previousState = null;
+        while (cursor != null && seen.add(cursor)) {
+            if (!level.isInWorldBounds(cursor) || !level.isLoaded(cursor)) break;
+            var current = level.getBlockState(cursor);
+            if (!(current.getBlock() instanceof BeltBlock) || previous != null && !areConnected(previous, previousState, cursor, current)) break;
+            result.add(cursor.immutable()); previous = cursor; previousState = current;
+            cursor = nextSegmentPosition(current, cursor, true);
+        }
+        return result;
+    }
+    public static void initBelt(Level level, BlockPos pos) {
+        if (!(level instanceof ServerLevel) || DISMANTLING.contains(level) || !level.isLoaded(pos)) return;
+        var state = level.getBlockState(pos);
+        if (!(state.getBlock() instanceof BeltBlock)) return;
+        BlockPos first = pos;
+        var seen = new HashSet<BlockPos>();
+        while (true) {
+            if (!level.isInWorldBounds(first) || !seen.add(first)) { dismantle(level, pos, state); return; }
+            if (!level.isLoaded(first)) return;
+            var current = level.getBlockState(first);
+            if (!(current.getBlock() instanceof BeltBlock)) { dismantle(level, pos, state); return; }
+            if (current.getValue(PART) == BeltPart.START) break;
+            var previous = nextSegmentPosition(current, first, false);
+            if (previous == null || !level.isInWorldBounds(previous)) { dismantle(level, pos, state); return; }
+            if (!level.isLoaded(previous)) return;
+            var before = level.getBlockState(previous);
+            if (!areConnected(first, current, previous, before)) { dismantle(level, pos, state); return; }
+            first = previous;
+        }
+        var chain = getBeltChain(level, first);
+        if (chain.isEmpty()) return;
+        var last = chain.getLast();
+        var lastState = level.getBlockState(last);
+        if (lastState.getValue(PART) != BeltPart.END) {
+            var next = nextSegmentPosition(lastState, last, true);
+            if (next != null && !level.isLoaded(next)) return;
+            dismantle(level, pos, state); return;
+        }
+        if (chain.size() < 2) { dismantle(level, pos, state); return; }
+        for (int i = 0; i < chain.size(); i++) {
+            var cell = chain.get(i);
+            if (i > 0 && !areConnected(chain.get(i - 1), level.getBlockState(chain.get(i - 1)), cell, level.getBlockState(cell))) { dismantle(level, pos, state); return; }
+            if (!(level.getBlockEntity(cell) instanceof BeltBlockEntity)) return;
+        }
+        for (int i = 0; i < chain.size(); i++) ((BeltBlockEntity) level.getBlockEntity(chain.get(i))).configure(first, i, chain.size());
+        KineticNetworks.markDirty((ServerLevel) level);
+    }
+    @Override public void onPlace(BlockState state, Level level, BlockPos pos, BlockState old, boolean moved) {
+        super.onPlace(state, level, pos, old, moved); if (!level.isClientSide()) level.scheduleTick(pos, this, 1);
+    }
+    @Override protected void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
+        initBelt(level,pos);
+        var above=pos.above();var tunnel=com.simibubi.create.foundation.utility.LoadedLevelAccess.blockState(level,above);
+        if(tunnel.getBlock() instanceof com.simibubi.create.content.logistics.tunnel.BeltTunnelBlock)level.scheduleTick(above,tunnel.getBlock(),1);
+    }
+    @Override protected BlockState updateShape(BlockState state, LevelReader level, ScheduledTickAccess ticks, BlockPos pos,
+            Direction side, BlockPos neighborPos, BlockState neighbor, RandomSource random) {
+        if (state.getValue(WATERLOGGED)) ticks.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(level));
+        ticks.scheduleTick(pos, this, 1); return state;
+    }
+    @Override protected void affectNeighborsAfterRemoval(BlockState state, ServerLevel level, BlockPos pos, boolean moved) {
+        super.affectNeighborsAfterRemoval(state, level, pos, moved);
+        if (!moved && !level.getBlockState(pos).is(this)) dismantle(level, pos, state);
+    }
+    public static void dismantle(Level level, BlockPos brokenPos, BlockState state) {
+        if (level.isClientSide() || !level.isLoaded(brokenPos) || !DISMANTLING.add(level)) return;
+        try {
+            var cells = new LinkedHashMap<BlockPos, BlockState>();
+            if (level.getBlockState(brokenPos).getBlock() instanceof BeltBlock) cells.put(brokenPos, state);
+            for (boolean forward : new boolean[]{true, false}) {
+                BlockPos previous = brokenPos; BlockState previousState = state;
+                var seen = new HashSet<BlockPos>(); seen.add(brokenPos);
+                while (true) {
+                    var next = nextSegmentPosition(previousState, previous, forward);
+                    if (next == null || !level.isInWorldBounds(next) || !seen.add(next) || !level.isLoaded(next)) break;
+                    var nextState = level.getBlockState(next);
+                    if (!areConnected(previous, previousState, next, nextState)) break;
+                    cells.put(next, nextState); previous = next; previousState = nextState;
+                }
+            }
+            for (var cell : cells.keySet()) {
+                var belt = BeltHelper.getControllerBE(level, cell);
+                if (belt != null) belt.getInventory().ejectAll();
+            }
+            cells.forEach((cell, old) -> {
+                var replacement = old.getValue(PART) == BeltPart.MIDDLE ? (old.getValue(WATERLOGGED) ? Blocks.WATER : Blocks.AIR).defaultBlockState()
+                        : AllBlocks.SHAFT.defaultBlockState().setValue(com.simibubi.create.content.kinetics.simpleRelays.ShaftBlock.AXIS, ((BeltBlock) old.getBlock()).getRotationAxis(old))
+                        .setValue(com.simibubi.create.content.kinetics.simpleRelays.ShaftBlock.WATERLOGGED, old.getValue(WATERLOGGED));
+                level.setBlock(cell, replacement, Block.UPDATE_ALL);
+            });
+        } finally { DISMANTLING.remove(level); }
+    }
+    @Override protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+        if (!player.mayBuild() || player.isShiftKeyDown() || !(level.getBlockEntity(pos) instanceof BeltBlockEntity belt)) return InteractionResult.PASS;
+        var dye = stack.get(net.minecraft.core.component.DataComponents.DYE);
+        if (dye != null || stack.is(Items.WATER_BUCKET)) return belt.applyColor(dye) ? InteractionResult.SUCCESS : InteractionResult.PASS;
+        if (stack.is(AllItems.BELT_CONNECTOR)) return BeltSlicer.useConnector(level, pos, player, hit);
+        if (stack.is(AllBlocks.SHAFT.asItem()) && state.getValue(PART) == BeltPart.MIDDLE) {
+            if (!level.isClientSide()) { level.setBlockAndUpdate(pos, state.setValue(PART, BeltPart.PULLEY)); stack.consume(1, player); }
+            return InteractionResult.SUCCESS;
+        }
+        if (stack.is(AllBlocks.ANDESITE_CASING.asItem()) || stack.is(AllBlocks.BRASS_CASING.asItem())) {
+            if (!level.isClientSide()) belt.setCasingType(stack.is(AllBlocks.BRASS_CASING.asItem()) ? BeltBlockEntity.CasingType.BRASS : BeltBlockEntity.CasingType.ANDESITE);
+            return InteractionResult.SUCCESS;
+        }
+        return InteractionResult.PASS;
+    }
+    @Override protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+        if (!player.mayBuild() || !canTransportObjects(state)) return InteractionResult.PASS;
+        if (!level.isClientSide() && level.getBlockEntity(pos) instanceof BeltBlockEntity belt) belt.collectItems(player);
+        return InteractionResult.SUCCESS;
+    }
+    public InteractionResult onWrenched(Level level, BlockPos pos, BlockState state, Player player) {
+        if (state.getValue(CASING)) { if (!level.isClientSide() && level.getBlockEntity(pos) instanceof BeltBlockEntity belt) belt.setCasingType(BeltBlockEntity.CasingType.NONE); return InteractionResult.SUCCESS; }
+        if (state.getValue(PART) == BeltPart.PULLEY) {
+            if (!level.isClientSide()) {
+                level.setBlockAndUpdate(pos, state.setValue(PART, BeltPart.MIDDLE));
+                if (!player.isCreative()) player.getInventory().placeItemBackInInventory(new ItemStack(AllBlocks.SHAFT), Prediction.SERVER_ONLY);
+            }
+            return InteractionResult.SUCCESS;
+        }
+        return InteractionResult.PASS;
+    }
 }

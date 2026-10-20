@@ -1,0 +1,19 @@
+{
+  "type": "create:pressing",
+  "ingredients": [
+    "betterendforge:chorus_nylium"
+  ],
+  "results": [
+    {
+      "id": "betterendforge:chorus_nylium_path"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "betterendforge"
+      ]
+    }
+  ]
+}

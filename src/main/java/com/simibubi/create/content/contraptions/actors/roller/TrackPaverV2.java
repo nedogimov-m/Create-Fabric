@@ -1,3 +1,4 @@
+// Pinned Create source rasterizer; native26.3 geometry APIs.
 package com.simibubi.create.content.contraptions.actors.roller;
 
 import java.util.HashMap;

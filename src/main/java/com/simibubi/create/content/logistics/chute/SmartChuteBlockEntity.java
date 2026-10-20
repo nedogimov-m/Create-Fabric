@@ -1,77 +1,25 @@
 package com.simibubi.create.content.logistics.chute;
 
-import java.util.List;
-
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
 import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.item.ItemHelper.ExtractionCountMode;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.Clearable;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
-
-public class SmartChuteBlockEntity extends ChuteBlockEntity implements Clearable {
-	FilteringBehaviour filtering;
-
-	public SmartChuteBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		event.registerBlockEntity(
-			Capabilities.ItemHandler.BLOCK,
-			AllBlockEntityTypes.SMART_CHUTE.get(),
-			(be, context) -> be.itemHandler
-		);
-	}
-
-	@Override
-	protected boolean canAcceptItem(ItemStack stack) {
-		return super.canAcceptItem(stack) && canActivate() && filtering.test(stack);
-	}
-
-	@Override
-	protected int getExtractionAmount() {
-		return filtering.isCountVisible() && !filtering.anyAmount() ? filtering.getAmount() : 64;
-	}
-
-	@Override
-	protected ExtractionCountMode getExtractionMode() {
-		return filtering.isCountVisible() && !filtering.anyAmount() && !filtering.upTo ? ExtractionCountMode.EXACTLY
-			: ExtractionCountMode.UPTO;
-	}
-
-	@Override
-	protected boolean canActivate() {
-		BlockState blockState = getBlockState();
-		return blockState.hasProperty(SmartChuteBlock.POWERED) && !blockState.getValue(SmartChuteBlock.POWERED);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(filtering =
-			new FilteringBehaviour(this, new SmartChuteFilterSlotPositioning()).showCountWhen(this::isExtracting)
-				.withCallback($ -> invVersionTracker.reset()));
-		super.addBehaviours(behaviours);
-	}
-
-	@Override
-	public void clearContent() {
-		super.clearContent();
-		filtering.setFilter(ItemStack.EMPTY);
-	}
-
-	private boolean isExtracting() {
-		boolean up = getItemMotion() < 0;
-		BlockPos chutePos = worldPosition.relative(up ? Direction.UP : Direction.DOWN);
-		BlockState blockState = level.getBlockState(chutePos);
-		return !AbstractChuteBlock.isChute(blockState) && !blockState.canBeReplaced();
-	}
+public final class SmartChuteBlockEntity extends ChuteBlockEntity implements BlockEntityBehaviour.Provider {
+    public final FilteringBehaviour filtering=new FilteringBehaviour(this).showCountWhen(this::isExtracting).withCallback(stack->inventoryTracker.reset());
+    public SmartChuteBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.SMART_CHUTE,pos,state);}
+    @Override public boolean canAcceptItem(ItemStack stack){return super.canAcceptItem(stack)&&canActivate()&&filtering.test(stack);}
+    @Override protected boolean canActivate(){return !getBlockState().getValue(SmartChuteBlock.POWERED);}
+    @Override protected int getExtractionAmount(){return filtering.isCountVisible()&&!filtering.anyAmount()?filtering.getAmount():64;}
+    @Override protected boolean isExact(){return filtering.isCountVisible()&&!filtering.anyAmount()&&!filtering.upTo;}
+    public boolean isExtracting(){if(level==null)return false;var source=worldPosition.relative(getItemMotion()<0?Direction.UP:Direction.DOWN);var state=LoadedLevelAccess.blockState(level,source);return !AbstractChuteBlock.isChute(state)&&!state.canBeReplaced();}
+    @Override public void clearContent(){super.clearContent();filtering.setFilter(ItemStack.EMPTY);}
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (filtering != null) behaviours.add(filtering);
+    }
 }

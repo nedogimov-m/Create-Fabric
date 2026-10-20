@@ -1,226 +1,92 @@
 package com.simibubi.create.content.kinetics.crank;
 
-import java.util.List;
-
-import com.google.common.collect.ImmutableList;
-import com.simibubi.create.AllBlocks;
+import java.util.UUID;
+import com.simibubi.create.AllBlockEntityTypes;
+import com.simibubi.create.content.kinetics.KineticNetworks;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntityRenderer;
+import com.simibubi.create.content.kinetics.transmission.sequencer.*;
 import com.simibubi.create.content.kinetics.transmission.sequencer.SequencedGearshiftBlockEntity.SequenceContext;
-import com.simibubi.create.content.kinetics.transmission.sequencer.SequencerInstructions;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsBoard;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsFormatter;
-import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollValueBehaviour;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import net.createmod.catnip.math.AngleHelper;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.render.CachedBuffers;
-import net.createmod.catnip.render.SuperByteBuffer;
-import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
-
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+import net.minecraft.world.level.storage.*;
 
 public class ValveHandleBlockEntity extends HandCrankBlockEntity {
+    private int angleInput = 45;
+    public int cooldown;
+    protected int startAngle, targetAngle, totalUseTicks;
+    private long phaseEpoch;
+    private UUID generation = UUID.randomUUID();
+    public ValveHandleBlockEntity(BlockPos pos,BlockState state){this(AllBlockEntityTypes.VALVE_HANDLE,pos,state);}
+    public ValveHandleBlockEntity(net.minecraft.world.level.block.entity.BlockEntityType<?> type,BlockPos pos,BlockState state){super(type,pos,state);}
+    public int getAngleInput() { return angleInput; }
+    public void setAngleInput(int angle) {
+        angle = Math.clamp(angle, -180, 180);
+        if (angle == 0) angle = 1;
+        if (angleInput == angle || !showValue()) return;
+        angleInput = angle; setChanged(); sync();
+    }
+    @Override protected boolean clockwise() { return angleInput < 0 ^ backwards; }
+    public boolean showValue() { return inUse == 0; }
+    public boolean activate(boolean sneak) {
+        if (level == null || isRemoved() || com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,worldPosition) != this || getTheoreticalSpeed() != 0 || inUse > 0 || cooldown > 0) return false;
+        if (level.isClientSide()) return true;
+        int target = Math.abs(angleInput);
+        inUse = (int) Math.ceil(target / (double) convertToAngular(32)) + 2;
+        startAngle = (int) ((independentAngle % 90 + 360) % 90);
+        targetAngle = Math.round((startAngle + (target > 135 ? 180 : 90) * Mth.sign(angleInput)) / 90f) * 90;
+        totalUseTicks = inUse; backwards = sneak;
+        phaseEpoch = phaseEpoch == Long.MAX_VALUE ? 1 : phaseEpoch + 1;
+        applySequenceContext(SequenceContext.fromGearshift(SequencerInstructions.TURN_ANGLE, 32, target),
+                new SequencePhase(worldPosition, phaseEpoch, generation));
+        cooldown = 4; setChanged(); sync();
+        if (level instanceof ServerLevel server) KineticNetworks.markDirty(server);
+        return true;
+    }
+    @Override public void turnCrank(boolean backwards) { activate(backwards); }
+    @Override protected void copySequenceContextFrom(KineticBlockEntity upstream) {}
+    public SequenceContext getOwnSequenceContext() { return inUse > 0 ? sequenceContext : null; }
+    @Override public float getIndependentAngle(float partial) {
+        if (inUse == 0 && hasSource() && getSpeed() != 0) {
+            var axis = getBlockState().getValue(ValveHandleBlock.FACING).getAxis();
+            int parity = (axis == Direction.Axis.X ? 0 : worldPosition.getX())
+                    +(axis == Direction.Axis.Y ? 0 : worldPosition.getY())+(axis == Direction.Axis.Z ? 0 : worldPosition.getZ());
+            return getAngle(partial)+(parity%2 == 0 ? 22.5f : 0);
+        }
+        int sign = getBlockState().getValue(ValveHandleBlock.FACING).getAxisDirection().getStep();
+        return (inUse > 0 && totalUseTicks > 0
+                ? Mth.lerp(Math.min(totalUseTicks, totalUseTicks - inUse + partial) / totalUseTicks, startAngle, targetAngle)
+                : targetAngle) * (backwards ? -1 : 1) * sign;
+    }
+    @Override public void tick(){if(level==null){super.tick();return;}tick(level,worldPosition,getBlockState(),this);}
+    public static void tick(Level level, BlockPos pos, BlockState state, ValveHandleBlockEntity entity) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, entity)) {
+            if (!createTick.shouldTick()) return;
 
-	public ScrollValueBehaviour angleInput;
-	public int cooldown;
-
-	protected int startAngle;
-	protected int targetAngle;
-	protected int totalUseTicks;
-
-	public ValveHandleBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		behaviours.add(angleInput = new ValveHandleScrollValueBehaviour(this).between(-180, 180));
-		angleInput.onlyActiveWhen(this::showValue);
-		angleInput.setValue(45);
-	}
-
-	@Override
-	protected boolean clockwise() {
-		return angleInput.getValue() < 0 ^ backwards;
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(compound, registries, clientPacket);
-		compound.putInt("TotalUseTicks", totalUseTicks);
-		compound.putInt("StartAngle", startAngle);
-		compound.putInt("TargetAngle", targetAngle);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-		totalUseTicks = compound.getInt("TotalUseTicks");
-		startAngle = compound.getInt("StartAngle");
-		targetAngle = compound.getInt("TargetAngle");
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		if (inUse == 0 && cooldown > 0)
-			cooldown--;
-		independentAngle = level.isClientSide() ? getIndependentAngle(0) : 0;
-	}
-
-	@Override
-	public float getIndependentAngle(float partialTicks) {
-		if (inUse == 0 && source != null && getSpeed() != 0)
-			return AngleHelper.deg(KineticBlockEntityRenderer.getAngleForBe(this, worldPosition,
-				KineticBlockEntityRenderer.getRotationAxisOf(this)));
-
-		int step = getBlockState().getOptionalValue(ValveHandleBlock.FACING)
-			.orElse(Direction.SOUTH)
-			.getAxisDirection()
-			.getStep();
-
-		return (inUse > 0 && totalUseTicks > 0
-			? Mth.lerp(Math.min(totalUseTicks, totalUseTicks - inUse + partialTicks) / (float) totalUseTicks,
-			startAngle, targetAngle)
-			: targetAngle) * (backwards ? -1 : 1) * step;
-	}
-
-	public boolean showValue() {
-		return inUse == 0;
-	}
-
-	public boolean activate(boolean sneak) {
-		if (getTheoreticalSpeed() != 0)
-			return false;
-		if (inUse > 0 || cooldown > 0)
-			return false;
-		if (level.isClientSide)
-			return true;
-
-		// Always overshoot, target will stop early
-		int value = angleInput.getValue();
-		int target = Math.abs(value);
-		int rotationSpeed = AllBlocks.COPPER_VALVE_HANDLE.get()
-			.getRotationSpeed();
-		double degreesPerTick = KineticBlockEntity.convertToAngular(rotationSpeed);
-		inUse = (int) Math.ceil(target / degreesPerTick) + 2;
-
-		startAngle = (int) ((independentAngle) % 90 + 360) % 90;
-		targetAngle = Math.round((startAngle + (target > 135 ? 180 : 90) * Mth.sign(value)) / 90f) * 90;
-		totalUseTicks = inUse;
-		backwards = sneak;
-
-		sequenceContext = SequenceContext.fromGearshift(SequencerInstructions.TURN_ANGLE, rotationSpeed, target);
-		updateGeneratedRotation();
-		cooldown = 4;
-
-		return true;
-	}
-
-	@Override
-	protected void copySequenceContextFrom(KineticBlockEntity sourceBE) {
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public SuperByteBuffer getRenderedHandle() {
-		return CachedBuffers.block(getBlockState());
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public boolean shouldRenderShaft() {
-		return false;
-	}
-
-	public static class ValveHandleScrollValueBehaviour extends ScrollValueBehaviour {
-
-		public ValveHandleScrollValueBehaviour(SmartBlockEntity be) {
-			super(CreateLang.translateDirect("kinetics.valve_handle.rotated_angle"), be, new ValveHandleValueBox());
-			withFormatter(v -> String.valueOf(Math.abs(v)) + CreateLang.translateDirect("generic.unit.degrees")
-				.getString());
-		}
-
-		@Override
-		public ValueSettingsBoard createBoard(Player player, BlockHitResult hitResult) {
-			ImmutableList<Component> rows = ImmutableList.of(Component.literal("\u27f3")
-					.withStyle(ChatFormatting.BOLD),
-				Component.literal("\u27f2")
-					.withStyle(ChatFormatting.BOLD));
-			return new ValueSettingsBoard(label, 180, 45, rows, new ValueSettingsFormatter(this::formatValue));
-		}
-
-		@Override
-		public void setValueSettings(Player player, ValueSettings valueSetting, boolean ctrlHeld) {
-			int value = Math.max(1, valueSetting.value());
-			if (!valueSetting.equals(getValueSettings()))
-				playFeedbackSound(this);
-			setValue(valueSetting.row() == 0 ? -value : value);
-		}
-
-		@Override
-		public ValueSettings getValueSettings() {
-			return new ValueSettings(value < 0 ? 0 : 1, Math.abs(value));
-		}
-
-		public MutableComponent formatValue(ValueSettings settings) {
-			return CreateLang.number(Math.max(1, Math.abs(settings.value())))
-				.add(CreateLang.translateDirect("generic.unit.degrees"))
-				.component();
-		}
-
-		@Override
-		public void onShortInteract(Player player, InteractionHand hand, Direction side, BlockHitResult hitResult) {
-			if (getWorld().isClientSide)
-				return;
-			BlockState blockState = blockEntity.getBlockState();
-			if (blockState.getBlock() instanceof ValveHandleBlock vhb)
-				vhb.clicked(getWorld(), getPos(), blockState, player, hand);
-		}
-
-	}
-
-	public static class ValveHandleValueBox extends ValueBoxTransform.Sided {
-
-		@Override
-		protected boolean isSideActive(BlockState state, Direction direction) {
-			return direction == state.getValue(ValveHandleBlock.FACING);
-		}
-
-		@Override
-		protected Vec3 getSouthLocation() {
-			return VecHelper.voxelSpace(8, 8, 4.5);
-		}
-
-		@Override
-		public boolean testHit(LevelAccessor level, BlockPos pos, BlockState state, Vec3 localHit) {
-			Vec3 offset = getLocalOffset(level, pos, state);
-			if (offset == null)
-				return false;
-			return localHit.distanceTo(offset) < scale / 1.5f;
-		}
-
-	}
-
+        if (entity.isRemoved() || com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,pos) != entity) return;
+        KineticBlockEntity.tick(level, pos, state, entity); entity.tickCrank();
+        if (entity.inUse == 0 && entity.cooldown > 0) entity.cooldown--;
+        entity.independentAngle = level.isClientSide() ? entity.getIndependentAngle(0) : 0;
+    
+        }
+    }
+    @Override protected void write(ValueOutput output, boolean clientPacket) {
+        super.write(output, clientPacket); output.putInt("ScrollValue", angleInput);
+        output.putInt("TotalUseTicks", totalUseTicks); output.putInt("StartAngle", startAngle); output.putInt("TargetAngle", targetAngle);
+        output.putInt("Cooldown", cooldown); output.putLong("SequenceEpoch", phaseEpoch); output.store("SequenceGeneration", UUIDUtil.CODEC, generation);
+    }
+    @Override protected void read(ValueInput input, boolean clientPacket) {
+        super.read(input, clientPacket); angleInput = input.getIntOr("ScrollValue", 45);
+        totalUseTicks = Math.max(0, input.getIntOr("TotalUseTicks", inUse));
+        startAngle = input.getIntOr("StartAngle", 0);
+        targetAngle = input.getIntOr("TargetAngle", 0);
+        cooldown = Math.clamp(input.getIntOr("Cooldown", 0), 0, 4);
+        phaseEpoch = Math.max(1, input.getLongOr("SequenceEpoch", 1));
+        generation = input.read("SequenceGeneration", UUIDUtil.CODEC).orElse(getSequencePhase() == null ? SequencePhase.LEGACY_GENERATION : getSequencePhase().generation());
+        if (inUse > 0) restoreSequenceContext(SequenceContext.fromGearshift(SequencerInstructions.TURN_ANGLE, 32, Math.abs(angleInput)),
+                new SequencePhase(worldPosition, phaseEpoch, generation));
+        else restoreSequenceContext(null, null);
+    }
 }

@@ -1,143 +1,82 @@
 package com.simibubi.create.content.kinetics.steamEngine;
 
-import java.util.List;
-
+import com.simibubi.create.*;
 import com.simibubi.create.api.stress.BlockStressValues;
-import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
-
-import net.createmod.catnip.nbt.NBTHelper;
-import net.createmod.catnip.registry.RegisteredObjectsHelper;
+import com.simibubi.create.content.kinetics.KineticNetworks;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.Mth;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
-public class PoweredShaftBlockEntity extends GeneratingKineticBlockEntity {
+public class PoweredShaftBlockEntity extends com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity {
+    @Override public boolean addToGoggleTooltip(java.util.List<net.minecraft.network.chat.Component> tooltip,boolean sneaking){return false;}
+    public boolean addToEngineTooltip(java.util.List<net.minecraft.network.chat.Component> tooltip,boolean sneaking){return super.addToGoggleTooltip(tooltip,sneaking);}
+    public BlockPos enginePos;
+    public net.minecraft.world.level.block.Block capacityKey;
+    public float engineEfficiency;
+    public int movementDirection=1,initialTicks=3;
+    public PoweredShaftBlockEntity(BlockPos pos,BlockState state){this(AllBlockEntityTypes.POWERED_SHAFT,pos,state);}
+    public PoweredShaftBlockEntity(net.minecraft.world.level.block.entity.BlockEntityType<?> type,BlockPos pos,BlockState state){super(type,pos,state);}
+    public boolean isPoweredBy(BlockPos engine){return worldPosition.subtract(engine).equals(enginePos);}
+    public boolean canBePoweredBy(BlockPos engine){return initialTicks==0&&(enginePos==null||isPoweredBy(engine));}
+    public void update(BlockPos engine,int direction,float efficiency){
+        if(!canBePoweredBy(engine))return;
+        enginePos=worldPosition.subtract(engine);efficiency=Float.isFinite(efficiency)?Math.clamp(efficiency,0,1):0;direction=Integer.signum(direction);
+        var nextCapacityKey=level==null?AllBlocks.STEAM_ENGINE:com.simibubi.create.foundation.utility.LoadedLevelAccess.blockState(level,engine).getBlock();
+        if(engineEfficiency==efficiency&&movementDirection==direction&&capacityKey==nextCapacityKey)return;
+        capacityKey=nextCapacityKey;engineEfficiency=efficiency;movementDirection=direction;changed();
+    }
+    public void remove(BlockPos engine){if(!isPoweredBy(engine))return;enginePos=null;capacityKey=null;engineEfficiency=0;movementDirection=0;changed();}
+    public void followNetworkDirection(int direction){
+        direction=Integer.signum(direction);if(direction==0||movementDirection==direction)return;
+        movementDirection=direction;
+        if(level!=null&&enginePos!=null&&com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,worldPosition.subtract(enginePos)) instanceof SteamEngineBlockEntity engine)engine.reverse();
+        setChanged();sync();
+    }
+    /** Native steam generators are reversible; a rigid driven source chooses their direction. */
+    public void followDrivenDirection(float conveyedSpeed) {
+        if (conveyedSpeed == 0 || getGeneratedSpeed() == 0 || Math.signum(conveyedSpeed) == Math.signum(getGeneratedSpeed())) return;
+        float previous = getSpeed();
+        followNetworkDirection(conveyedSpeed > 0 ? 1 : -1);
+        setSpeed(Math.copySign(Math.abs(getTheoreticalSpeed()), conveyedSpeed));
+        onSpeedChanged(previous);
+    }
+    @Override public void applyNewSpeed(float previousSpeed,float generatedSpeed) {
+        if (hasSource() && previousSpeed != 0 && generatedSpeed != 0) {
+            followDrivenDirection(previousSpeed);
+            generatedSpeed = Math.copySign(Math.abs(generatedSpeed), previousSpeed);
+        }
+        super.applyNewSpeed(previousSpeed, generatedSpeed);
+    }
+    private void changed(){updateGeneratedRotation();}
+    private int speedModifier(){return 1+(engineEfficiency>=1?3:Math.min(2,(int)Math.floor(engineEfficiency*4)));}
+    @Override public float getGeneratedSpeed(){
+        if(level instanceof ServerLevel server&&(enginePos==null||!server.shouldTickBlocksAt(worldPosition)||!server.shouldTickBlocksAt(worldPosition.subtract(enginePos))))return 0;
+        return getCombinedCapacity()>0?movementDirection*16f*speedModifier():0;
+    }
+    private float getCombinedCapacity(){return capacityKey==null?0:(float)(engineEfficiency*BlockStressValues.getCapacity(capacityKey));}
+    @Override public double getAddedStressCapacity(){return getCombinedCapacity()/speedModifier();}
+    @Override public int getRotationAngleOffset(Direction.Axis axis){return super.getRotationAngleOffset(axis)+(axis.choose(worldPosition.getX(),worldPosition.getY(),worldPosition.getZ())%2==0?180:0);}
+    @Override public void tick(){if(level==null){super.tick();return;}tick(level,worldPosition,getBlockState(),this);}
+    public static void tick(Level level,BlockPos pos,BlockState state,PoweredShaftBlockEntity shaft){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, shaft)) {
+            if (!createTick.shouldTick()) return;
 
-	public BlockPos enginePos;
-	public float engineEfficiency;
-	public int movementDirection;
-	public int initialTicks;
-	public Block capacityKey;
-
-	public PoweredShaftBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
-		super(typeIn, pos, state);
-		movementDirection = 1;
-		initialTicks = 3;
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		if (initialTicks > 0)
-			initialTicks--;
-	}
-
-	public void update(BlockPos sourcePos, int direction, float efficiency) {
-		BlockPos key = worldPosition.subtract(sourcePos);
-		enginePos = key;
-		float prev = engineEfficiency;
-		engineEfficiency = efficiency;
-		int prevDirection = this.movementDirection;
-		if (Mth.equal(efficiency, prev) && prevDirection == direction)
-			return;
-
-		capacityKey = level.getBlockState(sourcePos)
-			.getBlock();
-		this.movementDirection = direction;
-		updateGeneratedRotation();
-	}
-
-	public void remove(BlockPos sourcePos) {
-		if (!isPoweredBy(sourcePos))
-			return;
-
-		enginePos = null;
-		engineEfficiency = 0;
-		movementDirection = 0;
-		capacityKey = null;
-		updateGeneratedRotation();
-	}
-
-	public boolean canBePoweredBy(BlockPos globalPos) {
-		return initialTicks == 0 && (enginePos == null || isPoweredBy(globalPos));
-	}
-
-	public boolean isPoweredBy(BlockPos globalPos) {
-		BlockPos key = worldPosition.subtract(globalPos);
-		return key.equals(enginePos);
-	}
-
-	@Override
-	protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		compound.putInt("Direction", movementDirection);
-		if (initialTicks > 0)
-			compound.putInt("Warmup", initialTicks);
-		if (enginePos != null && capacityKey != null) {
-			compound.put("EnginePos", NbtUtils.writeBlockPos(enginePos));
-			compound.putFloat("EnginePower", engineEfficiency);
-			compound.putString("EngineType", RegisteredObjectsHelper.getKeyOrThrow(capacityKey)
-				.toString());
-		}
-		super.write(compound, registries, clientPacket);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-		movementDirection = compound.getInt("Direction");
-		initialTicks = compound.getInt("Warmup");
-		enginePos = null;
-		engineEfficiency = 0;
-
-		if (compound.contains("EnginePos")) {
-			enginePos = NBTHelper.readBlockPos(compound, "EnginePos");
-			engineEfficiency = compound.getFloat("EnginePower");
-			capacityKey = BuiltInRegistries.BLOCK.get(ResourceLocation.parse(compound.getString("EngineType")));
-		}
-	}
-
-	@Override
-	public float getGeneratedSpeed() {
-		return getCombinedCapacity() > 0 ? movementDirection * 16 * getSpeedModifier() : 0;
-	}
-
-	private float getCombinedCapacity() {
-		return capacityKey == null ? 0 : (float) (engineEfficiency * BlockStressValues.getCapacity(capacityKey));
-	}
-
-	private int getSpeedModifier() {
-		return (int) (1 + (engineEfficiency >= 1 ? 3 : Math.min(2, Math.floor(engineEfficiency * 4))));
-	}
-
-	@Override
-	public float calculateAddedStressCapacity() {
-		float capacity = getCombinedCapacity() / getSpeedModifier();
-		this.lastCapacityProvided = capacity;
-		return capacity;
-	}
-
-	@Override
-	public int getRotationAngleOffset(Axis axis) {
-		int combinedCoords = axis.choose(worldPosition.getX(), worldPosition.getY(), worldPosition.getZ());
-		return super.getRotationAngleOffset(axis) + (combinedCoords % 2 == 0 ? 180 : 0);
-	}
-
-	@Override
-	public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
-		return false;
-	}
-
-	public boolean addToEngineTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
-		return super.addToGoggleTooltip(tooltip, isPlayerSneaking);
-	}
-
+        KineticBlockEntity.tick(level,pos,state,shaft);if(shaft.initialTicks>0)shaft.initialTicks--;
+        if(!level.isClientSide()&&level.getGameTime()%20==0&&!PoweredShaftBlock.stillValid(state,level,pos))level.scheduleTick(pos,com.simibubi.create.AllBlocks.POWERED_SHAFT,1);
+        if(level.isClientSide()||shaft.enginePos==null)return;
+        var enginePos=pos.subtract(shaft.enginePos);
+        // A vanished or unloaded owner must never leave a live generator behind.
+        if(!level.isLoaded(enginePos)||!level.shouldTickBlocksAt(enginePos)||!(com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,enginePos) instanceof SteamEngineBlockEntity engine)||!SteamEngineBlock.getShaftPos(engine.getBlockState(),enginePos).equals(pos))shaft.remove(enginePos);
+    
+        }
+    }
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);out.putInt("Direction",movementDirection);out.putInt("Warmup",initialTicks);if(enginePos!=null){out.store("EnginePos",BlockPos.CODEC,enginePos);out.putFloat("EnginePower",engineEfficiency);out.putString("EngineType",net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(capacityKey==null?AllBlocks.STEAM_ENGINE:capacityKey).toString());}}
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);movementDirection=Integer.signum(in.getIntOr("Direction",1));initialTicks=Math.max(0,in.getIntOr("Warmup",3));enginePos=in.read("EnginePos",BlockPos.CODEC).orElse(null);float power=in.getFloatOr("EnginePower",0);engineEfficiency=enginePos==null||!Float.isFinite(power)?0:Math.max(0,power);
+        var key=net.minecraft.resources.Identifier.tryParse(in.getStringOr("EngineType","create:steam_engine"));
+        capacityKey=enginePos==null||key==null?null:net.minecraft.core.registries.BuiltInRegistries.BLOCK.getOptional(key).orElse(null);
+    }
 }

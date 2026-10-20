@@ -1,74 +1,32 @@
 package com.simibubi.create.content.decoration.bracket;
 
-import java.util.Optional;
-
+import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.fluids.FluidPropagator;
-import com.simibubi.create.content.kinetics.base.DirectionalAxisKineticBlock;
-import com.simibubi.create.content.kinetics.base.RotatedPillarKineticBlock;
-import com.simibubi.create.content.kinetics.simpleRelays.AbstractSimpleShaftBlock;
-import com.simibubi.create.content.kinetics.simpleRelays.CogWheelBlock;
+import com.simibubi.create.content.kinetics.simpleRelays.ShaftBlock;
 import com.simibubi.create.foundation.block.WrenchableDirectionalBlock;
-
-import net.createmod.catnip.lang.Lang;
+import java.util.Optional;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
 import net.minecraft.util.StringRepresentable;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Rotation;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.block.state.properties.EnumProperty;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
 
+/** Source bracket state is carried by its actual host, never a separate world block. */
 public class BracketBlock extends WrenchableDirectionalBlock {
-
-	public static final BooleanProperty AXIS_ALONG_FIRST_COORDINATE =
-		DirectionalAxisKineticBlock.AXIS_ALONG_FIRST_COORDINATE;
-	public static final EnumProperty<BracketType> TYPE = EnumProperty.create("type", BracketType.class);
-
-	public static enum BracketType implements StringRepresentable {
-		PIPE, COG, SHAFT;
-
-		@Override
-		public String getSerializedName() {
-			return Lang.asId(name());
-		}
-
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(AXIS_ALONG_FIRST_COORDINATE)
-			.add(TYPE));
-	}
-
-	public BracketBlock(Properties properties) {
-		super(properties);
-	}
-
-	public Optional<BlockState> getSuitableBracket(BlockState blockState, Direction direction) {
-		if (blockState.getBlock() instanceof AbstractSimpleShaftBlock)
-			return getSuitableBracket(blockState.getValue(RotatedPillarKineticBlock.AXIS), direction,
-				blockState.getBlock() instanceof CogWheelBlock ? BracketType.COG : BracketType.SHAFT);
-		return getSuitableBracket(FluidPropagator.getStraightPipeAxis(blockState), direction, BracketType.PIPE);
-	}
-
-	private Optional<BlockState> getSuitableBracket(Axis targetBlockAxis, Direction direction, BracketType type) {
-		Axis axis = direction.getAxis();
-		if (targetBlockAxis == null || targetBlockAxis == axis)
-			return Optional.empty();
-
-		boolean alongFirst = axis != Axis.Z ? targetBlockAxis == Axis.Z : targetBlockAxis == Axis.Y;
-		return Optional.of(defaultBlockState().setValue(TYPE, type)
-			.setValue(FACING, direction)
-			.setValue(AXIS_ALONG_FIRST_COORDINATE, !alongFirst));
-	}
-
-	@Override
-	public BlockState rotate(BlockState state, Rotation rot) {
-		if (rot.ordinal() % 2 == 1)
-			state = state.cycle(AXIS_ALONG_FIRST_COORDINATE);
-		return super.rotate(state, rot);
-	}
-
+    public static final BooleanProperty AXIS_ALONG_FIRST_COORDINATE=BooleanProperty.create("axis_along_first");
+    public static final EnumProperty<BracketType> TYPE=EnumProperty.create("type",BracketType.class);
+    public enum BracketType implements StringRepresentable {PIPE,COG,SHAFT;
+        @Override public String getSerializedName(){return name().toLowerCase(java.util.Locale.ROOT);}}
+    public BracketBlock(Properties properties){super(properties);}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){super.createBlockStateDefinition(builder.add(AXIS_ALONG_FIRST_COORDINATE,TYPE));}
+    public static boolean isSimpleShaft(BlockState state){return state.is(AllBlocks.SHAFT)||state.is(AllBlocks.COGWHEEL)||state.is(AllBlocks.LARGE_COGWHEEL);}
+    public Optional<BlockState> getSuitableBracket(BlockState target,Direction face){
+        boolean shaft=isSimpleShaft(target);
+        Direction.Axis targetAxis=shaft?target.getValue(ShaftBlock.AXIS):FluidPropagator.getStraightPipeAxis(target);
+        var faceAxis=face.getAxis();if(targetAxis==null||targetAxis==faceAxis)return Optional.empty();
+        boolean alongFirst=faceAxis!=Direction.Axis.Z?targetAxis==Direction.Axis.Z:targetAxis==Direction.Axis.Y;
+        return Optional.of(defaultBlockState().setValue(FACING,face).setValue(AXIS_ALONG_FIRST_COORDINATE,!alongFirst)
+            .setValue(TYPE,shaft?(target.is(AllBlocks.SHAFT)?BracketType.SHAFT:BracketType.COG):BracketType.PIPE));
+    }
+    @Override public BlockState rotate(BlockState state,Rotation rotation){if(rotation.ordinal()%2==1)state=state.cycle(AXIS_ALONG_FIRST_COORDINATE);return super.rotate(state,rotation);}
 }

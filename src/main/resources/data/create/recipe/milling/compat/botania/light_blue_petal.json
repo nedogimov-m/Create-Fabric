@@ -1,0 +1,20 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "#botania:petals/light_blue"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "id": "minecraft:light_blue_dye"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "botania"
+      ]
+    }
+  ]
+}

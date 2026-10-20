@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Additive exact pinned closure for standalone decorations and genuine bracket attachments."""
+from __future__ import annotations
+import json
+
+BLOCKS = ('andesite_alloy_block', 'andesite_bars', 'andesite_ladder', 'andesite_scaffolding', 'bound_cardboard_block', 'brass_bars', 'brass_ladder', 'brass_scaffolding', 'copper_bars', 'copper_ladder', 'copper_scaffolding', 'experience_block', 'framed_glass_trapdoor', 'metal_bracket', 'refined_radiance_casing', 'rose_quartz_block', 'rose_quartz_tiles', 'shadow_steel_casing', 'small_rose_quartz_tiles', 'train_trapdoor', 'wooden_bracket')
+RECIPES = ('andesite_bars_from_andesite_alloy_stonecutting', 'andesite_ladder_from_andesite_alloy_stonecutting', 'andesite_scaffolding_from_andesite_alloy_stonecutting', 'brass_bars_from_ingots_brass_stonecutting', 'brass_ladder_from_ingots_brass_stonecutting', 'brass_scaffolding_from_ingots_brass_stonecutting', 'copper_bars_from_ingots_copper_stonecutting', 'copper_ladder_from_ingots_copper_stonecutting', 'copper_scaffolding_from_ingots_copper_stonecutting', 'crafting/kinetics/framed_glass_trapdoor', 'crafting/kinetics/metal_bracket', 'crafting/kinetics/train_trapdoor', 'crafting/kinetics/wooden_bracket', 'crafting/materials/andesite_alloy_block', 'crafting/materials/andesite_alloy_from_block', 'crafting/materials/bound_cardboard_block', 'crafting/materials/cardboard_from_bound_block', 'crafting/materials/experience_block', 'crafting/materials/experience_nugget_from_block', 'crafting/materials/rose_quartz_tiles_from_conversion', 'crafting/materials/small_rose_quartz_tiles_from_conversion', 'item_application/bound_cardboard_inworld', 'rose_quartz_block_from_rose_quartz_stonecutting', 'rose_quartz_tiles_from_polished_rose_quartz_stonecutting', 'small_rose_quartz_tiles_from_polished_rose_quartz_stonecutting')
+ADVANCEMENTS = ('data/create/advancement/recipes/building_blocks/rose_quartz_block_from_rose_quartz_stonecutting.json', 'data/create/advancement/recipes/building_blocks/rose_quartz_tiles_from_polished_rose_quartz_stonecutting.json', 'data/create/advancement/recipes/building_blocks/small_rose_quartz_tiles_from_polished_rose_quartz_stonecutting.json', 'data/create/advancement/recipes/decorations/andesite_bars_from_andesite_alloy_stonecutting.json', 'data/create/advancement/recipes/decorations/andesite_ladder_from_andesite_alloy_stonecutting.json', 'data/create/advancement/recipes/decorations/andesite_scaffolding_from_andesite_alloy_stonecutting.json', 'data/create/advancement/recipes/decorations/brass_bars_from_ingots_brass_stonecutting.json', 'data/create/advancement/recipes/decorations/brass_ladder_from_ingots_brass_stonecutting.json', 'data/create/advancement/recipes/decorations/brass_scaffolding_from_ingots_brass_stonecutting.json', 'data/create/advancement/recipes/decorations/copper_bars_from_ingots_copper_stonecutting.json', 'data/create/advancement/recipes/decorations/copper_ladder_from_ingots_copper_stonecutting.json', 'data/create/advancement/recipes/decorations/copper_scaffolding_from_ingots_copper_stonecutting.json', 'data/create/advancement/recipes/misc/crafting/kinetics/framed_glass_trapdoor.json', 'data/create/advancement/recipes/misc/crafting/kinetics/metal_bracket.json', 'data/create/advancement/recipes/misc/crafting/kinetics/train_trapdoor.json', 'data/create/advancement/recipes/misc/crafting/kinetics/wooden_bracket.json', 'data/create/advancement/recipes/misc/crafting/materials/andesite_alloy_block.json', 'data/create/advancement/recipes/misc/crafting/materials/andesite_alloy_from_block.json', 'data/create/advancement/recipes/misc/crafting/materials/bound_cardboard_block.json', 'data/create/advancement/recipes/misc/crafting/materials/cardboard_from_bound_block.json', 'data/create/advancement/recipes/misc/crafting/materials/experience_block.json', 'data/create/advancement/recipes/misc/crafting/materials/experience_nugget_from_block.json', 'data/create/advancement/recipes/misc/crafting/materials/rose_quartz_tiles_from_conversion.json', 'data/create/advancement/recipes/misc/crafting/materials/small_rose_quartz_tiles_from_conversion.json')
+TAGS = {'data/c/tags/block/storage_blocks.json': ['create:andesite_alloy_block', 'create:experience_block'], 'data/c/tags/block/storage_blocks/andesite_alloy.json': ['create:andesite_alloy_block'], 'data/c/tags/item/storage_blocks.json': ['create:andesite_alloy_block', 'create:experience_block'], 'data/c/tags/item/storage_blocks/andesite_alloy.json': ['create:andesite_alloy_block'], 'data/create/tags/block/casing.json': ['create:shadow_steel_casing', 'create:refined_radiance_casing'], 'data/create/tags/block/copycat_deny.json': ['#minecraft:climbable'], 'data/create/tags/block/fan_transparent.json': ['create:andesite_bars', 'create:brass_bars', 'create:copper_bars'], 'data/create/tags/block/wrench_pickup.json': ['create:andesite_bars', 'create:brass_bars', 'create:copper_bars'], 'data/create/tags/item/casing.json': ['create:shadow_steel_casing', 'create:refined_radiance_casing'], 'data/create/tags/item/invalid_for_track_paving.json': ['create:wooden_bracket', 'create:metal_bracket'], 'data/minecraft/tags/block/beacon_base_blocks.json': ['create:experience_block'], 'data/minecraft/tags/block/climbable.json': ['create:andesite_ladder', 'create:brass_ladder', 'create:copper_ladder', 'create:andesite_scaffolding', 'create:brass_scaffolding', 'create:copper_scaffolding'], 'data/minecraft/tags/block/mineable/axe.json': ['create:wooden_bracket', 'create:shadow_steel_casing', 'create:refined_radiance_casing', 'create:bound_cardboard_block'], 'data/minecraft/tags/block/mineable/pickaxe.json': ['create:wooden_bracket', 'create:metal_bracket', 'create:shadow_steel_casing', 'create:refined_radiance_casing', 'create:andesite_ladder', 'create:brass_ladder', 'create:copper_ladder', 'create:andesite_bars', 'create:brass_bars', 'create:copper_bars', 'create:andesite_scaffolding', 'create:brass_scaffolding', 'create:copper_scaffolding', 'create:train_trapdoor', 'create:framed_glass_trapdoor', 'create:andesite_alloy_block', 'create:experience_block', 'create:rose_quartz_block', 'create:rose_quartz_tiles', 'create:small_rose_quartz_tiles'], 'data/minecraft/tags/block/trapdoors.json': ['create:train_trapdoor', 'create:framed_glass_trapdoor'], 'data/minecraft/tags/item/trapdoors.json': ['create:train_trapdoor', 'create:framed_glass_trapdoor']}
+
+def sync(api):
+    find,write_json=api["find"],api["write_json"]
+    for block in BLOCKS:
+        relative=f"assets/create/blockstates/{block}.json"
+        data=json.loads(find(relative).read_text());write_json(relative,data);api["walk_models"](data)
+        api["copy_model"](f"create:item/{block}")
+        write_json(f"assets/create/items/{block}.json",{"model":{"type":"minecraft:model","model":f"create:item/{block}"}})
+        relative=f"data/create/loot_table/blocks/{block}.json"
+        write_json(relative,api["modern_loot"](json.loads(find(relative).read_text())))
+    for material in ("andesite","brass","copper"):
+        for suffix in ("","_inside"):
+            api["copy_texture"](f"create:block/scaffold/{material}_scaffold{suffix}_connected")
+        api["copy_texture"](f"create:block/{material}_casing_connected")
+    for name in ("shadow_steel_casing","refined_radiance_casing","palettes/framed_glass"):
+        api["copy_texture"](f"create:block/{name}_connected")
+    for recipe in RECIPES:
+        relative=f"data/create/recipe/{recipe}.json";data=json.loads(find(relative).read_text())
+        write_json(relative,api["modern_processing"](data)if data["type"].startswith("create:")else api["modern_ingredients"](data))
+    for relative in ADVANCEMENTS:
+        write_json(relative,api["modern_advancement"](json.loads(find(relative).read_text())))
+    for relative,values in TAGS.items():
+        write_json(relative,{"replace":False,"values":values})
+    for locale in ("en_us","ru_ru","en_ud"):
+        relative=f"assets/create/lang/{locale}.json";original=json.loads(find(relative).read_text())
+        write_json(relative,{key:value for key,value in original.items()if any(key==f"block.create.{name}"or key==f"item.create.{name}"for name in BLOCKS)})
+
+if __name__=="__main__":
+    import sys
+    sys.dont_write_bytecode=True
+    import sync_assets
+    sync(vars(sync_assets))

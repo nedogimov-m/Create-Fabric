@@ -1,70 +1,28 @@
 package com.simibubi.create.content.kinetics.crusher;
 
-import java.util.List;
-
-import com.simibubi.create.AllDamageTypes;
+import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.createmod.catnip.data.Iterate;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.damagesource.DamageSource;
-import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
+public final class CrushingWheelBlockEntity extends KineticBlockEntity {
+    private float previousSpeed = Float.NaN;
+    public CrushingWheelBlockEntity(BlockPos pos, BlockState state) { super(AllBlockEntityTypes.CRUSHING_WHEEL, pos, state); }
+    public static void tick(Level level, BlockPos pos, BlockState state, CrushingWheelBlockEntity wheel) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, wheel)) {
+            if (!createTick.shouldTick()) return;
 
-@EventBusSubscriber
-public class CrushingWheelBlockEntity extends KineticBlockEntity {
-	public CrushingWheelBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		setLazyTickRate(20);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		registerAwardables(behaviours, AllAdvancements.CRUSHING_WHEEL, AllAdvancements.CRUSHER_MAXED);
-	}
-
-	@Override
-	public void onSpeedChanged(float prevSpeed) {
-		super.onSpeedChanged(prevSpeed);
-		fixControllers();
-	}
-
-	public void fixControllers() {
-		for (Direction d : Iterate.directions)
-			((CrushingWheelBlock) getBlockState().getBlock()).updateControllers(getBlockState(), getLevel(), getBlockPos(),
-				d);
-	}
-
-	@Override
-	protected AABB createRenderBoundingBox() {
-		return new AABB(worldPosition).inflate(1);
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		fixControllers();
-	}
-
-	@SubscribeEvent
-	public static void handleCrushedMobDrops(LivingDropsEvent event) {
-		DamageSource damageSource = event.getSource();
-		if (!damageSource.is(AllDamageTypes.CRUSH))
-			return;
-		Vec3 outSpeed = Vec3.ZERO;
-		for (ItemEntity outputItem : event.getDrops()) {
-			outputItem.setDeltaMovement(outSpeed);
-		}
-	}
+        KineticBlockEntity.tick(level, pos, state, wheel);
+        if (!level.isClientSide() && (wheel.previousSpeed != wheel.getSpeed() || level.getGameTime() % 20 == 0)) {
+            wheel.previousSpeed = wheel.getSpeed(); CrushingWheelBlock.updateControllers(level, pos, state);
+        }
+    
+        }
+    }
+    @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
+        super.addNativeAdvancementIds(ids);
+        ids.add("crushing_wheel");
+        ids.add("crusher_maxed_0000");
+    }
 }

@@ -5,35 +5,35 @@ import java.util.function.Supplier;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-
+/** Genuine source deferred callback and pending state on native value serialization. */
 public class DeferralBehaviour extends BlockEntityBehaviour {
-
 	public static final BehaviourType<DeferralBehaviour> TYPE = new BehaviourType<>();
-
 	private boolean needsUpdate;
-	private Supplier<Boolean> callback;
+	private final Supplier<Boolean> callback;
 
-	public DeferralBehaviour(SmartBlockEntity be, Supplier<Boolean> callback) {
-		super(be);
+	public DeferralBehaviour(SmartBlockEntity owner, Supplier<Boolean> callback) {
+		super(owner);
 		this.callback = callback;
 	}
 
 	@Override
-	public boolean isSafeNBT() { return true; }
-
-	@Override
-	public void write(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		nbt.putBoolean("NeedsUpdate", needsUpdate);
-		super.write(nbt, registries, clientPacket);
+	public boolean isSafeNBT() {
+		return true;
 	}
 
 	@Override
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		needsUpdate = nbt.getBoolean("NeedsUpdate");
-		super.read(nbt, registries, clientPacket);
+	public void write(ValueOutput output, boolean clientPacket) {
+		output.putBoolean("NeedsUpdate", needsUpdate);
+		super.write(output, clientPacket);
+	}
+
+	@Override
+	public void read(ValueInput input, boolean clientPacket) {
+		needsUpdate = input.getBooleanOr("NeedsUpdate", false);
+		super.read(input, clientPacket);
 	}
 
 	@Override
@@ -51,5 +51,4 @@ public class DeferralBehaviour extends BlockEntityBehaviour {
 	public BehaviourType<?> getType() {
 		return TYPE;
 	}
-
 }

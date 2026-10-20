@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/clipboard_and_quill",
+    "particle": "create:item/clipboard_and_quill"
+  }
+}

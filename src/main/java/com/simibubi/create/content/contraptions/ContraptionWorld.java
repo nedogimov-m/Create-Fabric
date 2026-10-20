@@ -1,61 +1,93 @@
 package com.simibubi.create.content.contraptions;
 
-import net.createmod.catnip.levelWrappers.WrappedLevel;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 import net.minecraft.core.BlockPos;
-import net.minecraft.sounds.SoundEvent;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.Mth;
-import net.minecraft.world.level.Level;
+import net.minecraft.world.level.*;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
+import net.minecraft.world.level.material.FluidState;
 
-public class ContraptionWorld extends WrappedLevel {
-	final Contraption contraption;
-	private final int minY;
-	private final int height;
+/** A structure-local block view for outlines/collision queries; it never reads world chunks. */
+public final class ContraptionWorld implements BlockGetter {
+  private final Contraption contraption;
+  private final java.util.Map<BlockPos, BlockEntity> entities = new java.util.HashMap<>();
 
-	public ContraptionWorld(Level world, Contraption contraption) {
-		super(world);
+  public ContraptionWorld(Contraption contraption) {
+    this.contraption = contraption;
+  }
 
-		this.contraption = contraption;
+  @Override
+  public BlockState getBlockState(BlockPos pos) {
+    if (contraption.isHiddenInPortal(pos)) return Blocks.AIR.defaultBlockState();
+    var info = contraption.getBlocks().get(pos);
+    return info == null ? Blocks.AIR.defaultBlockState() : info.state();
+  }
 
-		// Include 1 block above/below contraption height range to avoid certain edge-case Starlight crashes with
-		// downward-facing mechanical pistons.
-		minY = nextMultipleOf16(contraption.bounds.minY - 1);
-		height = nextMultipleOf16(contraption.bounds.maxY + 1) - minY;
-	}
+  @Override
+  public BlockEntity getBlockEntity(BlockPos pos) {
+    if (contraption.isHiddenInPortal(pos)) return null;
+    var rendered = contraption.getBlockEntityClientSide(pos);
+    if (rendered != null) return rendered;
+    if (entities.containsKey(pos)) return entities.get(pos);
+    var info = contraption.getBlocks().get(pos);
+    if (info == null
+        || !(info.state().getBlock()
+            instanceof net.minecraft.world.level.block.EntityBlock factory)) return null;
+    var be = factory.newBlockEntity(pos, info.state());
+    if (be != null && info.nbt() != null && contraption.entity != null)
+      be.loadWithComponents(
+          net.minecraft.world.level.storage.TagValueInput.create(
+              net.minecraft.util.ProblemReporter.DISCARDING,
+              contraption.entity.registryAccess(),
+              info.nbt().copy()));
+    entities.put(pos.immutable(), be);
+    return be;
+  }
 
-	// https://math.stackexchange.com/questions/291468
-	private static int nextMultipleOf16(double a) {
-		return (((Math.abs((int) a) - 1) | 15) + 1) * Mth.sign(a);
-	}
+  @Override
+  public FluidState getFluidState(BlockPos pos) {
+    return getBlockState(pos).getFluidState();
+  }
 
-	@Override
-	public BlockState getBlockState(BlockPos pos) {
-		StructureTemplate.StructureBlockInfo blockInfo = contraption.getBlocks().get(pos);
+  @Override
+  public int getMinY() {
+    return contraption.bounds == null ? -64 : (int) Math.floor(contraption.bounds.minY) - 16;
+  }
 
-		if (blockInfo != null)
-			return blockInfo.state();
+  @Override
+  public int getHeight() {
+    return contraption.bounds == null
+        ? 384
+        : (int) Math.ceil(contraption.bounds.maxY) - getMinY() + 16;
+  }
 
-		return Blocks.AIR.defaultBlockState();
-	}
+  public static BlockGetter loadedWorld(Level level) {
+    return new BlockGetter() {
+      @Override
+      public BlockState getBlockState(BlockPos pos) {
+        return LoadedLevelAccess.blockState(level, pos);
+      }
 
-	@Override
-	public void playLocalSound(double x, double y, double z, SoundEvent sound, SoundSource category, float volume, float pitch, boolean distanceDelay) {
-		level.playLocalSound(x, y, z, sound, category, volume, pitch, distanceDelay);
-	}
+      @Override
+      public BlockEntity getBlockEntity(BlockPos pos) {
+        return LoadedLevelAccess.blockEntity(level, pos);
+      }
 
-	// Ensure that we provide accurate information about ContraptionWorld height to mods (such as Starlight) which
-	// expect Levels to only have blocks located in chunks within their height range.
+      @Override
+      public FluidState getFluidState(BlockPos pos) {
+        return getBlockState(pos).getFluidState();
+      }
 
-	@Override
-	public int getHeight() {
-		return height;
-	}
+      @Override
+      public int getMinY() {
+        return level.getMinY();
+      }
 
-	@Override
-	public int getMinBuildHeight() {
-		return minY;
-	}
+      @Override
+      public int getHeight() {
+        return level.getHeight();
+      }
+    };
+  }
 }

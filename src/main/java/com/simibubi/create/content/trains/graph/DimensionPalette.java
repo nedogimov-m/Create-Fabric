@@ -1,76 +1,102 @@
 package com.simibubi.create.content.trains.graph;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
-import net.createmod.catnip.nbt.NBTHelper;
+import com.mojang.serialization.Codec;
+import java.util.*;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
+import net.minecraft.nbt.*;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.*;
 import net.minecraft.world.level.Level;
 
-public class DimensionPalette {
-	public static final StreamCodec<ByteBuf, DimensionPalette> STREAM_CODEC = CatnipStreamCodecBuilders.list(ResourceKey.streamCodec(Registries.DIMENSION))
-		.map(DimensionPalette::new, i -> i.gatheredDims);
+/** Source dimension palette; invalid indices cannot silently become Overworld. */
+public final class DimensionPalette {
+  public static final Codec<ResourceKey<Level>> DIMENSION = ResourceKey.codec(Registries.DIMENSION);
+  public static final Codec<DimensionPalette> CODEC =
+      DIMENSION
+          .listOf()
+          .comapFlatMap(
+              values -> {
+                try {
+                  return com.mojang.serialization.DataResult.success(new DimensionPalette(values));
+                } catch (IllegalArgumentException invalid) {
+                  return com.mojang.serialization.DataResult.error(invalid::getMessage);
+                }
+              },
+              value -> List.copyOf(value.gatheredDims));
+  public static final StreamCodec<FriendlyByteBuf, DimensionPalette> STREAM_CODEC =
+      new StreamCodec<>() {
+        public DimensionPalette decode(FriendlyByteBuf buf) {
+          return receive(buf);
+        }
 
-	private final List<ResourceKey<Level>> gatheredDims;
+        public void encode(FriendlyByteBuf buf, DimensionPalette palette) {
+          palette.send(buf);
+        }
+      };
+  private final List<ResourceKey<Level>> gatheredDims;
 
-	public DimensionPalette() {
-		gatheredDims = new ArrayList<>();
-	}
+  public DimensionPalette() {
+    gatheredDims = new ArrayList<>();
+  }
 
-	public DimensionPalette(List<ResourceKey<Level>> gatheredDims) {
-		this.gatheredDims = gatheredDims;
-	}
+  public DimensionPalette(List<ResourceKey<Level>> values) {
+    if (new HashSet<>(values).size() != values.size() || values.size() > 4096)
+      throw new IllegalArgumentException("Invalid railway dimension palette");
+    gatheredDims = new ArrayList<>(values);
+  }
 
-	public int encode(ResourceKey<Level> dimension) {
-		int indexOf = gatheredDims.indexOf(dimension);
-		if (indexOf == -1) {
-			indexOf = gatheredDims.size();
-			gatheredDims.add(dimension);
-		}
-		return indexOf;
-	}
+  public int encode(ResourceKey<Level> dimension) {
+    Objects.requireNonNull(dimension);
+    int index = gatheredDims.indexOf(dimension);
+    if (index < 0) {
+      if (gatheredDims.size() >= 4096)
+        throw new IllegalStateException("Railway dimension palette exhausted");
+      index = gatheredDims.size();
+      gatheredDims.add(dimension);
+    }
+    return index;
+  }
 
-	public ResourceKey<Level> decode(int index) {
-		if (gatheredDims.size() <= index || index < 0)
-			return Level.OVERWORLD;
-		return gatheredDims.get(index);
-	}
+  public ResourceKey<Level> decode(int index) {
+    if (index < 0 || index >= gatheredDims.size())
+      throw new IllegalArgumentException("Unknown railway dimension palette index " + index);
+    return gatheredDims.get(index);
+  }
 
-	public void send(FriendlyByteBuf buffer) {
-		buffer.writeInt(gatheredDims.size());
-		gatheredDims.forEach(rk -> buffer.writeResourceLocation(rk.location()));
-	}
+  public void send(FriendlyByteBuf buf) {
+    buf.writeInt(gatheredDims.size());
+    for (var dimension : gatheredDims) buf.writeIdentifier(dimension.identifier());
+  }
 
-	public static DimensionPalette receive(FriendlyByteBuf buffer) {
-		DimensionPalette palette = new DimensionPalette();
-		int length = buffer.readInt();
-		for (int i = 0; i < length; i++)
-			palette.gatheredDims.add(ResourceKey.create(Registries.DIMENSION, buffer.readResourceLocation()));
-		return palette;
-	}
+  public static DimensionPalette receive(FriendlyByteBuf buf) {
+    int size = buf.readInt();
+    if (size < 0 || size > 4096)
+      throw new IllegalArgumentException("Invalid railway dimension count");
+    var values = new ArrayList<ResourceKey<Level>>();
+    for (int i = 0; i < size; i++)
+      values.add(ResourceKey.create(Registries.DIMENSION, buf.readIdentifier()));
+    return new DimensionPalette(values);
+  }
 
-	public void write(CompoundTag tag) {
-		tag.put("DimensionPalette", NBTHelper.writeCompoundList(gatheredDims, rk -> {
-			CompoundTag c = new CompoundTag();
-			c.putString("Id", rk.location()
-				.toString());
-			return c;
-		}));
-	}
+  public void write(CompoundTag tag) {
+    var list = new ListTag();
+    for (var dimension : gatheredDims) {
+      var entry = new CompoundTag();
+      entry.putString("Id", dimension.identifier().toString());
+      list.add(entry);
+    }
+    tag.put("DimensionPalette", list);
+  }
 
-	public static DimensionPalette read(CompoundTag tag) {
-		DimensionPalette palette = new DimensionPalette();
-		NBTHelper.iterateCompoundList(tag.getList("DimensionPalette", Tag.TAG_COMPOUND), c -> palette.gatheredDims
-			.add(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(c.getString("Id")))));
-		return palette;
-	}
-
+  public static DimensionPalette read(CompoundTag tag) {
+    var dimensions = new ArrayList<ResourceKey<Level>>();
+    for (var value : tag.getListOrEmpty("DimensionPalette")) {
+      if (!(value instanceof CompoundTag entry))
+        throw new IllegalArgumentException("Invalid railway dimension entry");
+      dimensions.add(
+          ResourceKey.create(Registries.DIMENSION, Identifier.parse(entry.getStringOr("Id", ""))));
+    }
+    return new DimensionPalette(dimensions);
+  }
 }

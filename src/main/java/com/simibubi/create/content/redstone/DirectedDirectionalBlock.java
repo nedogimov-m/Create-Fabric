@@ -1,106 +1,23 @@
 package com.simibubi.create.content.redstone;
 
-import org.jetbrains.annotations.Nullable;
-
-import com.mojang.serialization.MapCodec;
-import com.simibubi.create.api.contraption.transformable.TransformableBlock;
-import com.simibubi.create.content.contraptions.StructureTransform;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.Direction.AxisDirection;
+import net.minecraft.core.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.HorizontalDirectionalBlock;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.AttachFace;
-import net.minecraft.world.level.block.state.properties.EnumProperty;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
 
-import org.jetbrains.annotations.NotNull;
-
-public class DirectedDirectionalBlock extends HorizontalDirectionalBlock implements IWrenchable, TransformableBlock {
-
-	public static final EnumProperty<AttachFace> TARGET = EnumProperty.create("target", AttachFace.class);
-
-	public static final MapCodec<DirectedDirectionalBlock> CODEC = simpleCodec(DirectedDirectionalBlock::new);
-
-	public DirectedDirectionalBlock(Properties pProperties) {
-		super(pProperties);
-		registerDefaultState(defaultBlockState().setValue(TARGET, AttachFace.WALL));
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> pBuilder) {
-		super.createBlockStateDefinition(pBuilder.add(TARGET, FACING));
-	}
-
-	@Nullable
-	public BlockState getStateForPlacement(BlockPlaceContext pContext) {
-		for (Direction direction : pContext.getNearestLookingDirections()) {
-			BlockState blockstate;
-			if (direction.getAxis() == Direction.Axis.Y) {
-				blockstate = this.defaultBlockState()
-					.setValue(TARGET, direction == Direction.UP ? AttachFace.CEILING : AttachFace.FLOOR)
-					.setValue(FACING, pContext.getHorizontalDirection());
-			} else {
-				blockstate = this.defaultBlockState()
-					.setValue(TARGET, AttachFace.WALL)
-					.setValue(FACING, direction.getOpposite());
-			}
-
-			return blockstate;
-		}
-
-		return null;
-	}
-
-	public static Direction getTargetDirection(BlockState pState) {
-		switch ((AttachFace) pState.getValue(TARGET)) {
-		case CEILING:
-			return Direction.UP;
-		case FLOOR:
-			return Direction.DOWN;
-		default:
-			return pState.getValue(FACING);
-		}
-	}
-
-	@Override
-	public BlockState getRotatedBlockState(BlockState originalState, Direction targetedFace) {
-		if (targetedFace.getAxis() == Axis.Y)
-			return IWrenchable.super.getRotatedBlockState(originalState, targetedFace);
-
-		Direction targetDirection = getTargetDirection(originalState);
-		Direction newFacing = targetDirection.getClockWise(targetedFace.getAxis());
-		if (targetedFace.getAxisDirection() == AxisDirection.NEGATIVE)
-			newFacing = newFacing.getOpposite();
-
-		if (newFacing.getAxis() == Axis.Y)
-			return originalState.setValue(TARGET, newFacing == Direction.UP ? AttachFace.CEILING : AttachFace.FLOOR);
-		return originalState.setValue(TARGET, AttachFace.WALL)
-			.setValue(FACING, newFacing);
-	}
-
-	@Override
-	public BlockState transform(BlockState state, StructureTransform transform) {
-		if (transform.mirror != null)
-			state = mirror(state, transform.mirror);
-		if (transform.rotationAxis == Direction.Axis.Y)
-			return rotate(state, transform.rotation);
-
-		Direction targetDirection = getTargetDirection(state);
-		Direction newFacing = transform.rotateFacing(targetDirection);
-
-		if (newFacing.getAxis() == Axis.Y)
-			return state.setValue(TARGET, newFacing == Direction.UP ? AttachFace.CEILING : AttachFace.FLOOR);
-		return state.setValue(TARGET, AttachFace.WALL)
-			.setValue(FACING, newFacing);
-	}
-
-	@Override
-	protected @NotNull MapCodec<? extends HorizontalDirectionalBlock> codec() {
-		return CODEC;
-	}
+/** Horizontal appearance and independently directed target, preserving original state properties. */
+public abstract class DirectedDirectionalBlock extends BaseEntityBlock {
+    public static final EnumProperty<AttachFace> TARGET=EnumProperty.create("target",AttachFace.class);
+    public static final EnumProperty<Direction> FACING=BlockStateProperties.HORIZONTAL_FACING;
+    protected DirectedDirectionalBlock(Properties properties){super(properties);registerDefaultState(defaultBlockState().setValue(TARGET,AttachFace.WALL).setValue(FACING,Direction.NORTH));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(TARGET,FACING);}
+    public static Direction getTargetDirection(BlockState state){return switch(state.getValue(TARGET)){case CEILING->Direction.UP;case FLOOR->Direction.DOWN;case WALL->state.getValue(FACING);};}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){var direction=context.getNearestLookingDirection();return direction.getAxis().isVertical()?defaultBlockState().setValue(TARGET,direction==Direction.UP?AttachFace.CEILING:AttachFace.FLOOR).setValue(FACING,context.getHorizontalDirection()):defaultBlockState().setValue(FACING,direction.getOpposite());}
+    public BlockState getRotatedBlockState(BlockState state,Direction face){
+        if(face.getAxis().isVertical())return state.setValue(FACING,state.getValue(FACING).getClockWise(face.getAxis()));
+        var rotated=getTargetDirection(state).getClockWise(face.getAxis());if(face.getAxisDirection()==Direction.AxisDirection.NEGATIVE)rotated=rotated.getOpposite();return rotated.getAxis().isVertical()?state.setValue(TARGET,rotated==Direction.UP?AttachFace.CEILING:AttachFace.FLOOR):state.setValue(TARGET,AttachFace.WALL).setValue(FACING,rotated);
+    }
+    @Override protected BlockState rotate(BlockState state,Rotation rotation){return state.setValue(FACING,rotation.rotate(state.getValue(FACING)));}
+    @Override protected BlockState mirror(BlockState state,Mirror mirror){return state.rotate(mirror.getRotation(state.getValue(FACING)));}
 }

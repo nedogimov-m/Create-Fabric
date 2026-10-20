@@ -1,28 +1,17 @@
 package com.simibubi.create.content.contraptions;
 
-import com.simibubi.create.AllPackets;
-import net.createmod.catnip.net.base.ClientboundPacketPayload;
-
-import io.netty.buffer.ByteBuf;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.codec.ByteBufCodecs;
+import com.simibubi.create.Create;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
-public record ContraptionRelocationPacket(int entityId) implements ClientboundPacketPayload {
-	public static final StreamCodec<ByteBuf, ContraptionRelocationPacket> STREAM_CODEC = ByteBufCodecs.INT.map(
-			ContraptionRelocationPacket::new, ContraptionRelocationPacket::entityId
-	);
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void handle(LocalPlayer player) {
-		OrientedContraptionEntity.handleRelocationPacket(this);
-	}
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.CONTRAPTION_RELOCATION;
-	}
+/** Source post-relocation ten-tick damage grace, applied to the actual tracked oriented entity. */
+public record ContraptionRelocationPacket(int entityId) implements CustomPacketPayload {
+    public static final Type<ContraptionRelocationPacket> TYPE=
+        new Type<>(Create.asResource("contraption_relocation"));
+    public static final StreamCodec<RegistryFriendlyByteBuf,ContraptionRelocationPacket> CODEC=
+        StreamCodec.of((buffer,packet)->buffer.writeInt(packet.entityId),
+            buffer->new ContraptionRelocationPacket(buffer.readInt()));
+    public static final StreamCodec<RegistryFriendlyByteBuf,ContraptionRelocationPacket> STREAM_CODEC=CODEC;
+    @Override public Type<ContraptionRelocationPacket> type(){return TYPE;}
 }

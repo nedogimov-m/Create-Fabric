@@ -28,18 +28,18 @@ public class CuboidBrush extends ShapedBrush {
 			positions = BlockPos
 				.betweenClosedStream(zero.offset((param0 - 1) / -2, (param1 - 1) / -2, (param2 - 1) / -2),
 					zero.offset((param0) / 2, (param1) / 2, (param2) / 2))
-				.map(BlockPos::new)
+				.map(BlockPos::immutable)
 				.collect(Collectors.toList());
 		}
 	}
 
 	@Override
-	int getMin(int paramIndex) {
+	public int getMin(int paramIndex) {
 		return 1;
 	}
 
 	@Override
-	int getMax(int paramIndex) {
+	public int getMax(int paramIndex) {
 		return MAX_SIZE;
 	}
 

@@ -1,0 +1,21 @@
+{
+  "type": "create:filling",
+  "ingredients": [
+    "create:cinder_flour",
+    {
+      "fluid": "create:potion",
+      "amount": 2025,
+      "components": {
+        "create:potion_fluid_bottle_type": "regular",
+        "minecraft:potion_contents": {
+          "potion": "minecraft:strength"
+        }
+      }
+    }
+  ],
+  "results": [
+    {
+      "id": "minecraft:redstone"
+    }
+  ]
+}

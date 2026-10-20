@@ -2,12 +2,12 @@ package com.simibubi.create.content.trains.schedule.condition;
 
 import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.trains.schedule.ScheduleText;
 
 import net.createmod.catnip.data.Pair;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
@@ -15,12 +15,12 @@ public class ScheduledDelay extends TimedWaitCondition {
 
 	@Override
 	public Pair<ItemStack, Component> getSummary() {
-		return Pair.of(ItemStack.EMPTY, CreateLang.translateDirect("schedule.condition.delay_short", formatTime(true)));
+		return Pair.of(ItemStack.EMPTY, ScheduleText.translate("schedule.condition.delay_short", formatTime(true)));
 	}
 
 	@Override
 	public boolean tickCompletion(Level level, Train train, CompoundTag context) {
-		int time = context.getInt("Time");
+		int time = context.getIntOr("Time", 0);
 		if (time >= totalWaitTicks())
 			return true;
 
@@ -30,7 +30,7 @@ public class ScheduledDelay extends TimedWaitCondition {
 	}
 
 	@Override
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return Create.asResource("delay");
 	}
 

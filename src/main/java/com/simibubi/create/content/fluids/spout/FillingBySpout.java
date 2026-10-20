@@ -1,96 +1,38 @@
 package com.simibubi.create.content.fluids.spout;
 
-import java.util.List;
-import java.util.Optional;
-import java.util.function.Predicate;
-
 import com.simibubi.create.AllRecipeTypes;
-import com.simibubi.create.content.fluids.transfer.FillingRecipe;
-import com.simibubi.create.content.fluids.transfer.GenericItemFilling;
-import com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe;
-
+import com.simibubi.create.content.fluids.transfer.*;
+import com.simibubi.create.foundation.fluid.FluidStack;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.Recipe;
-import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.level.Level;
 
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
-
-public class FillingBySpout {
-
-	public static boolean canItemBeFilled(Level world, ItemStack stack) {
-		SingleRecipeInput input = new SingleRecipeInput(stack);
-
-		Optional<RecipeHolder<FillingRecipe>> assemblyRecipe =
-			SequencedAssemblyRecipe.getRecipe(world, input, AllRecipeTypes.FILLING.getType(), FillingRecipe.class);
-		if (assemblyRecipe.isPresent())
-			return true;
-
-		if (AllRecipeTypes.FILLING.find(input, world)
-			.isPresent())
-			return true;
-		return GenericItemFilling.canItemBeFilled(world, stack);
-	}
-
-	public static int getRequiredAmountForItem(Level world, ItemStack stack, FluidStack availableFluid) {
-		SingleRecipeInput input = new SingleRecipeInput(stack);
-
-		Optional<RecipeHolder<FillingRecipe>> assemblyRecipe = SequencedAssemblyRecipe.getRecipe(world, input,
-			AllRecipeTypes.FILLING.getType(), FillingRecipe.class, matchItemAndFluid(world, availableFluid, input));
-		if (assemblyRecipe.isPresent()) {
-			SizedFluidIngredient requiredFluid = assemblyRecipe.get().value()
-				.getRequiredFluid();
-			if (requiredFluid.ingredient().test(availableFluid))
-				return requiredFluid.amount();
-		}
-
-		for (RecipeHolder<Recipe<SingleRecipeInput>> recipe : world.getRecipeManager()
-			.getRecipesFor(AllRecipeTypes.FILLING.getType(), input, world)) {
-			FillingRecipe fillingRecipe = (FillingRecipe) recipe.value();
-			SizedFluidIngredient requiredFluid = fillingRecipe.getRequiredFluid();
-			if (requiredFluid.ingredient().test(availableFluid))
-				return requiredFluid.amount();
-		}
-		return GenericItemFilling.getRequiredAmountForItem(world, stack, availableFluid);
-	}
-
-	public static ItemStack fillItem(Level level, int requiredAmount, ItemStack stack, FluidStack availableFluid) {
-		FluidStack toFill = availableFluid.copy();
-		toFill.setAmount(requiredAmount);
-
-		SingleRecipeInput input = new SingleRecipeInput(stack);
-
-		RecipeHolder<FillingRecipe> fillingRecipe = SequencedAssemblyRecipe
-			.getRecipe(level, input, AllRecipeTypes.FILLING.getType(), FillingRecipe.class,
-				matchItemAndFluid(level, availableFluid, input))
-			.filter(fr -> fr.value().getRequiredFluid()
-					.test(toFill))
-				.orElseGet(() -> {
-					for (RecipeHolder<Recipe<SingleRecipeInput>> recipe : level.getRecipeManager()
-						.getRecipesFor(AllRecipeTypes.FILLING.getType(), input, level)) {
-						FillingRecipe fr = (FillingRecipe) recipe.value();
-						SizedFluidIngredient requiredFluid = fr.getRequiredFluid();
-						if (requiredFluid.test(toFill))
-							return new RecipeHolder<>(recipe.id(), fr);
-					}
-					return null;
-				});
-
-		if (fillingRecipe != null) {
-			List<ItemStack> results = fillingRecipe.value().rollResults(level.random);
-			availableFluid.shrink(requiredAmount);
-			stack.shrink(1);
-			return results.isEmpty() ? ItemStack.EMPTY : results.get(0);
-		}
-
-		return GenericItemFilling.fillItem(level, requiredAmount, stack, availableFluid);
-	}
-
-	private static Predicate<RecipeHolder<FillingRecipe>> matchItemAndFluid(Level world, FluidStack availableFluid, SingleRecipeInput input) {
-		return r -> r.value().matches(input, world) && r.value().getRequiredFluid()
-			.test(availableFluid);
-	}
-
+public final class FillingBySpout {
+    private FillingBySpout() {}
+    private static java.util.stream.Stream<FillingRecipe> recipes(Level level, ItemStack stack) {
+        if (!(level instanceof ServerLevel server) || stack.isEmpty()) return java.util.stream.Stream.empty();
+        var input = new SingleRecipeInput(stack);
+        return server.getServer().getRecipeManager().getRecipes().stream().map(r -> r.value())
+            .filter(r -> r instanceof FillingRecipe).map(r -> (FillingRecipe)r).filter(r -> r.matches(input, level));
+    }
+    public static boolean canItemBeFilled(Level level, ItemStack stack) {
+        return com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe.getRecipe(level,stack,AllRecipeTypes.FILLING,r->true).isPresent()||recipes(level, stack).findAny().isPresent() || GenericItemFilling.canItemBeFilled(level, stack);
+    }
+    public static long getRequiredAmountForItem(Level level, ItemStack stack, FluidStack available) {
+        var assembly=com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe.getRecipe(level,stack,AllRecipeTypes.FILLING,r->((FillingRecipe)r).getRequiredFluid().test(available.variant()));if(assembly.isPresent())return ((FillingRecipe)assembly.get().recipe()).getRequiredFluid().amount();
+        return recipes(level, stack).filter(r -> r.getRequiredFluid().test(available.variant())).findFirst()
+            .map(r -> r.getRequiredFluid().amount()).orElseGet(() -> GenericItemFilling.getRequiredAmountForItem(level, stack, available));
+    }
+    public static ItemStack fillItem(Level level, long required, ItemStack stack, FluidStack available) {
+        if (stack.isEmpty() || required <= 0 || required > available.getAmount()) return ItemStack.EMPTY;
+        var assembly=com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe.getRecipe(level,stack,AllRecipeTypes.FILLING,r->((FillingRecipe)r).getRequiredFluid().test(available.variant())&&((FillingRecipe)r).getRequiredFluid().amount()==required);
+        if(assembly.isPresent()){var result=assembly.get().roll(level.getRandom()).getFirst();stack.shrink(1);available.shrink(required);return result;}
+        var recipe = recipes(level, stack).filter(r -> r.getRequiredFluid().test(available.variant()) && r.getRequiredFluid().amount() == required).findFirst();
+        if (recipe.isPresent()) {
+            stack.shrink(1); available.shrink(required);
+            return recipe.get().results().getFirst().rollOutput(level.getRandom());
+        }
+        return GenericItemFilling.fillItem(level, required, stack, available);
+    }
 }

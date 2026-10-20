@@ -1,41 +1,17 @@
 package com.simibubi.create.content.kinetics.fan;
 
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.infrastructure.config.AllConfigs;
-import com.simibubi.create.infrastructure.config.CKinetics;
-
-import net.minecraft.MethodsReturnNonnullByDefault;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.util.Mth;
 import net.minecraft.world.level.Level;
 
-@MethodsReturnNonnullByDefault
 public interface IAirCurrentSource {
-	@Nullable
-	AirCurrent getAirCurrent();
-
-	@Nullable
-	Level getAirCurrentWorld();
-
-	BlockPos getAirCurrentPos();
-
-	float getSpeed();
-
-	Direction getAirflowOriginSide();
-
-	@Nullable
-	Direction getAirFlowDirection();
-
-	default float getMaxDistance() {
-		float speed = Math.abs(this.getSpeed());
-		CKinetics config = AllConfigs.server().kinetics;
-		float distanceFactor = Math.min(speed / config.fanRotationArgmax.get(), 1);
-		float pushDistance = Mth.lerp(distanceFactor, 3, config.fanPushDistance.get());
-		float pullDistance = Mth.lerp(distanceFactor, 3f, config.fanPullDistance.get());
-		return this.getSpeed() > 0 ? pushDistance : pullDistance;
-	}
-
-	boolean isSourceRemoved();
+    AirCurrent getAirCurrent();
+    Level getAirCurrentWorld();
+    BlockPos getAirCurrentPos();
+    float getSpeed();
+    Direction getAirflowOriginSide();
+    Direction getAirFlowDirection();
+    /** Pinned interpolation uses the signed source speed to choose push/pull limits. */
+    default float getMaxDistance() { var config=com.simibubi.create.infrastructure.config.AllConfigs.server().kinetics;float target=getSpeed()>0?config.fanPushDistance.get():config.fanPullDistance.get();return 3+Math.min(Math.abs(getSpeed())/config.fanRotationArgmax.get(),1)*(target-3); }
+    boolean isSourceRemoved();
 }

@@ -90,7 +90,7 @@ public class ClipboardEntry {
 			return new ArrayList<>();
 
 		int previouslyOpenedPage = heldItem.getOrDefault(AllDataComponents.CLIPBOARD_CONTENT, ClipboardContent.EMPTY).previouslyOpenedPage();
-		int page = Math.min(previouslyOpenedPage, pages.size() - 1);
+		int page = Math.clamp(previouslyOpenedPage, 0, pages.size() - 1);
 		return pages.get(page);
 	}
 

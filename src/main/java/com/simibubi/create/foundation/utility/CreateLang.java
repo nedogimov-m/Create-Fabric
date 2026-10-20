@@ -12,7 +12,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.neoforge.fluids.FluidStack;
+import com.simibubi.create.foundation.fluid.FluidStack;
 
 public class CreateLang extends Lang {
 
@@ -50,9 +50,8 @@ public class CreateLang extends Lang {
 	}
 
 	public static LangBuilder fluidName(FluidStack stack) {
-		return builder().add(stack.getHoverName()
-				.copy());
-	}
+        return builder().add(net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariantAttributes.getName(stack.variant()));
+    }
 
 	public static LangBuilder number(double d) {
 		return builder().text(LangNumberFormat.format(d));

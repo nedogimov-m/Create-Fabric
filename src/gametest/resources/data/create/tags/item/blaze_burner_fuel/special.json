@@ -1,0 +1,7 @@
+{
+  "values": [
+    "create_test:burner_legacy_special",
+    "create_test:burner_both",
+    "create_test:burner_plain"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "library": "NightConfig core + toml",
+  "version": "3.8.3",
+  "license": "LGPL-3.0",
+  "licenseFiles": [
+    "licenses/NightConfig-LICENSE-LGPL-3.0.txt",
+    "licenses/NightConfig-LICENSE-GPL-3.0.txt"
+  ],
+  "project": "https://github.com/TheElectronWill/night-config",
+  "purpose": "Read actual original NeoForge TOML for absent-only native scope migration; no NeoForge loader or rendering dependency.",
+  "artifacts": [
+    {
+      "module": "core",
+      "version": "3.8.3",
+      "url": "https://repo.maven.apache.org/maven2/com/electronwill/night-config/core/3.8.3/core-3.8.3.jar",
+      "sha256": "971dc88c1c22085611ee1c300f5bbf8595938178e819befbb5e98c3cbd272b79"
+    },
+    {
+      "module": "toml",
+      "version": "3.8.3",
+      "url": "https://repo.maven.apache.org/maven2/com/electronwill/night-config/toml/3.8.3/toml-3.8.3.jar",
+      "sha256": "ccb92882264bf071e3916ab122fe5ea3e211b8ebf199201698a1324f151f928f"
+    }
+  ],
+  "correspondingSources": [
+    {
+      "module": "core",
+      "version": "3.8.3",
+      "url": "https://repo.maven.apache.org/maven2/com/electronwill/night-config/core/3.8.3/core-3.8.3-sources.jar",
+      "sha256": "463b60321d5dcb87970c9bc8ca49b5a6b3095018e9c9c9fc6fdd6bb2222a56aa"
+    },
+    {
+      "module": "toml",
+      "version": "3.8.3",
+      "url": "https://repo.maven.apache.org/maven2/com/electronwill/night-config/toml/3.8.3/toml-3.8.3-sources.jar",
+      "sha256": "7f24d082fd578bcb7a4a6f122b878dcb94da8524cfd3a03053b3a26683df5c6a"
+    }
+  ],
+  "replacement": "Libraries are declared as ordinary Gradle implementation/include dependencies; users can replace/rebuild the corresponding nested library jars from the linked sources."
+}

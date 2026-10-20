@@ -1,49 +1,37 @@
 package com.simibubi.create.content.logistics.stockTicker;
 
-import java.util.List;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.content.logistics.packager.IdentifiedInventory;
-import com.simibubi.create.content.logistics.packager.InventorySummary;
-import com.simibubi.create.content.logistics.packagerLink.LogisticallyLinkedBehaviour;
-import com.simibubi.create.content.logistics.packagerLink.LogisticallyLinkedBehaviour.RequestType;
-import com.simibubi.create.content.logistics.packagerLink.LogisticsManager;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import com.simibubi.create.content.logistics.packager.*;
+import com.simibubi.create.content.logistics.packagerLink.*;
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
+import net.minecraft.core.*;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
-public abstract class StockCheckingBlockEntity extends SmartBlockEntity {
-
-	public LogisticallyLinkedBehaviour behaviour;
-
-	public StockCheckingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		setLazyTickRate(10);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(behaviour = new LogisticallyLinkedBehaviour(this, false));
-	}
-
-	public InventorySummary getRecentSummary() {
-		return LogisticsManager.getSummaryOfNetwork(behaviour.freqId, false);
-	}
-
-	public InventorySummary getAccurateSummary() {
-		return LogisticsManager.getSummaryOfNetwork(behaviour.freqId, true);
-	}
-
-	public boolean broadcastPackageRequest(RequestType type, PackageOrder order, @Nullable IdentifiedInventory ignoredHandler, String address) {
-		return broadcastPackageRequest(type, PackageOrderWithCrafts.simple(order.stacks()), ignoredHandler, address);
-	}
-
-	public boolean broadcastPackageRequest(RequestType type, PackageOrderWithCrafts order, @Nullable IdentifiedInventory ignoredHandler, String address) {
-		return LogisticsManager.broadcastPackageRequest(behaviour.freqId, type, order, ignoredHandler, address);
-	}
-
+/** Shared stock access for requesters and stock keepers; only stock links supply goods. */
+public abstract class StockCheckingBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements BlockEntityBehaviour.Provider {
+    public final LogisticallyLinkedBehaviour behaviour=new LogisticallyLinkedBehaviour(this,false);
+    private boolean initialized;
+    protected StockCheckingBlockEntity(BlockEntityType<?> type,BlockPos pos,BlockState state) { super(type,pos,state); }
+    public void tick() {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, worldPosition, getBlockState(), this)) {
+            if (!createTick.shouldTick()) return;
+  
+        }
+    }
+    public InventorySummary getRecentSummary() { return LogisticsManager.getSummaryOfNetwork(level,behaviour.freqId,false); }
+    public InventorySummary getAccurateSummary() { return LogisticsManager.getSummaryOfNetwork(level,behaviour.freqId,true); }
+    public boolean broadcastPackageRequest(LogisticallyLinkedBehaviour.RequestType type,PackageOrder order,IdentifiedInventory ignored,String address) { return broadcastPackageRequest(type,PackageOrderWithCrafts.simple(order.stacks()),ignored,address); }
+    public boolean broadcastPackageRequest(LogisticallyLinkedBehaviour.RequestType type,PackageOrderWithCrafts order,IdentifiedInventory ignored,String address) { return LogisticsManager.broadcastPackageRequest(level,behaviour.freqId,type,order,ignored,address); }
+    public void notifyUpdate() { setChanged();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS); }
+    @Override public void invalidate() { initialized=false;super.invalidate(); }
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket() { return ClientboundBlockEntityDataPacket.create(this); }
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries) { var out=TagValueOutput.createWithContext(net.minecraft.util.ProblemReporter.DISCARDING,registries);write(out, true);return out.buildResult(); }
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (behaviour != null) behaviours.add(behaviour);
+    }
 }

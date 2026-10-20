@@ -1,9 +1,8 @@
 package com.simibubi.create.infrastructure.config;
 
 
-import net.createmod.catnip.config.ConfigBase;
 
-public class CLogistics extends ConfigBase {
+public class CLogistics extends NativeConfigBase {
 
 	public final ConfigInt defaultExtractionTimer = i(8, 1, "defaultExtractionTimer", Comments.defaultExtractionTimer);
 	public final ConfigInt psiTimeout = i(60, 1, "psiTimeout", Comments.psiTimeout);

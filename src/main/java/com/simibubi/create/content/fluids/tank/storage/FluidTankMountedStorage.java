@@ -1,112 +1,62 @@
 package com.simibubi.create.content.fluids.tank.storage;
 
-import org.jetbrains.annotations.Nullable;
-
-import com.mojang.serialization.MapCodec;
+import com.mojang.serialization.*;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.AllMountedStorageTypes;
 import com.simibubi.create.api.contraption.storage.SyncedMountedStorage;
-import com.simibubi.create.api.contraption.storage.fluid.MountedFluidStorageType;
-import com.simibubi.create.api.contraption.storage.fluid.WrapperMountedFluidStorage;
-import com.simibubi.create.content.contraptions.Contraption;
+import com.simibubi.create.api.contraption.storage.fluid.*;
 import com.simibubi.create.content.fluids.tank.FluidTankBlockEntity;
-import com.simibubi.create.content.fluids.tank.storage.FluidTankMountedStorage.Handler;
-
-import net.createmod.catnip.animation.LerpedFloat;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
+import com.simibubi.create.foundation.fluid.*;
+import net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.util.ExtraCodecs;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.TagValueOutput;
+import org.jspecify.annotations.Nullable;
 
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.templates.FluidTank;
-
-public class FluidTankMountedStorage extends WrapperMountedFluidStorage<Handler> implements SyncedMountedStorage {
-	public static final MapCodec<FluidTankMountedStorage> CODEC = RecordCodecBuilder.mapCodec(i -> i.group(
-		ExtraCodecs.NON_NEGATIVE_INT.fieldOf("capacity").forGetter(FluidTankMountedStorage::getCapacity),
-		FluidStack.OPTIONAL_CODEC.fieldOf("fluid").forGetter(FluidTankMountedStorage::getFluid)
-	).apply(i, FluidTankMountedStorage::new));
-
-	private boolean dirty;
-
-	protected FluidTankMountedStorage(MountedFluidStorageType<?> type, int capacity, FluidStack stack) {
-		super(type, new Handler(capacity, stack));
-		this.wrapped.onChange = () -> this.dirty = true;
-	}
-
-	protected FluidTankMountedStorage(int capacity, FluidStack stack) {
-		this(AllMountedStorageTypes.FLUID_TANK.get(), capacity, stack);
-	}
-
-	@Override
-	public void unmount(Level level, BlockState state, BlockPos pos, @Nullable BlockEntity be) {
-		if (be instanceof FluidTankBlockEntity tank && tank.isController()) {
-			FluidTank inventory = tank.getTankInventory();
-			// capacity shouldn't change, leave it
-			inventory.setFluid(this.wrapped.getFluid());
-		}
-	}
-
-	public FluidStack getFluid() {
-		return this.wrapped.getFluid();
-	}
-
-	public int getCapacity() {
-		return this.wrapped.getCapacity();
-	}
-
-	@Override
-	public boolean isDirty() {
-		return this.dirty;
-	}
-
-	@Override
-	public void markClean() {
-		this.dirty = false;
-	}
-
-	@Override
-	public void afterSync(Contraption contraption, BlockPos localPos) {
-		BlockEntity be = contraption.getBlockEntityClientSide(localPos);
-		if (!(be instanceof FluidTankBlockEntity tank))
-			return;
-
-		FluidTank inv = tank.getTankInventory();
-		inv.setFluid(this.getFluid());
-		float fillLevel = inv.getFluidAmount() / (float) inv.getCapacity();
-		if (tank.getFluidLevel() == null) {
-			tank.setFluidLevel(LerpedFloat.linear().startWithValue(fillLevel));
-		}
-		tank.getFluidLevel().chase(fillLevel, 0.5, LerpedFloat.Chaser.EXP);
-	}
-
-	public static FluidTankMountedStorage fromTank(FluidTankBlockEntity tank) {
-		// tank has update callbacks, make an isolated copy
-		FluidTank inventory = tank.getTankInventory();
-		return new FluidTankMountedStorage(inventory.getCapacity(), inventory.getFluid().copy());
-	}
-
-	public static FluidTankMountedStorage fromLegacy(HolderLookup.Provider registries, CompoundTag nbt) {
-		int capacity = nbt.getInt("Capacity");
-		FluidStack fluid = FluidStack.parseOptional(registries, nbt);
-		return new FluidTankMountedStorage(capacity, fluid);
-	}
-
-	public static final class Handler extends FluidTank {
-		private Runnable onChange = () -> {
-		};
-
-		public Handler(int capacity, FluidStack stack) {
-			super(capacity);
-			this.setFluid(stack);
-		}
-
-		@Override
-		protected void onContentsChanged() {
-			this.onChange.run();
-		}
-	}
+public class FluidTankMountedStorage extends WrapperMountedFluidStorage<FluidTankMountedStorage.Handler> implements SyncedMountedStorage {
+    private static final Codec<Long> NON_NEGATIVE = Codec.LONG.validate(value -> value >= 0 ? DataResult.success(value) : DataResult.error(() -> "Negative mounted fluid amount"));
+    private record FluidData(FluidVariant variant, long amount) {}
+    private static final Codec<FluidData> FLUID = RecordCodecBuilder.create(i -> i.group(
+        FluidVariant.CODEC.fieldOf("variant").forGetter(FluidData::variant), NON_NEGATIVE.fieldOf("amount").forGetter(FluidData::amount)
+    ).apply(i, FluidData::new));
+    private record Contents(long capacity, FluidData fluid) {}
+    private static final Codec<Contents> CONTENTS = RecordCodecBuilder.create(i -> i.group(
+        NON_NEGATIVE.fieldOf("capacity").forGetter(Contents::capacity), FLUID.fieldOf("fluid").forGetter(Contents::fluid)
+    ).apply(i, Contents::new));
+    public static final MapCodec<FluidTankMountedStorage> CODEC = CONTENTS.comapFlatMap(data -> {
+        if (data.fluid.amount > data.capacity || data.fluid.variant.isBlank() && data.fluid.amount != 0) return DataResult.error(() -> "Invalid mounted tank contents");
+        return DataResult.success(new FluidTankMountedStorage(data.capacity, new FluidStack(data.fluid.variant, data.fluid.amount)));
+    }, storage -> new Contents(storage.getCapacity(), new FluidData(storage.getFluid().variant(), storage.getFluid().getAmount()))).fieldOf("value");
+    private boolean dirty;
+    public FluidTankMountedStorage(long capacity, FluidStack fluid) {
+        super(AllMountedStorageTypes.FLUID_TANK, new Handler(capacity));
+        wrapped.setFluid(fluid); wrapped.changed = () -> dirty = true;
+    }
+    public FluidStack getFluid() { return wrapped.getFluid(); }
+    public long getCapacity() { return wrapped.getCapacity(); }
+    @Override public boolean isDirty() { return dirty; }
+    @Override public void markClean() { dirty = false; }
+    @Override public void afterSync(com.simibubi.create.content.contraptions.Contraption contraption, BlockPos localPos) {
+        if (contraption.getBlockEntityClientSide(localPos) instanceof FluidTankBlockEntity tank) {
+            tank.getTankInventory().setCapacity(getCapacity()); tank.getTankInventory().setFluid(getFluid());
+        }
+    }
+    public void writeBlockEntityData(CompoundTag data, HolderLookup.Provider registries) {
+        var output = TagValueOutput.createWithContext(net.minecraft.util.ProblemReporter.DISCARDING, registries);
+        wrapped.save(output); data.put("TankContent", output.buildResult());
+    }
+    @Override public void unmount(Level level, BlockState state, BlockPos pos, @Nullable BlockEntity be) {
+        if (be instanceof FluidTankBlockEntity tank && tank.isController()) tank.getTankInventory().setFluid(getFluid());
+    }
+    public static FluidTankMountedStorage fromTank(FluidTankBlockEntity tank) { return new FluidTankMountedStorage(tank.getTankInventory().getCapacity(), tank.getTankInventory().getFluid()); }
+    public static final class Handler extends SmartFluidTank {
+        private Runnable changed = () -> {};
+        private long version;
+        private Handler(long capacity) { super(capacity, ignored -> {}); }
+        @Override protected void onFinalCommit() { version++; changed.run(); }
+        @Override public long getVersion() { return version; }
+    }
 }

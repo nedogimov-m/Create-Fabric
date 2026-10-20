@@ -1,0 +1,7 @@
+{
+  "parent": "create:block/white_sail",
+  "textures": {
+    "0": "create:block/sail/canvas_light_blue",
+    "particle": "create:block/sail/canvas_light_blue"
+  }
+}

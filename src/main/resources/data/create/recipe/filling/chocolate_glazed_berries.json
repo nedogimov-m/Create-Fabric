@@ -1,0 +1,15 @@
+{
+  "type": "create:filling",
+  "ingredients": [
+    "minecraft:sweet_berries",
+    {
+      "fluid": "create:chocolate",
+      "amount": 20250
+    }
+  ],
+  "results": [
+    {
+      "id": "create:chocolate_glazed_berries"
+    }
+  ]
+}

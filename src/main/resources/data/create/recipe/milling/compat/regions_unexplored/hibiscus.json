@@ -1,0 +1,25 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "regions_unexplored:hibiscus"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "count": 2,
+      "id": "minecraft:yellow_dye"
+    },
+    {
+      "chance": 0.2,
+      "id": "minecraft:red_dye"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "regions_unexplored"
+      ]
+    }
+  ]
+}

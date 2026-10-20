@@ -1,133 +1,61 @@
 package com.simibubi.create.content.kinetics.crank;
 
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllPartialModels;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.Create;
-import com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity;
-
+import com.simibubi.create.content.kinetics.KineticNetworks;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-
-import net.createmod.catnip.animation.AnimationTickHolder;
-import net.createmod.catnip.render.CachedBuffers;
-import net.createmod.catnip.render.SuperByteBuffer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.block.Block;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-
-public class HandCrankBlockEntity extends GeneratingKineticBlockEntity {
-
-	public int inUse;
-	public boolean backwards;
-	/**
-	 * In degrees
-	 */
-	public float independentAngle;
-	public float chasingAngularVelocity;
-
-	public HandCrankBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
-
-	public void turn(boolean back) {
-		boolean update = false;
-
-		if (getGeneratedSpeed() == 0 || back != backwards)
-			update = true;
-
-		inUse = 10;
-		this.backwards = back;
-		if (update && !level.isClientSide)
-			updateGeneratedRotation();
-	}
-
-	/**
-	 * In degrees
-	 */
-	public float getIndependentAngle(float partialTicks) {
-		return independentAngle + partialTicks * chasingAngularVelocity;
-	}
-
-	@Override
-	public float getGeneratedSpeed() {
-		Block block = getBlockState().getBlock();
-		if (!(block instanceof HandCrankBlock crank))
-			return 0;
-		int speed = (inUse == 0 ? 0 : clockwise() ? -1 : 1) * crank.getRotationSpeed();
-		return convertToDirection(speed, getBlockState().getValue(HandCrankBlock.FACING));
-	}
-
-	protected boolean clockwise() {
-		return backwards;
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		compound.putInt("InUse", inUse);
-		compound.putBoolean("Backwards", backwards);
-		super.write(compound, registries, clientPacket);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		inUse = compound.getInt("InUse");
-		backwards = compound.getBoolean("Backwards");
-		super.read(compound, registries, clientPacket);
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		float actualAngularSpeed = KineticBlockEntity.convertToAngular(getSpeed());
-		chasingAngularVelocity += (actualAngularSpeed - chasingAngularVelocity) / 4f;
-		independentAngle += chasingAngularVelocity;
-
-		if (inUse > 0) {
-			inUse--;
-
-			if (inUse == 0 && !level.isClientSide) {
-				sequenceContext = null;
-				updateGeneratedRotation();
-			}
-		}
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	public SuperByteBuffer getRenderedHandle() {
-		BlockState blockState = getBlockState();
-		Direction facing = blockState.getOptionalValue(HandCrankBlock.FACING)
-			.orElse(Direction.UP);
-		return CachedBuffers.partialFacing(AllPartialModels.HAND_CRANK_HANDLE, blockState, facing.getOpposite());
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	public boolean shouldRenderShaft() {
-		return true;
-	}
-
-	@Override
-	protected Block getStressConfigKey() {
-		return AllBlocks.HAND_CRANK.has(getBlockState()) ? AllBlocks.HAND_CRANK.get()
-			: AllBlocks.COPPER_VALVE_HANDLE.get();
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void tickAudio() {
-		super.tickAudio();
-		if (inUse > 0 && AnimationTickHolder.getTicks() % 10 == 0) {
-			if (!AllBlocks.HAND_CRANK.has(getBlockState()))
-				return;
-			AllSoundEvents.CRANKING.playAt(level, worldPosition, (inUse) / 2.5f, .65f + (10 - inUse) / 10f, true);
-		}
-	}
-
+/** Source crank generator lifecycle, used by native valve handles. */
+public class HandCrankBlockEntity extends com.simibubi.create.content.kinetics.base.GeneratingKineticBlockEntity {
+    public int inUse;
+    public boolean backwards;
+    public float independentAngle;
+    public float chasingAngularVelocity;
+    public HandCrankBlockEntity(BlockPos pos,BlockState state){this(com.simibubi.create.AllBlockEntityTypes.HAND_CRANK,pos,state);}
+    public HandCrankBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) { super(type, pos, state); }
+    protected boolean clockwise() { return backwards; }
+    public void turn(boolean back) {
+        inUse = 10; backwards = back; setChanged();
+        if (level instanceof ServerLevel) updateGeneratedRotation();
+    }
+    @Override public void turnCrank(boolean backwards) { turn(backwards); }
+    @Override public float getGeneratedSpeed() {
+        if(!(getBlockState().getBlock() instanceof HandCrankBlock crank))return 0;
+        return convertToDirection(inUse==0?0:crank.getRotationSpeed()*(clockwise()?-1:1),getBlockState().getValue(HandCrankBlock.FACING));
+    }
+    @Override public double getDirectionalGeneratedSpeed() { return getGeneratedSpeed(); }
+    @Override public float getIndependentAngle(float partial) { return independentAngle + partial * chasingAngularVelocity; }
+    protected void tickCrank() {
+        chasingAngularVelocity += (convertToAngular(getSpeed()) - chasingAngularVelocity) / 4;
+        independentAngle += chasingAngularVelocity;
+        if (inUse > 0 && --inUse == 0 && level instanceof ServerLevel server) {
+            restoreSequenceContext(null, null); updateGeneratedRotation();
+        }
+    }
+    @Override public void tick(){if(level==null){super.tick();return;}tick(level,worldPosition,getBlockState(),this);}
+    public static void tick(Level level,BlockPos pos,BlockState state,HandCrankBlockEntity crank){
+        try(var scope=com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level,pos,state,crank)){
+            if(!scope.shouldTick())return;
+            KineticBlockEntity.tick(level,pos,state,crank);crank.tickCrank();
+            if(level instanceof ServerLevel&&state.is(com.simibubi.create.AllBlocks.HAND_CRANK)&&crank.inUse>0&&level.getGameTime()%10==0){
+                level.playSound(null,pos,com.simibubi.create.AllSoundEvents.CRANKING,net.minecraft.sounds.SoundSource.BLOCKS,.3f,.65f);
+                level.playSound(null,pos,com.simibubi.create.AllSoundEvents.CRANKING_BUTTON,net.minecraft.sounds.SoundSource.BLOCKS,.1f,.65f);
+            }
+        }
+    }
+    @Override protected void write(ValueOutput output, boolean clientPacket) {
+        super.write(output, clientPacket); output.putInt("InUse", inUse); output.putBoolean("Backwards", backwards);
+    }
+    @Override protected void read(ValueInput input, boolean clientPacket) {
+         inUse = Math.max(0, input.getIntOr("InUse", 0));
+        backwards = input.getBooleanOr("Backwards", false);
+    
+        super.read(input, clientPacket);
+    }
+    @Override protected net.minecraft.world.level.block.Block getStressConfigKey(){return getBlockState().is(com.simibubi.create.AllBlocks.HAND_CRANK)?com.simibubi.create.AllBlocks.HAND_CRANK:com.simibubi.create.AllBlocks.COPPER_VALVE_HANDLE;}
+    @Override public double getAddedStressCapacity(){return com.simibubi.create.api.stress.BlockStressValues.getCapacity(getBlockState().is(com.simibubi.create.AllBlocks.HAND_CRANK)?com.simibubi.create.AllBlocks.HAND_CRANK:com.simibubi.create.AllBlocks.COPPER_VALVE_HANDLE);}
 }

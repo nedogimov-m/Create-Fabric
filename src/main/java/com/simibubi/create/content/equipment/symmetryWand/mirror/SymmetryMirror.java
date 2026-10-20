@@ -6,14 +6,10 @@ import java.util.Map;
 import java.util.Objects;
 
 import com.google.common.collect.ImmutableList;
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import com.simibubi.create.foundation.utility.CreateLang;
 
-import dev.engine_room.flywheel.lib.model.baked.PartialModel;
 import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecs;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -24,12 +20,9 @@ import net.minecraft.world.level.block.Mirror;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 public abstract class SymmetryMirror {
 	public static final String EMPTY = "empty";
@@ -46,7 +39,7 @@ public abstract class SymmetryMirror {
 
 	public static final StreamCodec<ByteBuf, SymmetryMirror> STREAM_CODEC = StreamCodec.composite(
 			ByteBufCodecs.INT, SymmetryMirror::getOrientationIndex,
-			CatnipStreamCodecs.VEC3, SymmetryMirror::getPosition,
+			StreamCodec.of((ByteBuf buffer, Vec3 value) -> { buffer.writeDouble(value.x); buffer.writeDouble(value.y); buffer.writeDouble(value.z); }, buffer -> new Vec3(buffer.readDouble(), buffer.readDouble(), buffer.readDouble())), SymmetryMirror::getPosition,
 			ByteBufCodecs.STRING_UTF8, SymmetryMirror::typeName,
 			ByteBufCodecs.BOOL, m -> m.enable,
 			SymmetryMirror::create
@@ -58,14 +51,14 @@ public abstract class SymmetryMirror {
 	public boolean enable;
 
 	public SymmetryMirror(Vec3 pos) {
-		position = pos;
+		setPosition(pos);
 		enable = true;
 		orientationIndex = 0;
 	}
 
 	public static List<Component> getMirrors() {
-		return ImmutableList.of(CreateLang.translateDirect("symmetry.mirror.plane"), CreateLang.translateDirect("symmetry.mirror.doublePlane"),
-			CreateLang.translateDirect("symmetry.mirror.triplePlane"));
+		return ImmutableList.of(Component.translatable("create." + "symmetry.mirror.plane"), Component.translatable("create." + "symmetry.mirror.doublePlane"),
+			Component.translatable("create." + "symmetry.mirror.triplePlane"));
 	}
 
 	private static SymmetryMirror create(Integer orientationIndex, Vec3 position, String type, Boolean enable) {
@@ -76,7 +69,10 @@ public abstract class SymmetryMirror {
 			default -> new EmptyMirror(position);
 		};
 
-		element.setOrientation(orientationIndex);
+		int count = element instanceof PlaneMirror || element instanceof CrossPlaneMirror ? 2 : 1;
+        if (orientationIndex < 0 || orientationIndex >= count)
+            throw new IllegalArgumentException("Invalid native symmetry orientation");
+        element.setOrientation(orientationIndex);
 		element.enable = enable;
 
 		return element;
@@ -115,10 +111,16 @@ public abstract class SymmetryMirror {
 
 	public abstract String typeName();
 
-	@OnlyIn(Dist.CLIENT)
-	public abstract PartialModel getModel();
+	public abstract net.minecraft.resources.Identifier getModel();
 
-	public void applyModelTransform(PoseStack ms) {}
+    /** Native model rotation; the PoseStack adapter lives on the client. */
+    public float modelRotation() { return 0; }
+
+	/** Detached copy for data-component custody and native extraction. */
+    public final SymmetryMirror copy() {
+        SymmetryMirror result = create(getOrientationIndex(), getPosition(), typeName(), enable);
+        return result;
+    }
 
 	protected Vec3 getDiff(BlockPos position) {
 		return this.position.scale(-1)
@@ -140,16 +142,19 @@ public abstract class SymmetryMirror {
 			if (property == BlockStateProperties.HALF)
 				return in.cycle(property);
 			// Directional Blocks
-			if (property instanceof DirectionProperty) {
+			if (property.getValueClass() == Direction.class) {
 				if (in.getValue(property) == Direction.DOWN) {
-					return in.setValue((DirectionProperty) property, Direction.UP);
+					return in.setValue(directionProperty(property), Direction.UP);
 				} else if (in.getValue(property) == Direction.UP) {
-					return in.setValue((DirectionProperty) property, Direction.DOWN);
+					return in.setValue(directionProperty(property), Direction.DOWN);
 				}
 			}
 		}
 		return in;
 	}
+
+    @SuppressWarnings("unchecked")
+    private static Property<Direction> directionProperty(Property<?> property) { return (Property<Direction>) property; }
 
 	protected BlockState flipZ(BlockState in) {
 		return in.mirror(Mirror.LEFT_RIGHT);
@@ -195,7 +200,10 @@ public abstract class SymmetryMirror {
 	}
 
 	public void setPosition(Vec3 pos3d) {
-		this.position = pos3d;
+		if (!Double.isFinite(pos3d.x) || !Double.isFinite(pos3d.y) || !Double.isFinite(pos3d.z)
+            || Math.abs(pos3d.x) > 30_000_000 || Math.abs(pos3d.z) > 30_000_000 || Math.abs(pos3d.y) > 30_000_000)
+            throw new IllegalArgumentException("Invalid native symmetry position");
+        this.position = pos3d;
 	}
 
 	public abstract List<Component> getAlignToolTips();

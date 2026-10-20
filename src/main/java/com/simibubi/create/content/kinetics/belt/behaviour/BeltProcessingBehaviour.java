@@ -2,71 +2,47 @@ package com.simibubi.create.content.kinetics.belt.behaviour;
 
 import com.simibubi.create.content.kinetics.belt.transport.TransportedItemStack;
 import com.simibubi.create.content.logistics.funnel.AbstractFunnelBlock;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.entity.BlockEntity;
 
-/**
- * Behaviour for BlockEntities which can process items on belts or depots beneath
- * them. Currently only supports placement location 2 spaces above the belt
- * block. Example use: Mechanical Press
- */
+/** Source callback API for actual processors two blocks above transported stock. */
 public class BeltProcessingBehaviour extends BlockEntityBehaviour {
-
-	public static final BehaviourType<BeltProcessingBehaviour> TYPE = new BehaviourType<>();
-
-	public static enum ProcessingResult {
-		PASS, HOLD, REMOVE;
-	}
-
-	private ProcessingCallback onItemEnter;
-	private ProcessingCallback continueProcessing;
-
-	public BeltProcessingBehaviour(SmartBlockEntity be) {
-		super(be);
-		onItemEnter = (s, i) -> ProcessingResult.PASS;
-		continueProcessing = (s, i) -> ProcessingResult.PASS;
-	}
-
-	public BeltProcessingBehaviour whenItemEnters(ProcessingCallback callback) {
-		onItemEnter = callback;
-		return this;
-	}
-
-	public BeltProcessingBehaviour whileItemHeld(ProcessingCallback callback) {
-		continueProcessing = callback;
-		return this;
-	}
-
-	public static boolean isBlocked(BlockGetter world, BlockPos processingSpace) {
-		BlockState blockState = world.getBlockState(processingSpace.above());
-		if (AbstractFunnelBlock.isFunnel(blockState))
-			return false;
-		return !blockState.getCollisionShape(world, processingSpace.above())
-			.isEmpty();
-	}
-
-	@Override
-	public BehaviourType<?> getType() {
-		return TYPE;
-	}
-
-	public ProcessingResult handleReceivedItem(TransportedItemStack stack,
-		TransportedItemStackHandlerBehaviour inventory) {
-		return onItemEnter.apply(stack, inventory);
-	}
-
-	public ProcessingResult handleHeldItem(TransportedItemStack stack, TransportedItemStackHandlerBehaviour inventory) {
-		return continueProcessing.apply(stack, inventory);
-	}
-
-	@FunctionalInterface
-	public interface ProcessingCallback {
-		public ProcessingResult apply(TransportedItemStack stack, TransportedItemStackHandlerBehaviour inventory);
-	}
-
+    public static final BehaviourType<BeltProcessingBehaviour> TYPE = new BehaviourType<BeltProcessingBehaviour>()
+            ;
+    public enum ProcessingResult { PASS, HOLD, REMOVE }
+    @FunctionalInterface public interface ProcessingCallback {
+        ProcessingResult apply(TransportedItemStack stack, TransportedItemStackHandlerBehaviour inventory);
+    }
+    private ProcessingCallback enter = (stack, inventory) -> ProcessingResult.PASS;
+    private ProcessingCallback held = (stack, inventory) -> ProcessingResult.PASS;
+    public BeltProcessingBehaviour(BlockEntity entity) { super(entity); }
+    public BeltProcessingBehaviour whenItemEnters(ProcessingCallback callback) { enter = callback; return this; }
+    public BeltProcessingBehaviour whileItemHeld(ProcessingCallback callback) { held = callback; return this; }
+    public ProcessingResult handleReceivedItem(TransportedItemStack stack, TransportedItemStackHandlerBehaviour inventory) { return enter.apply(stack, inventory); }
+    public ProcessingResult handleHeldItem(TransportedItemStack stack, TransportedItemStackHandlerBehaviour inventory) { return held.apply(stack, inventory); }
+    public static boolean isBlocked(BlockGetter level, BlockPos position) {
+        var space = position.above(); var state = LoadedLevelAccess.blockState(level, space);
+        if (state.getBlock() instanceof AbstractFunnelBlock) return false;
+        return !state.getCollisionShape(level, space).isEmpty();
+    }
+    public static BeltProcessingBehaviour createNative(BlockEntity entity) {
+        if(entity instanceof com.simibubi.create.content.kinetics.press.MechanicalPressBlockEntity press)
+            return press.getPressingBehaviour();
+        if (entity instanceof com.simibubi.create.content.fluids.spout.SpoutBlockEntity spout)
+            return new BeltProcessingBehaviour(entity).whenItemEnters((stack, inventory) ->
+                    spout.onBeltItemReceived(stack) ? ProcessingResult.HOLD : ProcessingResult.PASS)
+                    .whileItemHeld((stack, inventory) -> spout.processingTicks >= 0 || spout.onBeltItemReceived(stack)
+                            ? ProcessingResult.HOLD : ProcessingResult.PASS);
+        if (entity instanceof com.simibubi.create.content.kinetics.deployer.DeployerBlockEntity deployer)
+            return new BeltProcessingBehaviour(entity).whenItemEnters((stack, inventory) ->
+                    deployer.onBeltItemReceived(stack) ? ProcessingResult.HOLD : ProcessingResult.PASS)
+                    .whileItemHeld((stack, inventory) -> deployer.tryHoldTransportedItem(stack)
+                            ? ProcessingResult.HOLD : ProcessingResult.PASS);
+        return null;
+    }
+    @Override public BehaviourType<?> getType() { return TYPE; }
 }

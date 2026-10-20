@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/chest_minecart_contraption",
+    "particle": "create:item/chest_minecart_contraption"
+  }
+}

@@ -3,7 +3,7 @@ package com.simibubi.create.content.trains.schedule.destination;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -15,24 +15,21 @@ import com.simibubi.create.content.trains.graph.DiscoveredPath;
 import com.simibubi.create.content.trains.graph.EdgePointType;
 import com.simibubi.create.content.trains.schedule.ScheduleRuntime;
 import com.simibubi.create.content.trains.station.GlobalStation;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.trains.schedule.ScheduleText;
 
 import net.createmod.catnip.data.Glob;
 import net.createmod.catnip.data.Pair;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 public class DestinationInstruction extends TextScheduleInstruction {
 
 	@Override
 	public Pair<ItemStack, Component> getSummary() {
-		return Pair.of(AllBlocks.TRACK_STATION.asStack(), Component.literal(getLabelText()));
+		return Pair.of(new ItemStack(AllBlocks.TRACK_STATION), Component.literal(getLabelText()));
 	}
 
 	@Override
@@ -41,13 +38,13 @@ public class DestinationInstruction extends TextScheduleInstruction {
 	}
 
 	@Override
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return Create.asResource("destination");
 	}
 
 	@Override
 	public ItemStack getSecondLineIcon() {
-		return AllBlocks.TRACK_STATION.asStack();
+		return new ItemStack(AllBlocks.TRACK_STATION);
 	}
 
 	public String getFilter() {
@@ -60,20 +57,16 @@ public class DestinationInstruction extends TextScheduleInstruction {
 
 	@Override
 	public List<Component> getSecondLineTooltip(int slot) {
-		return ImmutableList.of(CreateLang.translateDirect("schedule.instruction.filter_edit_box"),
-			CreateLang.translateDirect("schedule.instruction.filter_edit_box_1")
+		return ImmutableList.of(ScheduleText.translate("schedule.instruction.filter_edit_box"),
+			ScheduleText.translate("schedule.instruction.filter_edit_box_1")
 				.withStyle(ChatFormatting.GRAY),
-			CreateLang.translateDirect("schedule.instruction.filter_edit_box_2")
+			ScheduleText.translate("schedule.instruction.filter_edit_box_2")
 				.withStyle(ChatFormatting.DARK_GRAY),
-			CreateLang.translateDirect("schedule.instruction.filter_edit_box_3")
+			ScheduleText.translate("schedule.instruction.filter_edit_box_3")
 				.withStyle(ChatFormatting.DARK_GRAY));
 	}
 
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	protected void modifyEditBox(EditBox box) {
-		box.setFilter(s -> StringUtils.countMatches(s, '*') <= 3);
-	}
+	
 
 	@Override
 	@Nullable
@@ -90,8 +83,8 @@ public class DestinationInstruction extends TextScheduleInstruction {
 		}
 
 
-		for (GlobalStation globalStation : train.graph.getPoints(EdgePointType.STATION)) {
-			if (!globalStation.name.matches(regex))
+		for (GlobalStation globalStation : train.graph.getPoints(com.simibubi.create.content.trains.station.StationEdgePoints.STATION)) {
+			if (!globalStation.name().matches(regex))
 				continue;
 			anyMatch = true;
 			validStations.add(globalStation);

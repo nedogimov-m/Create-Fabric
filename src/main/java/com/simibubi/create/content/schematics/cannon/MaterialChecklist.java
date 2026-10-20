@@ -13,7 +13,6 @@ import com.simibubi.create.content.equipment.clipboard.ClipboardEntry;
 import com.simibubi.create.content.equipment.clipboard.ClipboardOverrides.ClipboardType;
 import com.simibubi.create.content.schematics.requirement.ItemRequirement;
 import com.simibubi.create.content.schematics.requirement.ItemRequirement.ItemUseType;
-import com.simibubi.create.foundation.utility.CreateLang;
 
 import it.unimi.dsi.fastutil.objects.Object2IntArrayMap;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
@@ -86,17 +85,17 @@ public class MaterialChecklist {
 
 		if (blocksNotLoaded) {
 			textComponent = Component.literal("\n" + ChatFormatting.RED);
-			textComponent = textComponent.append(CreateLang.translateDirect("materialChecklist.blocksNotLoaded"));
+			textComponent = textComponent.append(Component.translatable("create.materialChecklist.blocksNotLoaded"));
 			pages.add(Filterable.passThrough(textComponent));
 		}
 
 		List<Item> keys = new ArrayList<>(Sets.union(required.keySet(), damageRequired.keySet()));
 		Collections.sort(keys, (item1, item2) -> {
 			Locale locale = Locale.ENGLISH;
-			String name1 = item1.getDescription()
+			String name1 = Component.translatable(item1.getDescriptionId())
 				.getString()
 				.toLowerCase(locale);
-			String name2 = item2.getDescription()
+			String name2 = Component.translatable(item2.getDescriptionId())
 				.getString()
 				.toLowerCase(locale);
 			return name1.compareTo(name2);
@@ -149,7 +148,7 @@ public class MaterialChecklist {
 				true
 		);
 		book.set(DataComponents.WRITTEN_BOOK_CONTENT, contents);
-		textComponent = CreateLang.translateDirect("materialChecklist")
+		textComponent = Component.translatable("create.materialChecklist")
 			.setStyle(Style.EMPTY.withColor(ChatFormatting.BLUE)
 				.withItalic(Boolean.FALSE));
 		book.set(DataComponents.CUSTOM_NAME, textComponent);
@@ -164,17 +163,17 @@ public class MaterialChecklist {
 		List<ClipboardEntry> currentPage = new ArrayList<>();
 
 		if (blocksNotLoaded) {
-			currentPage.add(new ClipboardEntry(false, CreateLang.translateDirect("materialChecklist.blocksNotLoaded")
+			currentPage.add(new ClipboardEntry(false, Component.translatable("create.materialChecklist.blocksNotLoaded")
 				.withStyle(ChatFormatting.RED)));
 		}
 
 		List<Item> keys = new ArrayList<>(Sets.union(required.keySet(), damageRequired.keySet()));
 		Collections.sort(keys, (item1, item2) -> {
 			Locale locale = Locale.ENGLISH;
-			String name1 = item1.getDescription()
+			String name1 = Component.translatable(item1.getDescriptionId())
 				.getString()
 				.toLowerCase(locale);
-			String name2 = item2.getDescription()
+			String name2 = Component.translatable(item2.getDescriptionId())
 				.getString()
 				.toLowerCase(locale);
 			return name1.compareTo(name2);
@@ -220,9 +219,9 @@ public class MaterialChecklist {
 
 		pages.add(currentPage);
 
-		ItemStack clipboard = AllBlocks.CLIPBOARD.asStack();
+		ItemStack clipboard = new ItemStack(AllBlocks.CLIPBOARD);
 		clipboard.set(AllDataComponents.CLIPBOARD_CONTENT, new ClipboardContent(ClipboardType.WRITTEN, pages, true));
-		clipboard.set(DataComponents.CUSTOM_NAME, CreateLang.translateDirect("materialChecklist")
+		clipboard.set(DataComponents.CUSTOM_NAME, Component.translatable("create.materialChecklist")
 				.setStyle(Style.EMPTY.withItalic(false)));
 		return clipboard;
 	}
@@ -238,9 +237,9 @@ public class MaterialChecklist {
 		int stacks = amount / 64;
 		int remainder = amount % 64;
         MutableComponent tc = Component.empty();
-		tc.append(Component.translatable(item.getDescriptionId())
+		tc.append(Component.translatable(item.getItem().getDescriptionId())
 			.setStyle(Style.EMPTY
-				.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ITEM, new HoverEvent.ItemStackInfo(item)))));
+				.withHoverEvent(new HoverEvent.ShowItem(net.minecraft.world.item.ItemStackTemplate.fromNonEmptyStack(item)))));
 
 		if (!unfinished && forBook)
 			tc.append(" \u2714");

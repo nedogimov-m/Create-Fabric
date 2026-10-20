@@ -1,0 +1,8 @@
+{
+  "parent": "create:block/connected_glass_pane/post",
+  "textures": {
+    "edge": "minecraft:block/mangrove_planks",
+    "pane": "create:block/palettes/mangrove_window",
+    "particle": "minecraft:block/mangrove_planks"
+  }
+}

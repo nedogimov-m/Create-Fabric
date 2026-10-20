@@ -1,0 +1,8 @@
+{
+  "values": [
+    "#minecraft:climbable",
+    "#minecraft:cauldrons",
+    "#minecraft:saplings"
+  ],
+  "replace": false
+}

@@ -1,209 +1,77 @@
 package com.simibubi.create.content.contraptions.actors.roller;
 
-import java.util.List;
-
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
+import com.simibubi.create.AllBlockEntityTypes;
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
 import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.INamedIconOptions;
-import com.simibubi.create.foundation.blockEntity.behaviour.scrollValue.ScrollOptionBehaviour;
-import com.simibubi.create.foundation.gui.AllIcons;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.lang.Lang;
-import net.createmod.catnip.math.AngleHelper;
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.EntityBlock;
-import net.minecraft.world.level.block.StairBlock;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.shapes.Shapes;
-import net.minecraft.world.phys.shapes.VoxelShape;
 
-public class RollerBlockEntity extends SmartBlockEntity {
-
-	// For simulations such as Ponder
-	private float manuallyAnimatedSpeed;
-
-	public FilteringBehaviour filtering;
-	public ScrollOptionBehaviour<RollingMode> mode;
-
-	private boolean dontPropagate;
-
-	public RollerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		dontPropagate = false;
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(filtering = new FilteringBehaviour(this, new RollerValueBox(3)));
-		behaviours.add(mode = new ScrollOptionBehaviour<>(RollingMode.class,
-			CreateLang.translateDirect("contraptions.roller_mode"), this, new RollerValueBox(-3)));
-
-		filtering.setLabel(CreateLang.translateDirect("contraptions.mechanical_roller.pave_material"));
-		filtering.withCallback(this::onFilterChanged);
-		filtering.withPredicate(this::isValidMaterial);
-		mode.withCallback(this::onModeChanged);
-	}
-
-	protected void onModeChanged(int mode) {
-		shareValuesToAdjacent();
-	}
-
-	protected void onFilterChanged(ItemStack newFilter) {
-		shareValuesToAdjacent();
-	}
-
-	protected boolean isValidMaterial(ItemStack newFilter) {
-		if (newFilter.isEmpty())
-			return true;
-		BlockState appliedState = RollerMovementBehaviour.getStateToPaveWith(newFilter);
-		if (appliedState.isAir())
-			return false;
-		if (appliedState.getBlock() instanceof EntityBlock)
-			return false;
-		if (appliedState.getBlock() instanceof StairBlock)
-			return false;
-		VoxelShape shape = appliedState.getShape(level, worldPosition);
-		if (shape.isEmpty() || !shape.bounds()
-			.equals(Shapes.block()
-				.bounds()))
-			return false;
-		VoxelShape collisionShape = appliedState.getCollisionShape(level, worldPosition);
-		if (collisionShape.isEmpty())
-			return false;
-		return true;
-	}
-
-	@Override
-	protected AABB createRenderBoundingBox() {
-		return new AABB(worldPosition).inflate(1);
-	}
-
-	public float getAnimatedSpeed() {
-		return manuallyAnimatedSpeed;
-	}
-
-	public void setAnimatedSpeed(float speed) {
-		manuallyAnimatedSpeed = speed;
-	}
-
-	public void searchForSharedValues() {
-		BlockState blockState = getBlockState();
-		Direction facing = blockState.getOptionalValue(RollerBlock.FACING)
-			.orElse(Direction.SOUTH);
-
-		for (int side : Iterate.positiveAndNegative) {
-			BlockPos pos = worldPosition.relative(facing.getClockWise(), side);
-			if (level.getBlockState(pos) != blockState)
-				continue;
-			if (!(level.getBlockEntity(pos) instanceof RollerBlockEntity otherRoller))
-				continue;
-			acceptSharedValues(otherRoller.mode.getValue(), otherRoller.filtering.getFilter());
-			shareValuesToAdjacent();
-			break;
-		}
-	}
-
-	protected void acceptSharedValues(int mode, ItemStack filter) {
-		dontPropagate = true;
-		this.filtering.setFilter(filter.copy());
-		this.mode.setValue(mode);
-		dontPropagate = false;
-		notifyUpdate();
-	}
-
-	public void shareValuesToAdjacent() {
-		if (dontPropagate || level.isClientSide())
-			return;
-		BlockState blockState = getBlockState();
-		Direction facing = blockState.getOptionalValue(RollerBlock.FACING)
-			.orElse(Direction.SOUTH);
-
-		for (int side : Iterate.positiveAndNegative) {
-			for (int i = 1; i < 100; i++) {
-				BlockPos pos = worldPosition.relative(facing.getClockWise(), side * i);
-				if (level.getBlockState(pos) != blockState)
-					break;
-				if (!(level.getBlockEntity(pos) instanceof RollerBlockEntity otherRoller))
-					break;
-				otherRoller.acceptSharedValues(mode.getValue(), filtering.getFilter());
-			}
-		}
-	}
-
-	static enum RollingMode implements INamedIconOptions {
-
-		TUNNEL_PAVE(AllIcons.I_ROLLER_PAVE),
-		STRAIGHT_FILL(AllIcons.I_ROLLER_FILL),
-		WIDE_FILL(AllIcons.I_ROLLER_WIDE_FILL),
-
-		;
-
-		private String translationKey;
-		private AllIcons icon;
-
-		private RollingMode(AllIcons icon) {
-			this.icon = icon;
-			translationKey = "create.contraptions.roller_mode." + Lang.asId(name());
-		}
-
-		@Override
-		public AllIcons getIcon() {
-			return icon;
-		}
-
-		@Override
-		public String getTranslationKey() {
-			return translationKey;
-		}
-
-	}
-
-	private final class RollerValueBox extends ValueBoxTransform {
-
-		private int hOffset;
-
-		public RollerValueBox(int hOffset) {
-			this.hOffset = hOffset;
-		}
-
-		@Override
-		public void rotate(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms) {
-			Direction facing = state.getValue(RollerBlock.FACING);
-			float yRot = AngleHelper.horizontalAngle(facing) + 180;
-			TransformStack.of(ms)
-				.rotateYDegrees(yRot)
-				.rotateXDegrees(90);
-		}
-
-		@Override
-		public boolean testHit(LevelAccessor level, BlockPos pos, BlockState state, Vec3 localHit) {
-			Vec3 offset = getLocalOffset(level, pos, state);
-			if (offset == null)
-				return false;
-			return localHit.distanceTo(offset) < scale / 3;
-		}
-
-		@Override
-		public Vec3 getLocalOffset(LevelAccessor level, BlockPos pos, BlockState state) {
-			Direction facing = state.getValue(RollerBlock.FACING);
-			float stateAngle = AngleHelper.horizontalAngle(facing) + 180;
-			return VecHelper.rotateCentered(VecHelper.voxelSpace(8 + hOffset, 15.5f, 11), stateAngle, Axis.Y);
-		}
-
-	}
-
+public class RollerBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements BlockEntityBehaviour.Provider {
+    public enum RollingMode {
+        TUNNEL_PAVE, STRAIGHT_FILL, WIDE_FILL;
+        public Component label() { return Component.translatable("create.contraptions.roller_mode." + name().toLowerCase(java.util.Locale.ROOT)); }
+    }
+    public final FilteringBehaviour filtering = new FilteringBehaviour(this).withPredicate(this::isValidMaterial).withCallback(stack -> shareValuesToAdjacent()).setLabel(Component.translatable("create.contraptions.mechanical_roller.pave_material"));
+    private RollingMode mode = RollingMode.TUNNEL_PAVE;
+    private boolean dontPropagate;
+    private float manuallyAnimatedSpeed;
+    public RollerBlockEntity(BlockPos pos, BlockState state) { this(AllBlockEntityTypes.MECHANICAL_ROLLER, pos, state); }
+    public RollerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) { super(type, pos, state); }
+    public RollingMode getMode() { return mode; }
+    public void setMode(RollingMode mode) { this.mode = java.util.Objects.requireNonNull(mode); shareValuesToAdjacent(); notifyUpdate(); }
+    public float getAnimatedSpeed() { return manuallyAnimatedSpeed; }
+    public void setAnimatedSpeed(float speed) { manuallyAnimatedSpeed = Float.isFinite(speed) ? speed : 0; }
+    public boolean isValidMaterial(ItemStack stack) {
+        if (stack.isEmpty()) return true;
+        var state = RollerMovementBehaviour.getStateToPaveWith(stack);
+        if (state.isAir() || state.getBlock() instanceof EntityBlock || state.getBlock() instanceof StairBlock) return false;
+        var shape = state.getShape(level, worldPosition);
+        return !shape.isEmpty() && shape.bounds().equals(Shapes.block().bounds()) && !state.getCollisionShape(level, worldPosition).isEmpty();
+    }
+    public void searchForSharedValues() {
+        if (level == null || level.isClientSide()) return;
+        var state = getBlockState(); var side = state.getValue(RollerBlock.FACING).getClockWise();
+        for (int sign : new int[]{1, -1}) {
+            var pos = worldPosition.relative(side, sign);
+            if (LoadedLevelAccess.blockState(level, pos) == state && LoadedLevelAccess.blockEntity(level, pos) instanceof RollerBlockEntity other) {
+                acceptSharedValues(other.mode, other.filtering.getFilter()); shareValuesToAdjacent(); break;
+            }
+        }
+    }
+    protected void acceptSharedValues(RollingMode mode, ItemStack filter) {
+        dontPropagate = true;
+        try { filtering.setFilter(filter.copy()); this.mode = mode; } finally { dontPropagate = false; }
+        notifyUpdate();
+    }
+    public void shareValuesToAdjacent() {
+        if (dontPropagate || level == null || level.isClientSide()) return;
+        var state = getBlockState(); var side = state.getValue(RollerBlock.FACING).getClockWise();
+        for (int sign : new int[]{1, -1}) for (int i = 1; i < 100; i++) {
+            var pos = worldPosition.relative(side, i * sign);
+            if (LoadedLevelAccess.blockState(level, pos) != state || !(LoadedLevelAccess.blockEntity(level, pos) instanceof RollerBlockEntity other)) break;
+            other.acceptSharedValues(mode, filtering.getFilter());
+        }
+    }
+    public void notifyUpdate() {
+        setChanged(); if (level != null && !level.isClientSide()) level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), Block.UPDATE_CLIENTS);
+    }
+    @Override protected void write(ValueOutput out, boolean clientPacket) { super.write(out, clientPacket);  out.putInt("ScrollValue", mode.ordinal()); }
+    @Override protected void read(ValueInput in, boolean clientPacket) { super.read(in, clientPacket);  mode = RollingMode.values()[Math.clamp(in.getIntOr("ScrollValue", 0), 0, 2)]; }
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket() { return ClientboundBlockEntityDataPacket.create(this); }
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+        var out = TagValueOutput.createWithContext(net.minecraft.util.ProblemReporter.DISCARDING, registries); write(out, true); return out.buildResult();
+    }
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (filtering != null) behaviours.add(filtering);
+    }
 }

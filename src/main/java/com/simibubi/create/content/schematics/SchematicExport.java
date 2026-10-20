@@ -1,73 +1,41 @@
 package com.simibubi.create.content.schematics;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-
-import org.jetbrains.annotations.Nullable;
-
 import com.simibubi.create.Create;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.foundation.utility.FilesHelper;
-
+import com.simibubi.create.foundation.utility.*;
+import java.io.IOException;
+import java.nio.file.*;
+import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtIo;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.*;
+import org.jetbrains.annotations.Nullable;
 
-public class SchematicExport {
-	/**
-	 * Save a schematic to a file from a world.
-	 *
-	 * @param dir       the directory the schematic will be created in
-	 * @param fileName  the ideal name of the schematic, may not be the name of the created file
-	 * @param overwrite whether overwriting an existing schematic is allowed
-	 * @param level     the level where the schematic structure is placed
-	 * @param first     the first corner of the schematic area
-	 * @param second    the second corner of the schematic area
-	 * @return a SchematicExportResult, or null if an error occurred.
-	 */
-	@Nullable
-	public static SchematicExportResult saveSchematic(Path dir, String fileName, boolean overwrite, Level level, BlockPos first, BlockPos second) {
-		BoundingBox bb = BoundingBox.fromCorners(first, second);
-		BlockPos origin = new BlockPos(bb.minX(), bb.minY(), bb.minZ());
-		BlockPos bounds = new BlockPos(bb.getXSpan(), bb.getYSpan(), bb.getZSpan());
-
-		StructureTemplate structure = new StructureTemplate();
-		structure.fillFromWorld(level, origin, bounds, true, Blocks.AIR);
-		CompoundTag data = structure.save(new CompoundTag());
-		SchematicAndQuillItem.replaceStructureVoidWithAir(data);
-		SchematicAndQuillItem.clampGlueBoxes(level, new AABB(Vec3.atLowerCornerOf(origin), Vec3.atLowerCornerOf(origin.offset(bounds))), data);
-
-		if (fileName.isEmpty())
-			fileName = CreateLang.translateDirect("schematicAndQuill.fallbackName").getString();
-		if (!overwrite)
-			fileName = FilesHelper.findFirstValidFilename(fileName, dir, "nbt");
-		if (!fileName.endsWith(".nbt"))
-			fileName += ".nbt";
-		Path file = dir.resolve(fileName).toAbsolutePath();
-
-		try {
-			Files.createDirectories(dir);
-			boolean overwritten = Files.deleteIfExists(file);
-			try (OutputStream out = Files.newOutputStream(file, StandardOpenOption.CREATE)) {
-				NbtIo.writeCompressed(data, out);
-			}
-			return new SchematicExportResult(file, dir, fileName, overwritten, origin, bounds);
-		} catch (IOException e) {
-			Create.LOGGER.error("An error occurred while saving schematic [" + fileName + "]", e);
-			return null;
-		}
-	}
-
-	public record SchematicExportResult(Path file, Path dir, String fileName, boolean overwritten, BlockPos origin,
-										BlockPos bounds) {
-	}
+/** Actual native structure export; a complete validated compressed file is published atomically. */
+public final class SchematicExport {
+    public record SchematicExportResult(Path file,Path dir,String fileName,boolean overwritten,BlockPos origin,BlockPos bounds){}
+    public static CompoundTag capture(Level level,BlockPos first,BlockPos second)throws IOException{
+        var box=BoundingBox.fromCorners(first,second);var origin=new BlockPos(box.minX(),box.minY(),box.minZ());var size=new BlockPos(box.getXSpan(),box.getYSpan(),box.getZSpan());
+        var extent=new CompoundTag();extent.put("size",SchematicAndQuillItem.integers(size.getX(),size.getY(),size.getZ()));SchematicFiles.bounds(extent);
+        if(!level.isInValidBounds(first)||!level.isInValidBounds(second))throw new IOException("Native schematic source lies outside valid world bounds");
+        var glueQueries=new java.util.HashSet<Long>();
+        for(int x=box.minX()>>4;x<=box.maxX()>>4;x++)for(int z=box.minZ()>>4;z<=box.maxZ()>>4;z++){
+            if(!LoadedEntityAccess.isReady(level,x,z))throw new IOException("Native schematic source terrain/entities are not fully ready");
+            try{LoadedEntityAccess.requireGlueQueriesReady(level,new BlockPos(x<<4,origin.getY(),z<<4),glueQueries);}catch(com.simibubi.create.content.contraptions.AssemblyException unavailable){throw new IOException("Native schematic glue query has incomplete visible entity storage",unavailable);}
+        }
+        var template=new StructureTemplate();template.fillFromWorld(level,origin,size,true,List.of(Blocks.AIR));var tag=template.save(new CompoundTag());
+        SchematicAndQuillItem.replaceStructureVoidWithAir(tag);SchematicAndQuillItem.clampGlueBoxes(level,new AABB(Vec3.atLowerCornerOf(origin),Vec3.atLowerCornerOf(origin.offset(size))),tag);return tag;
+    }
+    @Nullable public static SchematicExportResult saveSchematic(Path directory,String requested,boolean overwrite,Level level,BlockPos first,BlockPos second){
+        try{
+            String name=requested.isBlank()?"Schematic":requested;name=SchematicFiles.fileName(name.endsWith(".nbt")?name:name+".nbt");
+            if(!overwrite){String stem=name.substring(0,name.length()-4);for(int index=1;Files.exists(SchematicFiles.contained(directory,name),LinkOption.NOFOLLOW_LINKS);index++)name=SchematicFiles.fileName(stem+"_"+index+".nbt");}
+            var tag=capture(level,first,second);var target=SchematicFiles.contained(directory,name);boolean existed=Files.exists(target,LinkOption.NOFOLLOW_LINKS);var file=SchematicFiles.writeAtomic(directory,name,tag,overwrite,Long.MAX_VALUE);
+            var box=BoundingBox.fromCorners(first,second);return new SchematicExportResult(file,directory,name,existed,new BlockPos(box.minX(),box.minY(),box.minZ()),new BlockPos(box.getXSpan(),box.getYSpan(),box.getZSpan()));
+        }catch(IOException failure){Create.LOGGER.error("Unable to save actual native schematic {}",requested,failure);return null;}
+    }
+    private SchematicExport(){}
 }

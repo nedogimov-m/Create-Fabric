@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    "create:experience_block",
+    "create:zinc_block",
+    "create:brass_block"
+  ]
+}

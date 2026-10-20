@@ -1,47 +1,16 @@
 package com.simibubi.create.content.logistics.tunnel;
 
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.content.kinetics.belt.BeltBlockEntity;
-import com.simibubi.create.content.kinetics.belt.BeltBlockEntity.CasingType;
-import com.simibubi.create.content.kinetics.belt.BeltHelper;
-
+import com.simibubi.create.content.kinetics.belt.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
-public class BeltTunnelItem extends BlockItem {
-
-	public BeltTunnelItem(Block p_i48527_1_, Properties p_i48527_2_) {
-		super(p_i48527_1_, p_i48527_2_);
-	}
-
-	@Override
-	protected boolean canPlace(BlockPlaceContext ctx, BlockState state) {
-		Player playerentity = ctx.getPlayer();
-		CollisionContext iselectioncontext =
-			playerentity == null ? CollisionContext.empty() : CollisionContext.of(playerentity);
-		Level world = ctx.getLevel();
-		BlockPos pos = ctx.getClickedPos();
-		return (!this.mustSurvive() || AllBlocks.ANDESITE_TUNNEL.get()
-			.isValidPositionForPlacement(state, world, pos)) && world.isUnobstructed(state, pos, iselectioncontext);
-	}
-
-	@Override
-	protected boolean updateCustomBlockEntityTag(BlockPos pos, Level world, Player p_195943_3_, ItemStack p_195943_4_,
-		BlockState state) {
-		boolean flag = super.updateCustomBlockEntityTag(pos, world, p_195943_3_, p_195943_4_, state);
-		if (!world.isClientSide) {
-			BeltBlockEntity belt = BeltHelper.getSegmentBE(world, pos.below());
-			if (belt != null && belt.casing == CasingType.NONE)
-				belt.setCasingType(AllBlocks.ANDESITE_TUNNEL.has(state) ? CasingType.ANDESITE : CasingType.BRASS);
-		}
-		return flag;
-	}
-
+public final class BeltTunnelItem extends BlockItem {
+    public BeltTunnelItem(BeltTunnelBlock block,Properties properties){super(block,properties);}
+    @Override protected boolean canPlace(BlockPlaceContext context,BlockState state){var player=context.getPlayer();return ((BeltTunnelBlock)getBlock()).isValidPositionForPlacement(state,context.getLevel(),context.getClickedPos())&&context.getLevel().isUnobstructed(state,context.getClickedPos(),player==null?CollisionContext.empty():CollisionContext.of(player));}
+    @Override public net.minecraft.world.InteractionResult place(BlockPlaceContext context){var result=super.place(context);if(result.consumesAction()&&!context.getLevel().isClientSide()){var belt=BeltHelper.getSegmentBE(context.getLevel(),context.getClickedPos().below());if(belt!=null&&belt.getCasingType()==BeltBlockEntity.CasingType.NONE)belt.setCasingType(((BeltTunnelBlock)getBlock()).brass?BeltBlockEntity.CasingType.BRASS:BeltBlockEntity.CasingType.ANDESITE);}return result;}
 }

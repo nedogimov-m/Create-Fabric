@@ -1,52 +1,22 @@
 package com.simibubi.create.content.equipment.bell;
 
-import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
-public class HauntedBellBlock extends AbstractBellBlock<HauntedBellBlockEntity> {
-
-	public HauntedBellBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public BlockEntityType<? extends HauntedBellBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.HAUNTED_BELL.get();
-	}
-	
-	@Override
-	protected boolean ring(Level world, BlockPos pos, Direction direction, Player player) {
-		boolean ring = super.ring(world, pos, direction, player);
-		if (ring)
-			AllAdvancements.HAUNTED_BELL.awardTo(player);
-		return ring;
-	}
-
-	@Override
-	public Class<HauntedBellBlockEntity> getBlockEntityClass() {
-		return HauntedBellBlockEntity.class;
-	}
-
-	@Override
-	public void playSound(Level world, BlockPos pos) {
-		AllSoundEvents.HAUNTED_BELL_USE.playOnServer(world, pos, 4f, 1f);
-	}
-
-	@Override
-	public void onPlace(BlockState state, Level world, BlockPos pos, BlockState oldState, boolean isMoving) {
-		if (oldState.getBlock() != this && !world.isClientSide)
-			withBlockEntityDo(world, pos, hbte -> {
-				hbte.effectTicks = HauntedBellBlockEntity.EFFECT_TICKS;
-				hbte.sendData();
-			});
-	}
-
+public final class HauntedBellBlock extends AbstractBellBlock {
+    public HauntedBellBlock(Properties properties) { super(properties); }
+    @Override protected boolean ring(Level level,BlockPos pos,net.minecraft.core.Direction direction,net.minecraft.world.entity.player.Player player) {
+        boolean rung=super.ring(level,pos,direction,player);
+        if(rung && player instanceof net.minecraft.server.level.ServerPlayer server && server.level()==level)
+            com.simibubi.create.foundation.advancement.NativeDeviceAdvancements.hauntedBellRung(server);
+        return rung;
+    }
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state) { return new HauntedBellBlockEntity(pos,state); }
+    @Override public void playSound(Level level,BlockPos pos) { if(!level.isClientSide())level.playSound(null,pos,AllSoundEvents.HAUNTED_BELL_USE,SoundSource.BLOCKS,4,1); }
+    @Override protected void onPlace(BlockState state,Level level,BlockPos pos,BlockState previous,boolean moved) { if(!level.isClientSide()&&!previous.is(this)&&LoadedLevelAccess.blockEntity(level,pos) instanceof HauntedBellBlockEntity bell)bell.awaken(); }
 }

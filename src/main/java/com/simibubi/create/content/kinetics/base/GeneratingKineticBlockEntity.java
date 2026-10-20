@@ -1,169 +1,103 @@
 package com.simibubi.create.content.kinetics.base;
 
-import java.util.List;
-
-import com.simibubi.create.content.kinetics.KineticNetwork;
-import com.simibubi.create.content.kinetics.base.IRotate.SpeedLevel;
-import com.simibubi.create.content.kinetics.base.IRotate.StressImpact;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import net.minecraft.ChatFormatting;
+import com.simibubi.create.content.kinetics.KineticNetworks;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
-import net.minecraft.util.Mth;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 
+/** Source generating transitions on the canonical native topology and genuine source stress network. */
 public abstract class GeneratingKineticBlockEntity extends KineticBlockEntity {
+    public boolean reActivateSource;
+    private long generatorTick = Long.MIN_VALUE;
 
-	public boolean reActivateSource;
+    public GeneratingKineticBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+        super(type, pos, state);
+    }
 
-	public GeneratingKineticBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
+    protected void notifyStressCapacityChange(float capacity) {
+        var group = getOrCreateNetwork();
+        if (group != null) group.updateCapacityFor(this, capacity);
+    }
 
-	protected void notifyStressCapacityChange(float capacity) {
-		getOrCreateNetwork().updateCapacityFor(this, capacity);
-	}
+    @Override public void removeSource() {
+        if (hasSource() && isSource()) reActivateSource = true;
+        super.removeSource();
+    }
 
-	@Override
-	public void removeSource() {
-		if (hasSource() && isSource())
-			reActivateSource = true;
-		super.removeSource();
-	}
+    @Override public void setSource(BlockPos source) {
+        super.setSource(source);
+        checkSourceReactivation();
+    }
 
-	@Override
-	public void setSource(BlockPos source) {
-		super.setSource(source);
-		BlockEntity blockEntity = level.getBlockEntity(source);
-		if (!(blockEntity instanceof KineticBlockEntity sourceBE))
-			return;
-		if (reActivateSource && Math.abs(sourceBE.getSpeed()) >= Math.abs(getGeneratedSpeed()))
-			reActivateSource = false;
-	}
+    @Override public void setKineticProvenance(BlockPos generator, BlockPos upstream, net.minecraft.core.Direction face) {
+        boolean lostSource = hasSource() && upstream == null && isSource();
+        super.setKineticProvenance(generator, upstream, face);
+        if (lostSource) reActivateSource = true;
+        checkSourceReactivation();
+    }
 
-	@Override
-	public void tick() {
-		super.tick();
-		if (reActivateSource) {
-			updateGeneratedRotation();
-			reActivateSource = false;
-		}
-	}
+    private void checkSourceReactivation() {
+        if (reActivateSource && level != null && hasSource()
+                && LoadedLevelAccess.blockEntity(level, getSource()) instanceof KineticBlockEntity source
+                && Math.abs(source.getSpeed()) >= Math.abs(getGeneratedSpeed())) reActivateSource = false;
+    }
 
-	@Override
-	public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
-		boolean added = super.addToGoggleTooltip(tooltip, isPlayerSneaking);
-		if (!StressImpact.isEnabled())
-			return added;
+    /** Called by the real Kinetic tick bridge, including source addon instance tick(). */
+    public final void tickGenerator() {
+        if (level == null || level.isClientSide() || generatorTick == level.getGameTime()) return;
+        generatorTick = level.getGameTime();
+        if (reActivateSource) {
+            reActivateSource = false;
+            updateGeneratedRotation();
+        }
+    }
 
-		float stressBase = calculateAddedStressCapacity();
-		if (Mth.equal(stressBase, 0))
-			return added;
+    public void updateGeneratedRotation() {
+        if (!(level instanceof ServerLevel server) || isVirtual() || !KineticNetworks.isLive(server, this)) return;
+        float generated = getGeneratedSpeed();
+        float previous = speed;
+        beginNetworkUpdate();
+        try {
+            if (previous != generated) applyNewSpeed(previous, generated);
+            if (hasNetwork() && generated != 0) {
+                var group = getOrCreateNetwork();
+                notifyStressCapacityChange(calculateAddedStressCapacity());
+                group.updateStressFor(this, calculateStressApplied());
+                group.updateStress();
+            }
+            forceSpeedCallback();
+            setChanged(); sendData();
+            KineticNetworks.generatorChanged(server, this);
+        } finally { endNetworkUpdate(); }
+    }
 
-		CreateLang.translate("gui.goggles.generator_stats")
-			.forGoggles(tooltip);
-		CreateLang.translate("tooltip.capacityProvided")
-			.style(ChatFormatting.GRAY)
-			.forGoggles(tooltip);
+    public void applyNewSpeed(float previousSpeed, float generatedSpeed) {
+        if (!(level instanceof ServerLevel server) || isVirtual() || !KineticNetworks.isLive(server, this)) return;
+        if (generatedSpeed == 0) {
+            if (hasSource()) {
+                notifyStressCapacityChange(0);
+                if (hasNetwork()) getOrCreateNetwork().updateStressFor(this, calculateStressApplied());
+                return;
+            }
+            detachKinetics(); setSpeed(0); setNetwork(null); return;
+        }
+        if (previousSpeed == 0) {
+            setSpeed(generatedSpeed); setNetwork(createNetworkId()); attachKinetics(); return;
+        }
+        if (hasSource()) {
+            if (Math.abs(previousSpeed) >= Math.abs(generatedSpeed)) {
+                if (Math.signum(previousSpeed) != Math.signum(generatedSpeed)) KineticNetworks.destroyForConflict(this);
+                return;
+            }
+            detachKinetics(); setSpeed(generatedSpeed);
+            setKineticProvenance(worldPosition, null, null);
+            setNetwork(createNetworkId()); attachKinetics(); return;
+        }
+        detachKinetics(); setSpeed(generatedSpeed); attachKinetics();
+    }
 
-		float speed = getTheoreticalSpeed();
-		if (speed != getGeneratedSpeed() && speed != 0)
-			stressBase *= getGeneratedSpeed() / speed;
-
-		float stressTotal = Math.abs(stressBase * speed);
-
-		CreateLang.number(stressTotal)
-			.translate("generic.unit.stress")
-			.style(ChatFormatting.AQUA)
-			.space()
-			.add(CreateLang.translate("gui.goggles.at_current_speed")
-				.style(ChatFormatting.DARK_GRAY))
-			.forGoggles(tooltip, 1);
-
-		return true;
-	}
-
-	public void updateGeneratedRotation() {
-		float speed = getGeneratedSpeed();
-		float prevSpeed = this.speed;
-
-		if (level == null || level.isClientSide)
-			return;
-
-		if (prevSpeed != speed) {
-			if (!hasSource()) {
-				SpeedLevel levelBefore = SpeedLevel.of(this.speed);
-				SpeedLevel levelafter = SpeedLevel.of(speed);
-				if (levelBefore != levelafter)
-					effects.queueRotationIndicators();
-			}
-
-			applyNewSpeed(prevSpeed, speed);
-		}
-
-		if (hasNetwork() && speed != 0) {
-			KineticNetwork network = getOrCreateNetwork();
-			notifyStressCapacityChange(calculateAddedStressCapacity());
-			getOrCreateNetwork().updateStressFor(this, calculateStressApplied());
-			network.updateStress();
-		}
-
-		onSpeedChanged(prevSpeed);
-		sendData();
-	}
-
-	public void applyNewSpeed(float prevSpeed, float speed) {
-
-		// Speed changed to 0
-		if (speed == 0) {
-			if (hasSource()) {
-				notifyStressCapacityChange(0);
-				getOrCreateNetwork().updateStressFor(this, calculateStressApplied());
-				return;
-			}
-			detachKinetics();
-			setSpeed(0);
-			setNetwork(null);
-			return;
-		}
-
-		// Now turning - create a new Network
-		if (prevSpeed == 0) {
-			setSpeed(speed);
-			setNetwork(createNetworkId());
-			attachKinetics();
-			return;
-		}
-
-		// Change speed when overpowered by other generator
-		if (hasSource()) {
-
-			// Staying below Overpowered speed
-			if (Math.abs(prevSpeed) >= Math.abs(speed)) {
-				if (Math.signum(prevSpeed) != Math.signum(speed))
-					level.destroyBlock(worldPosition, true);
-				return;
-			}
-
-			// Faster than attached network -> become the new source
-			detachKinetics();
-			setSpeed(speed);
-			source = null;
-			setNetwork(createNetworkId());
-			attachKinetics();
-			return;
-		}
-
-		// Reapply source
-		detachKinetics();
-		setSpeed(speed);
-		attachKinetics();
-	}
-
-	public Long createNetworkId() {
-		return worldPosition.asLong();
-	}
+    /** Source network identity is the actual generating cell, matching native provenance. */
+    public Long createNetworkId() { return worldPosition.asLong(); }
 }

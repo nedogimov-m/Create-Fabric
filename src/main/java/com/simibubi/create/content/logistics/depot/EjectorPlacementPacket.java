@@ -1,65 +1,26 @@
 package com.simibubi.create.content.logistics.depot;
 
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllPackets;
-import net.createmod.catnip.net.base.ClientboundPacketPayload;
-import net.createmod.catnip.net.base.ServerboundPacketPayload;
-
-import io.netty.buffer.ByteBuf;
-import net.minecraft.client.player.LocalPlayer;
+import com.simibubi.create.Create;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
-public record EjectorPlacementPacket(int h, int v, BlockPos pos, Direction facing) implements ServerboundPacketPayload {
-	public static final StreamCodec<ByteBuf, EjectorPlacementPacket> STREAM_CODEC = StreamCodec.composite(
-			ByteBufCodecs.INT, EjectorPlacementPacket::h,
-			ByteBufCodecs.INT, EjectorPlacementPacket::v,
-			BlockPos.STREAM_CODEC, EjectorPlacementPacket::pos,
-			Direction.STREAM_CODEC, EjectorPlacementPacket::facing,
-	        EjectorPlacementPacket::new
-	);
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.PLACE_EJECTOR;
-	}
-
-	@Override
-	public void handle(ServerPlayer player) {
-		Level world = player.level();
-		if (!world.isLoaded(pos))
-			return;
-		BlockEntity blockEntity = world.getBlockEntity(pos);
-		BlockState state = world.getBlockState(pos);
-		if (blockEntity instanceof EjectorBlockEntity)
-			((EjectorBlockEntity) blockEntity).setTarget(h, v);
-		if (AllBlocks.WEIGHTED_EJECTOR.has(state))
-			world.setBlockAndUpdate(pos, state.setValue(EjectorBlock.HORIZONTAL_FACING, facing));
-	}
-
-	public record ClientBoundRequest(BlockPos pos) implements ClientboundPacketPayload {
-		public static final StreamCodec<ByteBuf, ClientBoundRequest> STREAM_CODEC = BlockPos.STREAM_CODEC.map(
-				ClientBoundRequest::new, ClientBoundRequest::pos
-		);
-
-		@Override
-		public PacketTypeProvider getTypeProvider() {
-			return AllPackets.S_PLACE_EJECTOR;
-		}
-
-		@Override
-		@OnlyIn(Dist.CLIENT)
-		public void handle(LocalPlayer player) {
-			EjectorTargetHandler.flushSettings(pos);
-		}
-	}
-
+/** Source target parameters bound to an actual paid placement's one-use server request. */
+public record EjectorPlacementPacket(int h,int v,BlockPos pos,Direction facing,long nonce) implements CustomPacketPayload {
+    public static final Type<EjectorPlacementPacket> TYPE=new Type<>(Create.asResource("place_ejector"));
+    public static final StreamCodec<RegistryFriendlyByteBuf,EjectorPlacementPacket> STREAM_CODEC=StreamCodec.of((b,p)->{
+        b.writeInt(p.h);b.writeInt(p.v);b.writeBlockPos(p.pos);b.writeEnum(p.facing);b.writeLong(p.nonce);
+    },b->new EjectorPlacementPacket(b.readInt(),b.readInt(),b.readBlockPos(),b.readEnum(Direction.class),b.readLong()));
+    public EjectorPlacementPacket{pos=pos.immutable();java.util.Objects.requireNonNull(facing);}
+    @Override public Type<EjectorPlacementPacket> type(){return TYPE;}
+    public boolean apply(ServerPlayer player){var owner=EjectorNetworking.interactable(player,pos);return owner!=null&&owner.acceptPlacement(player,nonce,h,v,facing);}
+    public record ClientBoundRequest(BlockPos pos,long nonce) implements CustomPacketPayload {
+        public static final Type<ClientBoundRequest> TYPE=new Type<>(Create.asResource("s_place_ejector"));
+        public static final StreamCodec<RegistryFriendlyByteBuf,ClientBoundRequest> STREAM_CODEC=StreamCodec.of((b,p)->{b.writeBlockPos(p.pos);b.writeLong(p.nonce);},b->new ClientBoundRequest(b.readBlockPos(),b.readLong()));
+        public ClientBoundRequest{pos=pos.immutable();}
+        @Override public Type<ClientBoundRequest> type(){return TYPE;}
+    }
 }

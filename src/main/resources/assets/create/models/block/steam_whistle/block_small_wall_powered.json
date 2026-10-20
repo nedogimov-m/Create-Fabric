@@ -1,0 +1,7 @@
+{
+  "parent": "create:block/steam_whistle/block_small_wall",
+  "textures": {
+    "2": "create:block/copper_redstone_plate_powered",
+    "particle": "create:block/copper_redstone_plate_powered"
+  }
+}

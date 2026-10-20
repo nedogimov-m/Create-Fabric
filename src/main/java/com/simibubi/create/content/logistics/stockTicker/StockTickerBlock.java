@@ -1,125 +1,45 @@
 package com.simibubi.create.content.logistics.stockTicker;
 
-import com.mojang.serialization.MapCodec;
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllPartialModels;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
+import com.simibubi.create.*;
 import com.simibubi.create.content.logistics.packagerLink.LogisticallyLinkedBlockItem;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import dev.engine_room.flywheel.lib.model.baked.PartialModel;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.LivingEntity;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.HorizontalDirectionalBlock;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.pathfinder.PathComputationType;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+import net.minecraft.world.phys.shapes.*;
 
-public class StockTickerBlock extends HorizontalDirectionalBlock implements IBE<StockTickerBlockEntity>, IWrenchable {
-
-	public static final MapCodec<StockTickerBlock> CODEC = simpleCodec(StockTickerBlock::new);
-
-	public StockTickerBlock(Properties pProperties) {
-		super(pProperties);
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext pContext) {
-		Direction facing = pContext.getHorizontalDirection()
-			.getOpposite();
-		boolean reverse = pContext.getPlayer() != null && pContext.getPlayer()
-			.isShiftKeyDown();
-		return super.getStateForPlacement(pContext).setValue(FACING, reverse ? facing.getOpposite() : facing);
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> pBuilder) {
-		super.createBlockStateDefinition(pBuilder.add(FACING));
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (stack.getItem() instanceof LogisticallyLinkedBlockItem)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		return onBlockEntityUseItemOn(level, pos, stbe -> {
-			if (!stbe.behaviour.mayInteractMessage(player))
-				return ItemInteractionResult.SUCCESS;
-
-			if (!level.isClientSide() && !stbe.receivedPayments.isEmpty()) {
-				for (int i = 0; i < stbe.receivedPayments.getSlots(); i++)
-					player.getInventory()
-						.placeItemBackInInventory(
-							stbe.receivedPayments.extractItem(i, stbe.receivedPayments.getStackInSlot(i)
-								.getCount(), false));
-				AllSoundEvents.playItemPickup(player);
-				return ItemInteractionResult.SUCCESS;
-			}
-
-			if (player instanceof ServerPlayer sp) {
-				if (stbe.isKeeperPresent())
-					sp.openMenu(stbe.new CategoryMenuProvider(), stbe.getBlockPos());
-				else
-					CreateLang.translate("stock_ticker.keeper_missing")
-						.sendStatus(player);
-			}
-
-			return ItemInteractionResult.SUCCESS;
-		});
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState pState, BlockGetter pLevel, BlockPos pPos, CollisionContext pContext) {
-		return AllShapes.STOCK_TICKER;
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	public PartialModel getHat(LevelAccessor level, BlockPos pos, LivingEntity keeper) {
-		return AllPartialModels.LOGISTICS_HAT;
-	}
-
-	@Override
-	public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pMovedByPiston) {
-		IBE.onRemove(pState, pLevel, pPos, pNewState);
-	}
-
-	@Override
-	public Class<StockTickerBlockEntity> getBlockEntityClass() {
-		return StockTickerBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends StockTickerBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.STOCK_TICKER.get();
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	protected MapCodec<? extends HorizontalDirectionalBlock> codec() {
-		return CODEC;
-	}
+public final class StockTickerBlock extends BaseEntityBlock {
+    public static final EnumProperty<Direction> FACING = BlockStateProperties.HORIZONTAL_FACING;
+    private static final VoxelShape SHAPE = Shapes.or(box(1, 0, 1, 15, 4, 15), box(2, 0, 2, 14, 16, 14));
+    public StockTickerBlock(Properties properties) { super(properties.strength(1.5f, 6).sound(SoundType.NETHERITE_BLOCK).requiresCorrectToolForDrops()); registerDefaultState(defaultBlockState().setValue(FACING, Direction.NORTH)); }
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder) { builder.add(FACING); }
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context) { return defaultBlockState().setValue(FACING, context.getPlayer() != null && context.getPlayer().isShiftKeyDown() ? context.getHorizontalDirection() : context.getHorizontalDirection().getOpposite()); }
+    @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new StockTickerBlockEntity(pos, state); }
+    @Override protected RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
+    @Override protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) { return SHAPE; }
+    @Override protected boolean isPathfindable(BlockState state,net.minecraft.world.level.pathfinder.PathComputationType type){return false;}
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) { return createTickerHelper(type, AllBlockEntityTypes.STOCK_TICKER, (l,p,s,ticker) -> ticker.tick()); }
+    @Override protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit) {
+        if (stack.getItem() instanceof LogisticallyLinkedBlockItem || stack.is(AllItems.WRENCH)) return InteractionResult.PASS;
+        return useWithoutItem(state, level, pos, player, hit);
+    }
+    @Override protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
+        if (player.isSpectator() || player instanceof net.fabricmc.fabric.api.entity.FakePlayer || !player.mayBuild() || !level.mayInteract(player, pos)) return InteractionResult.PASS;
+        if (!level.isClientSide() && LoadedLevelAccess.blockEntity(level, pos) instanceof StockTickerBlockEntity ticker && ticker.behaviour.mayInteractMessage(player)) {
+            if (ticker.hasPayments()) { ticker.retrievePayments(player); level.playSound(null, pos, net.minecraft.sounds.SoundEvents.ITEM_PICKUP, net.minecraft.sounds.SoundSource.PLAYERS, .2f, 1); }
+            else if (ticker.isKeeperPresent()) StockTickerMenu.open(player, ticker, true);
+            else player.sendOverlayMessage(net.minecraft.network.chat.Component.translatable("create.stock_ticker.keeper_missing"));
+        }
+        return InteractionResult.SUCCESS;
+    }
+    @Override protected BlockState rotate(BlockState state, Rotation rotation) { return state.setValue(FACING, rotation.rotate(state.getValue(FACING))); }
+    @Override protected BlockState mirror(BlockState state, Mirror mirror) { return state.rotate(mirror.getRotation(state.getValue(FACING))); }
 }

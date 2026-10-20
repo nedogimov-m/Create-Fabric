@@ -1,71 +1,25 @@
 package com.simibubi.create.content.redstone.displayLink;
 
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-
-import net.createmod.catnip.nbt.NBTHelper;
-import net.createmod.catnip.animation.LerpedFloat;
-import net.createmod.catnip.animation.LerpedFloat.Chaser;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.Vec3;
 
-public abstract class LinkWithBulbBlockEntity extends SmartBlockEntity {
-
-	private LerpedFloat glow;
-	private boolean sendPulse;
-
-	public LinkWithBulbBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		glow = LerpedFloat.linear()
-			.startWithValue(0);
-		glow.chase(0, 0.5f, Chaser.EXP);
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		if (isVirtual() || level.isClientSide())
-			glow.tickChaser();
-	}
-
-	public float getGlow(float partialTicks) {
-		return glow.getValue(partialTicks);
-	}
-
-	public void sendPulseNextSync() {
-		sendPulse = true;
-	}
-
-	public void pulse() {
-		glow.setValue(2);
-	}
-
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-		if (clientPacket && sendPulse) {
-			sendPulse = false;
-			NBTHelper.putMarker(tag, "Pulse");
-		}
-	}
-
-	@Override
-	protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(tag, registries, clientPacket);
-		if (clientPacket && tag.contains("Pulse"))
-			pulse();
-	}
-
-	public Vec3 getBulbOffset(BlockState state) {
-		return Vec3.ZERO;
-	}
-
-	public Direction getBulbFacing(BlockState state) {
-		return state.getValue(DisplayLinkBlock.FACING);
-	}
-
+/** Real source pulse/glow state on a native block entity; no SmartBlockEntity facade. */
+public abstract class LinkWithBulbBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity {
+    private float glow,previousGlow;
+    private boolean sendPulse;
+    protected LinkWithBulbBlockEntity(BlockEntityType<?> type,BlockPos pos,BlockState state){super(type,pos,state);}
+    protected void tickGlow(){previousGlow=glow;glow*=.5f;if(glow<.001f)glow=0;}
+    public float getGlow(float partial){return previousGlow+(glow-previousGlow)*partial;}
+    public void sendPulseNextSync(){sendPulse=true;}
+    public void pulse(){glow=2;}
+    public Vec3 getBulbOffset(BlockState state){return Vec3.ZERO;}
+    public Direction getBulbFacing(BlockState state){return state.getValue(DisplayLinkBlock.FACING);}
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){var tag=super.getUpdateTag(registries);if(sendPulse){tag.putBoolean("Pulse",true);sendPulse=false;}return tag;}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);if(level!=null&&level.isClientSide()&&in.getBooleanOr("Pulse",false))pulse();}
 }

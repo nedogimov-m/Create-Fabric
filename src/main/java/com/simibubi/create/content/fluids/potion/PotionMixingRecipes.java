@@ -1,179 +1,55 @@
 package com.simibubi.create.content.fluids.potion;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
-import com.simibubi.create.Create;
-import com.simibubi.create.content.fluids.potion.PotionFluid.BottleType;
-import com.simibubi.create.content.kinetics.mixer.MixingRecipe;
-import com.simibubi.create.content.processing.recipe.HeatCondition;
-import com.simibubi.create.content.processing.recipe.StandardProcessingRecipe.Builder;
-import com.simibubi.create.foundation.mixin.accessor.PotionBrewingAccessor;
-
-import net.minecraft.core.Holder.Reference;
+import com.mojang.datafixers.util.Either;
+import com.simibubi.create.*;
+import com.simibubi.create.content.processing.basin.*;
+import com.simibubi.create.content.processing.recipe.*;
+import net.fabricmc.fabric.api.transfer.v1.fluid.FluidConstants;
+import net.minecraft.core.component.DataComponentExactPredicate;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.item.alchemy.Potion;
-import net.minecraft.world.item.alchemy.PotionBrewing;
-import net.minecraft.world.item.alchemy.PotionContents;
-import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.level.Level;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.alchemy.*;
+import net.minecraft.world.item.crafting.*;
+import net.minecraft.world.level.material.Fluids;
+import java.util.*;
 
-import net.neoforged.neoforge.common.brewing.BrewingRecipe;
-import net.neoforged.neoforge.common.brewing.IBrewingRecipe;
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.crafting.DataComponentFluidIngredient;
-import net.neoforged.neoforge.fluids.crafting.SizedFluidIngredient;
-
-public class PotionMixingRecipes {
-
-	public static final List<Item> SUPPORTED_CONTAINERS = List.of(Items.POTION, Items.SPLASH_POTION, Items.LINGERING_POTION);
-
-	private static List<RecipeHolder<MixingRecipe>> RECIPES;
-	private static Map<Item, List<MixingRecipe>> SORTED;
-
-	private static boolean alreadyGenerated = false;
-	private static boolean alreadySorted = false;
-
-	public static List<RecipeHolder<MixingRecipe>> createRecipes(Level level) {
-		if (!alreadyGenerated) {
-			RECIPES = createRecipesImpl(level);
-			alreadyGenerated = true;
-		}
-
-		return RECIPES;
-	}
-
-	public static Map<Item, List<MixingRecipe>> sortRecipesByItem(Level level) {
-		if (!alreadySorted) {
-			SORTED = sortRecipesByItem(createRecipes(level));
-			alreadySorted = true;
-		}
-
-		return SORTED;
-	}
-
-	private static List<RecipeHolder<MixingRecipe>> createRecipesImpl(Level level) {
-		PotionBrewing potionBrewing = level.potionBrewing();
-
-		List<RecipeHolder<MixingRecipe>> mixingRecipes = new ArrayList<>();
-
-		int recipeIndex = 0;
-
-		List<Item> allowedSupportedContainers = new ArrayList<>();
-		List<ItemStack> supportedContainerStacks = new ArrayList<>();
-		for (Item container : SUPPORTED_CONTAINERS) {
-			ItemStack stack = new ItemStack(container);
-			supportedContainerStacks.add(stack);
-			if (((PotionBrewingAccessor) potionBrewing).create$isContainer(stack)) {
-				allowedSupportedContainers.add(container);
-			}
-		}
-
-		for (Item container : allowedSupportedContainers) {
-			BottleType bottleType = PotionFluidHandler.bottleTypeFromItem(container);
-			for (PotionBrewing.Mix<Potion> mix : ((PotionBrewingAccessor) potionBrewing).create$getPotionMixes()) {
-				FluidStack fromFluid = PotionFluidHandler.getFluidFromPotion(new PotionContents(mix.from()), bottleType, 1000);
-				FluidStack toFluid = PotionFluidHandler.getFluidFromPotion(new PotionContents(mix.to()), bottleType, 1000);
-
-				mixingRecipes.add(createRecipe("potion_mixing_vanilla_" + recipeIndex++, mix.ingredient(), fromFluid, toFluid));
-			}
-		}
-
-		for (PotionBrewing.Mix<Item> mix : ((PotionBrewingAccessor) potionBrewing).create$getContainerMixes()) {
-			Item from = mix.from().value();
-			if (!allowedSupportedContainers.contains(from)) {
-				continue;
-			}
-			Item to = mix.to().value();
-			if (!allowedSupportedContainers.contains(to)) {
-				continue;
-			}
-			BottleType fromBottleType = PotionFluidHandler.bottleTypeFromItem(from);
-			BottleType toBottleType = PotionFluidHandler.bottleTypeFromItem(to);
-			Ingredient ingredient = mix.ingredient();
-
-			List<Reference<Potion>> potions = level.registryAccess()
-				.lookupOrThrow(Registries.POTION)
-				.listElements()
-				.toList();
-
-			for (Reference<Potion> potion : potions) {
-				FluidStack fromFluid = PotionFluidHandler.getFluidFromPotion(new PotionContents(potion), fromBottleType, 1000);
-				FluidStack toFluid = PotionFluidHandler.getFluidFromPotion(new PotionContents(potion), toBottleType, 1000);
-
-				mixingRecipes.add(createRecipe("potion_mixing_vanilla_" + recipeIndex++, ingredient, fromFluid, toFluid));
-			}
-		}
-
-		recipeIndex = 0;
-		for (IBrewingRecipe recipe : potionBrewing.getRecipes()) {
-			if (recipe instanceof BrewingRecipe recipeImpl) {
-				ItemStack output = recipeImpl.getOutput();
-				if (!SUPPORTED_CONTAINERS.contains(output.getItem())) {
-					continue;
-				}
-
-				Ingredient input = recipeImpl.getInput();
-				Ingredient ingredient = recipeImpl.getIngredient();
-				FluidStack outputFluid = null;
-				for (ItemStack stack : supportedContainerStacks) {
-					if (input.test(stack)) {
-						ItemStack[] stacks = input.getItems();
-						if (stacks.length == 0){
-							continue;
-						}
-						FluidStack inputFluid = PotionFluidHandler.getFluidFromPotionItem(stacks[0]);
-						inputFluid.setAmount(1000);
-						if (outputFluid == null) {
-							outputFluid = PotionFluidHandler.getFluidFromPotionItem(output);
-						}
-						outputFluid.setAmount(1000);
-						mixingRecipes.add(createRecipe("potion_mixing_modded_" + recipeIndex++, ingredient, inputFluid, outputFluid));
-					}
-				}
-			}
-		}
-
-		return mixingRecipes;
-	}
-
-	private static RecipeHolder<MixingRecipe> createRecipe(String id, Ingredient ingredient, FluidStack fromFluid, FluidStack toFluid) {
-		ResourceLocation recipeId = Create.asResource(id);
-		MixingRecipe recipe = new Builder<>(MixingRecipe::new, recipeId)
-				.require(ingredient)
-			.require(new SizedFluidIngredient(DataComponentFluidIngredient.of(false, fromFluid), fromFluid.getAmount()))
-				.output(toFluid)
-				.requiresHeat(HeatCondition.HEATED)
-				.build();
-
-		return new RecipeHolder<>(recipeId, recipe);
-	}
-
-	private static Map<Item, List<MixingRecipe>> sortRecipesByItem(List<RecipeHolder<MixingRecipe>> all) {
-		Map<Item, List<MixingRecipe>> byItem = new HashMap<>();
-		Set<Item> processedItems = new HashSet<>();
-		for (RecipeHolder<MixingRecipe> recipe : all) {
-			for (Ingredient ingredient : recipe.value().getIngredients()) {
-				for (ItemStack itemStack : ingredient.getItems()) {
-					Item item = itemStack.getItem();
-					if (processedItems.add(item)) {
-						byItem.computeIfAbsent(item, i -> new ArrayList<>())
-							.add(recipe.value());
-					}
-				}
-			}
-			processedItems.clear();
-		}
-		return byItem;
-	}
-
+/** Minecraft 26.3 brewing is data driven; basin brewing follows the current recipe manager. */
+public final class PotionMixingRecipes {
+    private PotionMixingRecipes(){}
+    private record Index(Object recipes,Map<Item,List<RecipeHolder<BrewingRecipe>>> reagents){}
+    private static final Map<RecipeManager,Index> INDICES=new WeakHashMap<>();
+    private static synchronized Index index(RecipeManager manager){
+        var recipes=manager.getRecipes();var cached=INDICES.get(manager);if(cached!=null&&cached.recipes==recipes)return cached;
+        var byItem=new IdentityHashMap<Item,List<RecipeHolder<BrewingRecipe>>>();
+        for(var holder:recipes)if(holder.value() instanceof BrewingRecipe recipe){
+            var typed=new RecipeHolder<>(holder.id(),recipe);
+            recipe.getReagent().ingredient().items().forEach(item->byItem.computeIfAbsent(item.value(),ignored->new ArrayList<>()).add(typed));
+        }
+        var index=new Index(recipes,byItem);INDICES.put(manager,index);return index;
+    }
+    public static RecipeHolder<BasinRecipe> findRecipe(ServerLevel level,BasinRecipeInput input){
+        if(!HeatCondition.HEATED.test(input.heat()))return null;
+        var index=index(level.getServer().getRecipeManager());
+        for(var fluid:input.fluids()){
+            if(fluid.amount()<FluidConstants.BUCKET)continue;
+            var variant=fluid.variant();ItemStack bottle;
+            if(variant.getFluid().isSame(Fluids.WATER))bottle=PotionContents.createItemStack(Items.POTION,Potions.WATER);
+            else if(variant.getFluid().isSame(AllFluids.POTION))bottle=PotionFluidHandler.fillBottle(variant);else continue;
+            for(var item:input.items()){
+                if(item.isEmpty())continue;
+                for(var holder:index.reagents.getOrDefault(item.getItem(),List.of())){
+                    var recipe=holder.value();var brewingInput=new BrewingInput(bottle,item);if(!recipe.matches(brewingInput,level))continue;
+                    var result=recipe.assemble(brewingInput);if(!PotionFluidHandler.isPotionItem(result))continue;
+                    var output=PotionFluidHandler.getFluidFromPotionItem(result);
+                    var ingredient=new FluidIngredient(new FluidIngredient.ExactSelector(variant.getFluid(),DataComponentExactPredicate.allOf(variant.getComponents())),FluidConstants.BUCKET);
+                    var converted=new BasinRecipe(true,List.of(Either.left(new BrewingReagentIngredient(recipe.getReagent()).toVanilla()),Either.right(ingredient)),
+                        List.of(Either.right(new FluidOutput(output.variant().getFluid(),FluidConstants.BUCKET,output.variant().getComponentsPatch()))),HeatCondition.HEATED,100);
+                    if(!converted.matches(input,level))continue;
+                    var id=holder.id().identifier();return new RecipeHolder<>(ResourceKey.create(Registries.RECIPE,Create.asResource("potion_mixing/"+id.getNamespace()+"/"+id.getPath())),converted);
+                }
+            }
+        }return null;
+    }
 }

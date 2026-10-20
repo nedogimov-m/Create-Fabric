@@ -1,444 +1,419 @@
 package com.simibubi.create.content.logistics.depot;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
-
 import com.simibubi.create.AllSoundEvents;
 import com.simibubi.create.content.kinetics.belt.BeltHelper;
 import com.simibubi.create.content.kinetics.belt.behaviour.BeltProcessingBehaviour;
-import com.simibubi.create.content.kinetics.belt.behaviour.BeltProcessingBehaviour.ProcessingResult;
 import com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour;
 import com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour;
 import com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour.TransportedResult;
 import com.simibubi.create.content.kinetics.belt.transport.TransportedItemStack;
 import com.simibubi.create.content.logistics.funnel.AbstractFunnelBlock;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.item.ItemHelper;
-import com.simibubi.create.foundation.mixin.accessor.ItemStackHandlerAccessor;
-
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
+import com.simibubi.create.foundation.item.ProcessingInventory;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.storage.base.CombinedStorage;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
+import net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext;
+import net.fabricmc.fabric.api.transfer.v1.transaction.base.SnapshotParticipant;
 import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
+import net.minecraft.core.UUIDUtil;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.Clearable;
 import net.minecraft.world.Containers;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.neoforge.items.ItemHandlerHelper;
-import net.neoforged.neoforge.items.ItemStackHandler;
-
+/** Source Depot transport, processing and insertion policy over one real Fabric inventory.
+ * The held transport's stack is a refreshed view of Input0; it is never another stock owner.
+ * Incoming stacks have their own transactional owner until their source slide completes.
+ */
 public class DepotBehaviour extends BlockEntityBehaviour implements Clearable {
-	public static final BehaviourType<DepotBehaviour> TYPE = new BehaviourType<>();
+    public static final BehaviourType<DepotBehaviour> TYPE = new BehaviourType<>();
+    public final ProcessingInventory inventory;
+    public final DepotItemHandler itemHandler;
+    public final DirectBeltInputBehaviour directInput;
+    public final TransportedItemStackHandlerBehaviour transportedHandler;
+    private TransportedItemStack heldMetadata;
+    private final List<TransportedItemStack> incoming = new ArrayList<>();
+    Supplier<Integer> maxStackSize = () -> getHeldItemStack().isEmpty() ? 64 : getHeldItemStack().getMaxStackSize();
+    Supplier<Boolean> canAcceptItems = () -> true;
+    Predicate<Direction> canFunnelsPullFrom = side -> true;
+    Consumer<ItemStack> onHeldInserted = stack -> {};
+    Predicate<ItemStack> acceptedItems = stack -> true;
+    private boolean allowMerge;
 
-	TransportedItemStack heldItem;
-	List<TransportedItemStack> incoming;
-	ItemStackHandler processingOutputBuffer;
-	public DepotItemHandler itemHandler;
-	TransportedItemStackHandlerBehaviour transportedHandler;
-	Supplier<Integer> maxStackSize;
-	Supplier<Boolean> canAcceptItems;
-	Predicate<Direction> canFunnelsPullFrom;
-	Consumer<ItemStack> onHeldInserted;
-	Predicate<ItemStack> acceptedItems;
-	boolean allowMerge;
+    private record Metadata(TransportedItemStack held, List<TransportedItemStack> incoming) {}
+    private final SnapshotParticipant<Metadata> metadata = new SnapshotParticipant<>() {
+        @Override protected Metadata createSnapshot() {
+            return new Metadata(heldMetadata == null ? null : heldMetadata.copy(),
+                    incoming.stream().map(TransportedItemStack::copy).toList());
+        }
+        @Override protected void readSnapshot(Metadata state) {
+            heldMetadata = state.held;
+            incoming.clear(); incoming.addAll(state.incoming);
+        }
+        @Override protected void onFinalCommit() { changed(); }
+    };
 
-	public DepotBehaviour(SmartBlockEntity be) {
-		super(be);
-		maxStackSize = () -> heldItem != null ? heldItem.stack.getMaxStackSize() : 64;
-		canAcceptItems = () -> true;
-		canFunnelsPullFrom = $ -> true;
-		acceptedItems = $ -> true;
-		onHeldInserted = $ -> {
-		};
-		incoming = new ArrayList<>();
-		itemHandler = new DepotItemHandler(this);
-		processingOutputBuffer = new ItemStackHandler(8) {
-			protected void onContentsChanged(int slot) {
-				be.notifyUpdate();
-			}
-		};
-	}
+    public DepotBehaviour(BlockEntity entity) {
+        super(entity);
+        inventory = new ProcessingInventory(1, 8, variant -> true, this::changed, true, false,
+                slots -> new DepotItemHandler(this, slots));
+        itemHandler = (DepotItemHandler) inventory.automation;
+        directInput = new DirectBeltInputBehaviour(entity).allowingBeltFunnels()
+                .setInsertionHandler(this::insertFromSide).considerOccupiedWhen(this::isOccupied);
+        transportedHandler = new TransportedItemStackHandlerBehaviour(entity, this::applyToAllItems)
+                .withStackPlacement(stack -> Vec3.atCenterOf(getPos()));
+    }
 
-	public void enableMerging() {
-		allowMerge = true;
-	}
+    public void enableMerging() { allowMerge = true; }
+    public boolean canMergeItems() { return allowMerge; }
+    public DepotBehaviour withCallback(Consumer<ItemStack> callback) { onHeldInserted = callback; return this; }
+    public DepotBehaviour onlyAccepts(Predicate<ItemStack> predicate) { acceptedItems = predicate; return this; }
+    public DepotBehaviour withMaxStackSize(Supplier<Integer> supplier) { maxStackSize = supplier; return this; }
+    public DepotBehaviour acceptingWhen(Supplier<Boolean> supplier) { canAcceptItems = supplier; return this; }
+    public DepotBehaviour pullingFrom(Predicate<Direction> predicate) { canFunnelsPullFrom = predicate; return this; }
+    public boolean isActiveWorldOwner() {
+        var world=getWorld();return world!=null&&!blockEntity.isRemoved()
+                &&LoadedLevelAccess.blockEntity(world,getPos())==blockEntity
+                &&LoadedLevelAccess.blockState(world,getPos()).getBlock()==blockEntity.getBlockState().getBlock();
+    }
+    public boolean canAcceptItems() { return canAcceptItems.get(); }
+    public boolean isItemValid(ItemStack stack) { return acceptedItems.test(stack); }
+    public int getConfiguredMaxStackSize() { return maxStackSize.get(); }
+    public boolean isOutputEmpty() { return inventory.outputs.stream().allMatch(ProcessingInventory.Slot::isResourceBlank); }
+    public boolean isEmpty() { return getHeldItemStack().isEmpty() && isOutputEmpty(); }
+    public boolean isOccupied(Direction side) { return !canAcceptItems.get() || !allowMerge && !isEmpty(); }
+    public ItemStack getHeldItemStack() { return inventory.inputs.getFirst().stack(); }
 
-	public DepotBehaviour withCallback(Consumer<ItemStack> changeListener) {
-		onHeldInserted = changeListener;
-		return this;
-	}
+    public TransportedItemStack getHeldItem() {
+        ItemStack actual = getHeldItemStack();
+        if (actual.isEmpty()) return null;
+        if (heldMetadata == null) heldMetadata = new TransportedItemStack(actual, .5f);
+        heldMetadata.stack = actual;
+        return heldMetadata;
+    }
 
-	public DepotBehaviour onlyAccepts(Predicate<ItemStack> filter) {
-		acceptedItems = filter;
-		return this;
-	}
+    /** Legacy port API: changes transport metadata only, after its canonical slot transaction. */
+    public void setTransportMetadata(TransportedItemStack stack) {
+        heldMetadata = stack == null ? null : stack.copy();
+        blockEntity.setChanged();
+    }
 
-	@Override
-	public void tick() {
-		super.tick();
+    public List<TransportedItemStack> getIncomingItems() { return incoming.stream().map(TransportedItemStack::copy).toList(); }
+    public int getPresentStackSize() {
+        return getHeldItemStack().getCount() + inventory.outputs.stream().mapToInt(slot -> (int) slot.getAmount()).sum();
+    }
+    public int getRemainingSpace() {
+        int max = maxStackSize.get();
+        int nativeMax = getHeldItemStack().isEmpty() ? 64 : getHeldItemStack().getMaxStackSize();
+        return Math.min(max == 0 ? 64 : max, nativeMax) - getPresentStackSize()
+                - incoming.stream().mapToInt(stack -> stack.stack.getCount()).sum();
+    }
+    public boolean readyForProcessing() {
+        var held = getHeldItem(); return held != null && .5f - held.beltPosition < 1 / 16f;
+    }
 
-		Level world = blockEntity.getLevel();
+    long insert(TransportedItemStack transport, long maximum, TransactionContext tx) {
+        ItemStack stack = transport.stack;
+        if (stack.isEmpty() || maximum == 0 || !canAcceptItems.get() || !acceptedItems.test(stack)) return 0;
+        if (!allowMerge && !isEmpty()) return 0;
+        long accepted = Math.min(maximum, stack.getMaxStackSize());
+        var current = getHeldItem();
+        if (allowMerge) {
+            accepted = Math.min(accepted, Math.max(0, getRemainingSpace()));
+            if (current != null && !ItemStack.isSameItemSameComponents(current.stack, stack)) return 0;
+        }
+        if (accepted == 0) return 0;
+        metadata.updateSnapshots(tx);
+        var copy = transport.copy(); copy.stack = stack.copyWithCount((int) accepted);
+        if (allowMerge && current != null) {
+            incoming.add(copy);
+        } else {
+            long placed = inventory.inputs.getFirst().insert(ItemVariant.of(stack), accepted, tx);
+            if (placed == 0) return 0;
+            copy.stack = stack.copyWithCount((int) placed); heldMetadata = copy; accepted = placed;
+        }
+        if (!allowMerge) {
+            ItemStack inserted = copy.stack.copy();
+            tx.addOuterCloseCallback(result -> {
+                if (!result.wasCommitted()) return;
+                onHeldInserted.accept(inserted);
+                if (getWorld() != null && !getWorld().isClientSide())
+                    getWorld().playSound(null, getPos(), transport.insertedFrom.getAxis().isHorizontal()
+                            ? AllSoundEvents.DEPOT_SLIDE : AllSoundEvents.DEPOT_PLOP, SoundSource.BLOCKS, 1, 1);
+            });
+        }
+        return accepted;
+    }
 
-		for (Iterator<TransportedItemStack> iterator = incoming.iterator(); iterator.hasNext(); ) {
-			TransportedItemStack ts = iterator.next();
-			if (!tick(ts))
-				continue;
-			if (world.isClientSide && !blockEntity.isVirtual())
-				continue;
-			if (heldItem == null) {
-				heldItem = ts;
-			} else {
-				if (!ItemHelper.canItemStackAmountsStack(heldItem.stack, ts.stack)) {
-					Vec3 vec = VecHelper.getCenterOf(blockEntity.getBlockPos());
-					Containers.dropItemStack(blockEntity.getLevel(), vec.x, vec.y + .5f, vec.z, ts.stack);
-				} else {
-					heldItem.stack.grow(ts.stack.getCount());
-				}
-			}
-			iterator.remove();
-			blockEntity.notifyUpdate();
-		}
+    private long insertFromSide(TransportedItemStack transport, Direction side, TransactionContext tx) {
+        if (isOccupied(side)) return 0;
+        var incoming = transport.copy(); incoming.beltPosition = side.getAxis().isVertical() ? .5f : 0;
+        incoming.prevBeltPosition = incoming.beltPosition; incoming.insertedFrom = side;
+        incoming.prevSideOffset = incoming.sideOffset;
+        return insert(incoming, incoming.stack.getCount(), tx);
+    }
 
-		if (heldItem == null)
-			return;
-		if (!tick(heldItem))
-			return;
+    public ItemStack insert(TransportedItemStack stack, boolean simulate) {
+        try (var tx = Transaction.openOuter()) {
+            long accepted = insert(stack, stack.stack.getCount(), tx);
+            if (!simulate) tx.commit();
+            return stack.stack.copyWithCount(stack.stack.getCount() - (int) accepted);
+        }
+    }
 
-		BlockPos pos = blockEntity.getBlockPos();
+    public void setHeldItem(TransportedItemStack item, TransactionContext tx) {
+        metadata.updateSnapshots(tx);
+        inventory.inputs.getFirst().setStack(item == null ? ItemStack.EMPTY : item.stack, tx);
+        heldMetadata = item == null || item.stack.isEmpty() ? null : item.copy();
+    }
+    public void setHeldItem(TransportedItemStack item) {
+        try (var tx = Transaction.openOuter()) { setHeldItem(item, tx); tx.commit(); }
+    }
+    public void setCenteredHeldItem(TransportedItemStack item) {
+        var copy = item.copy(); copy.beltPosition = copy.prevBeltPosition = .5f; setHeldItem(copy);
+    }
+    public void removeHeldItem() { setHeldItem(null); }
 
-		if (world.isClientSide)
-			return;
-		if (handleBeltFunnelOutput())
-			return;
+    /** Source alternate overhead funnel route, including original in-transit incoming owners. */
+    public long exportTo(net.fabricmc.fabric.api.transfer.v1.storage.Storage<ItemVariant> target, TransactionContext tx) {
+        metadata.updateSnapshots(tx); long total = 0;
+        var main = inventory.inputs.getFirst();
+        if (!main.isResourceBlank()) {var resource = main.getResource();long moved = target.insert(resource, main.getAmount(), tx);main.extract(resource, moved, tx);total += moved;}
+        for (int index = 0; index < incoming.size();) {
+            var entry = incoming.get(index);long moved = target.insert(ItemVariant.of(entry.stack),entry.stack.getCount(),tx);total += moved;
+            entry.stack = entry.stack.copyWithCount(entry.stack.getCount() - (int) moved);
+            if (entry.stack.isEmpty()) incoming.remove(index); else index++;
+        }
+        for (var output : inventory.outputs) if (!output.isResourceBlank()) {var resource=output.getResource();long moved=target.insert(resource,output.getAmount(),tx);output.extract(resource,moved,tx);total+=moved;}
+        return total;
+    }
+    /** Transfer every real owner to the caller inside the same transaction. */
+    public List<ItemStack> takeAll(TransactionContext tx) {
+        metadata.updateSnapshots(tx);
+        List<ItemStack> result = new ArrayList<>();
+        for (var slot : inventory.inputs) takeSlot(slot, result, tx);
+        for (var stack : incoming) if (!stack.stack.isEmpty()) result.add(stack.stack.copy());
+        incoming.clear(); heldMetadata = null;
+        for (var slot : inventory.outputs) takeSlot(slot, result, tx);
+        return result;
+    }
+    private static void takeSlot(ProcessingInventory.Slot slot, List<ItemStack> result, TransactionContext tx) {
+        if (slot.isResourceBlank()) return;
+        result.add(slot.stack()); slot.extract(slot.getResource(), slot.getAmount(), tx);
+    }
 
-		BeltProcessingBehaviour processingBehaviour =
-			BlockEntityBehaviour.get(world, pos.above(2), BeltProcessingBehaviour.TYPE);
-		if (processingBehaviour == null)
-			return;
-		if (!heldItem.locked && BeltProcessingBehaviour.isBlocked(world, pos))
-			return;
+    @Override public void tick() {
+        super.tick();
+        var level = getWorld(); if (level == null) return;
+        boolean moved = false;
+        for (int index = 0; index < incoming.size();) {
+            var item = incoming.get(index);
+            if (!tick(item) || level.isClientSide() && !blockEntity.isVirtual()) { index++; continue; }
+            try (var tx = Transaction.openOuter()) {
+                metadata.updateSnapshots(tx);
+                var slot = inventory.inputs.getFirst();
+                long accepted = slot.insert(ItemVariant.of(item.stack), item.stack.getCount(), tx);
+                if (accepted > 0 && heldMetadata == null) heldMetadata = item.copy();
+                ItemStack remainder = item.stack.copyWithCount(item.stack.getCount() - (int) accepted);
+                incoming.remove(index);
+                if (!remainder.isEmpty()) tx.addOuterCloseCallback(result -> {
+                    if (result.wasCommitted()) dropAtDepot(remainder);
+                });
+                tx.commit();
+            }
+            moved = true;
+        }
+        var held = getHeldItem(); if (held == null) { heldMetadata = null; return; }
+        if (!tick(held) || level.isClientSide()) return;
+        if (moved) changed();
+        if (handleBeltFunnelOutput()) return;
+        var processor = BlockEntityBehaviour.get(level, getPos().above(2), BeltProcessingBehaviour.TYPE);
+        if (processor == null || !held.locked && BeltProcessingBehaviour.isBlocked(level, getPos())) return;
+        ItemStack before = held.stack.copy(); boolean locked = held.locked;
+        var result = locked ? processor.handleHeldItem(held, transportedHandler)
+                : processor.handleReceivedItem(held, transportedHandler);
+        if (result == BeltProcessingBehaviour.ProcessingResult.REMOVE) { removeHeldItem(); return; }
+        held = getHeldItem(); if (held == null) return;
+        held.locked = result == BeltProcessingBehaviour.ProcessingResult.HOLD;
+        if (locked != held.locked || !ItemStack.matches(before, held.stack)) changed();
+    }
 
-		ItemStack previousItem = heldItem.stack;
-		boolean wasLocked = heldItem.locked;
-		ProcessingResult result = wasLocked ? processingBehaviour.handleHeldItem(heldItem, transportedHandler)
-			: processingBehaviour.handleReceivedItem(heldItem, transportedHandler);
-		if (heldItem == null || result == ProcessingResult.REMOVE) {
-			heldItem = null;
-			blockEntity.sendData();
-			return;
-		}
+    protected boolean tick(TransportedItemStack item) {
+        item.prevBeltPosition = item.beltPosition; item.prevSideOffset = item.sideOffset;
+        float difference = .5f - item.beltPosition;
+        if (difference > 1 / 512f) {
+            if (difference > 1 / 32f && !BeltHelper.isItemUpright(item.stack)) item.angle++;
+            item.beltPosition += difference / 4f;
+        }
+        return difference < 1 / 16f;
+    }
 
-		heldItem.locked = result == ProcessingResult.HOLD;
-		if (heldItem.locked != wasLocked || !ItemStack.matches(previousItem, heldItem.stack))
-			blockEntity.sendData();
-	}
+    private boolean handleBeltFunnelOutput() {
+        var state = LoadedLevelAccess.blockState(getWorld(), getPos().above());
+        Direction facing = AbstractFunnelBlock.getFunnelFacing(state);
+        if (facing == null || !canFunnelsPullFrom.test(facing.getOpposite())) return false;
+        var target = directInput.exportingFunnel(null); if (target == null) return false;
+        var order = new ArrayList<>(inventory.outputs); order.addAll(inventory.inputs);
+        for (var slot : order) {
+            if (slot.isResourceBlank()) continue;
+            try (var tx = Transaction.openOuter()) {
+                var variant = slot.getResource();
+                long transferred = target.insert(variant, slot.getAmount(), tx);
+                if (transferred == 0) continue;
+                if (slot.extract(variant, transferred, tx) != transferred) throw new IllegalStateException("Depot ownership changed during export");
+                tx.commit(); return true;
+            }
+        }
+        return false;
+    }
 
-	protected boolean tick(TransportedItemStack heldItem) {
-		heldItem.prevBeltPosition = heldItem.beltPosition;
-		heldItem.prevSideOffset = heldItem.sideOffset;
-		float diff = .5f - heldItem.beltPosition;
-		if (diff > 1 / 512f) {
-			if (diff > 1 / 32f && !BeltHelper.isItemUpright(heldItem.stack))
-				heldItem.angle += 1;
-			heldItem.beltPosition += diff / 4f;
-		}
-		return diff < 1 / 16f;
-	}
+    private void applyToAllItems(float maximumDistance, Function<TransportedItemStack, TransportedResult> function) {
+        var held = getHeldItem(); if (held == null || .5f - held.beltPosition > maximumDistance) return;
+        var processed = held.copy(); var result = function.apply(processed);
+        if ((result == null || result.didntChangeFrom(held.stack)) && sameMetadata(held,processed) && ItemStack.matches(held.stack,processed.stack)) return;
+        try (var tx = Transaction.openOuter()) {
+            metadata.updateSnapshots(tx);
+            if (result == null || result.didntChangeFrom(held.stack)) {
+                if (ItemStack.matches(held.stack, processed.stack)) heldMetadata = processed.copy();
+                else setHeldItem(processed, tx);
+                tx.commit(); return;
+            }
+            applyResult(result, tx);
+            tx.commit();
+        }
+    }
+    private static boolean sameMetadata(TransportedItemStack first,TransportedItemStack second) {
+        if (!first.id.equals(second.id)||first.beltPosition!=second.beltPosition||first.prevBeltPosition!=second.prevBeltPosition
+                ||first.sideOffset!=second.sideOffset||first.prevSideOffset!=second.prevSideOffset||first.angle!=second.angle
+                ||first.insertedAt!=second.insertedAt||first.insertedFrom!=second.insertedFrom||first.locked!=second.locked
+                ||first.lockedExternally!=second.lockedExternally||!java.util.Objects.equals(first.heldBy,second.heldBy)
+                ||first.processedBy!=second.processedBy||!java.util.Objects.equals(first.unresolvedFanProcessingType,second.unresolvedFanProcessingType)||!first.pendingFanInput.equals(second.pendingFanInput)||first.pendingFanCount!=second.pendingFanCount||first.processingTime!=second.processingTime||first.lastProcessingTick!=second.lastProcessingTick) return false;
+        var a=first.pendingFanResults;var b=second.pendingFanResults;if(a==null||b==null)return a==b;
+        if(a.size()!=b.size())return false;for(int index=0;index<a.size();index++)if(!ItemStack.matches(a.get(index),b.get(index)))return false;return true;
+    }
+    /** Exact source held → eight output slots → genuine world remainder routing.
+     * Every canonical debit/credit and transport change participates in the caller's transaction;
+     * overflow becomes a real ItemEntity only after the outer transaction commits.
+     */
+    public void applyResult(TransportedResult result, TransactionContext tx) {
+        if (result == null || result.doesNothing()) return;
+        metadata.updateSnapshots(tx);
+        setHeldItem(result.hasHeldOutput() ? centered(result.getHeldOutput()) : null, tx);
+        var buffer = new CombinedStorage<ItemVariant, ProcessingInventory.Slot>(inventory.outputs);
+        for (var output : result.getOutputs()) {
+            if (output.stack.isEmpty()) continue;
+            var variant = ItemVariant.of(output.stack);
+            long placed;
+            if (getHeldItemStack().isEmpty()) {
+                setHeldItem(centered(output), tx); placed = output.stack.getCount();
+            } else placed = buffer.insert(variant, output.stack.getCount(), tx);
+            if (placed < output.stack.getCount()) {
+                var remainder = output.stack.copyWithCount(output.stack.getCount() - (int) placed);
+                tx.addOuterCloseCallback(closed -> { if (closed.wasCommitted()) dropAtDepot(remainder); });
+            }
+        }
+    }
+    public boolean applyRecipeOutputs(int consumed, List<ItemStack> outputs, boolean lockOutputs, TransactionContext tx) {
+        var held = getHeldItem(); if (held == null || consumed <= 0 || consumed > held.stack.getCount()) return false;
+        var left = held.copy(); left.stack.shrink(consumed); left.clearFanProcessingData();
+        List<TransportedItemStack> converted = new ArrayList<>();
+        for (var stack : outputs) {
+            if (stack.isEmpty()) continue;
+            var copy = left.copy(); copy.stack = stack.copy(); copy.locked = lockOutputs;
+            copy.angle = BeltHelper.isItemUpright(stack) ? 180 : getWorld().getRandom().nextInt(360);
+            converted.add(copy);
+        }
+        applyResult(TransportedResult.convertToAndLeaveHeld(converted, left.stack.isEmpty() ? null : left), tx);
+        return true;
+    }
+    private static TransportedItemStack centered(TransportedItemStack stack) {
+        var copy = stack.copy(); copy.beltPosition = copy.prevBeltPosition = .5f; return copy;
+    }
+    private void dropAtDepot(ItemStack stack) {
+        if (stack.isEmpty() || getWorld() == null || getWorld().isClientSide()) return;
+        var center = Vec3.atCenterOf(getPos()); Containers.dropItemStack(getWorld(), center.x, center.y + .5, center.z, stack);
+    }
 
-	private boolean handleBeltFunnelOutput() {
-		BlockState funnel = getWorld().getBlockState(getPos().above());
-		Direction funnelFacing = AbstractFunnelBlock.getFunnelFacing(funnel);
-		if (funnelFacing == null || !canFunnelsPullFrom.test(funnelFacing.getOpposite()))
-			return false;
+    @Override public void clearContent() {
+        try (var tx = Transaction.openOuter()) { takeAll(tx); tx.commit(); }
+    }
+    @Override public void destroy() {
+        if (blockEntity.isRemoved() || getWorld() == null || getWorld().isClientSide()) return;
+        try (var tx = Transaction.openOuter()) {
+            var stacks = takeAll(tx);
+            tx.addOuterCloseCallback(result -> { if (result.wasCommitted()) stacks.forEach(this::dropAtDepot); }); tx.commit();
+        }
+    }
+    @Override protected void changed() {
+        super.changed();
+        if (getWorld() != null && !getWorld().isClientSide())
+            getWorld().updateNeighbourForOutputSignal(getPos(), blockEntity.getBlockState().getBlock());
+    }
 
-		for (int slot = 0; slot < processingOutputBuffer.getSlots(); slot++) {
-			ItemStack previousItem = processingOutputBuffer.getStackInSlot(slot);
-			if (previousItem.isEmpty())
-				continue;
-			ItemStack afterInsert = blockEntity.getBehaviour(DirectBeltInputBehaviour.TYPE)
-				.tryExportingToBeltFunnel(previousItem, null, false);
-			if (afterInsert == null)
-				return false;
-			if (previousItem.getCount() != afterInsert.getCount()) {
-				processingOutputBuffer.setStackInSlot(slot, afterInsert);
-				blockEntity.notifyUpdate();
-				return true;
-			}
-		}
-
-		ItemStack previousItem = heldItem.stack;
-		ItemStack afterInsert = blockEntity.getBehaviour(DirectBeltInputBehaviour.TYPE)
-			.tryExportingToBeltFunnel(previousItem, null, false);
-		if (afterInsert == null)
-			return false;
-		if (previousItem.getCount() != afterInsert.getCount()) {
-			if (afterInsert.isEmpty())
-				heldItem = null;
-			else
-				heldItem.stack = afterInsert;
-			blockEntity.notifyUpdate();
-			return true;
-		}
-
-		return false;
-	}
-
-	@Override
-	public void clearContent() {
-		((ItemStackHandlerAccessor) processingOutputBuffer).create$getStacks().clear();
-		incoming.clear();
-		heldItem = null;
-	}
-
-	@Override
-	public void destroy() {
-		super.destroy();
-		Level level = getWorld();
-		BlockPos pos = getPos();
-		ItemHelper.dropContents(level, pos, processingOutputBuffer);
-		for (TransportedItemStack transportedItemStack : incoming)
-			Block.popResource(level, pos, transportedItemStack.stack);
-		if (!getHeldItemStack().isEmpty())
-			Block.popResource(level, pos, getHeldItemStack());
-	}
-
-	@Override
-	public void unload() {
-		if (itemHandler != null)
-			blockEntity.invalidateCapabilities();
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		if (heldItem != null)
-			compound.put("HeldItem", heldItem.serializeNBT(registries));
-		compound.put("OutputBuffer", processingOutputBuffer.serializeNBT(registries));
-		if (canMergeItems() && !incoming.isEmpty())
-			compound.put("Incoming", NBTHelper.writeCompoundList(incoming, stack -> stack.serializeNBT(registries)));
-	}
-
-	@Override
-	public void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		heldItem = null;
-		if (compound.contains("HeldItem"))
-			heldItem = TransportedItemStack.read(compound.getCompound("HeldItem"), registries);
-		processingOutputBuffer.deserializeNBT(registries, compound.getCompound("OutputBuffer"));
-		if (canMergeItems()) {
-			ListTag list = compound.getList("Incoming", Tag.TAG_COMPOUND);
-			incoming = NBTHelper.readCompoundList(list, c -> TransportedItemStack.read(c, registries));
-		}
-	}
-
-	public void addSubBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(new DirectBeltInputBehaviour(blockEntity).allowingBeltFunnels()
-			.setInsertionHandler(this::tryInsertingFromSide).considerOccupiedWhen(this::isOccupied));
-		transportedHandler = new TransportedItemStackHandlerBehaviour(blockEntity, this::applyToAllItems)
-			.withStackPlacement(this::getWorldPositionOf);
-		behaviours.add(transportedHandler);
-	}
-
-	public ItemStack getHeldItemStack() {
-		return heldItem == null ? ItemStack.EMPTY : heldItem.stack;
-	}
-
-	public boolean canMergeItems() {
-		return allowMerge;
-	}
-
-	public int getPresentStackSize() {
-		int cumulativeStackSize = 0;
-		cumulativeStackSize += getHeldItemStack().getCount();
-		for (int slot = 0; slot < processingOutputBuffer.getSlots(); slot++)
-			cumulativeStackSize += processingOutputBuffer.getStackInSlot(slot)
-				.getCount();
-		return cumulativeStackSize;
-	}
-
-	public int getRemainingSpace() {
-		int cumulativeStackSize = getPresentStackSize();
-		for (TransportedItemStack transportedItemStack : incoming)
-			cumulativeStackSize += transportedItemStack.stack.getCount();
-		int fromGetter =
-			Math.min(maxStackSize.get() == 0 ? 64 : maxStackSize.get(), getHeldItemStack().getMaxStackSize());
-		return (fromGetter) - cumulativeStackSize;
-	}
-
-	public ItemStack insert(TransportedItemStack heldItem, boolean simulate) {
-		if (!canAcceptItems.get())
-			return heldItem.stack;
-		if (!acceptedItems.test(heldItem.stack))
-			return heldItem.stack;
-
-		if (canMergeItems()) {
-			int remainingSpace = getRemainingSpace();
-			ItemStack inserted = heldItem.stack;
-			if (remainingSpace <= 0)
-				return inserted;
-			if (this.heldItem != null && !ItemHelper.canItemStackAmountsStack(this.heldItem.stack, inserted))
-				return inserted;
-
-			ItemStack returned = ItemStack.EMPTY;
-			if (remainingSpace < inserted.getCount()) {
-				returned = heldItem.stack.copyWithCount(inserted.getCount() - remainingSpace);
-				if (!simulate) {
-					TransportedItemStack copy = heldItem.copy();
-					copy.stack.setCount(remainingSpace);
-					if (this.heldItem != null)
-						incoming.add(copy);
-					else
-						this.heldItem = copy;
-				}
-			} else {
-				if (!simulate) {
-					if (this.heldItem != null)
-						incoming.add(heldItem);
-					else
-						this.heldItem = heldItem;
-				}
-			}
-			return returned;
-		}
-
-		ItemStack returned = ItemStack.EMPTY;
-		int maxCount = heldItem.stack.getMaxStackSize();
-		boolean stackTooLarge = maxCount < heldItem.stack.getCount();
-		if (stackTooLarge)
-			returned = heldItem.stack.copyWithCount(heldItem.stack.getCount() - maxCount);
-
-		if (simulate)
-			return returned;
-
-		if (this.isEmpty()) {
-			if (heldItem.insertedFrom.getAxis().isHorizontal())
-				AllSoundEvents.DEPOT_SLIDE.playOnServer(getWorld(), getPos());
-			else
-				AllSoundEvents.DEPOT_PLOP.playOnServer(getWorld(), getPos());
-		}
-
-		if (stackTooLarge) {
-			heldItem = heldItem.copy();
-			heldItem.stack.setCount(maxCount);
-		}
-
-		this.heldItem = heldItem;
-		onHeldInserted.accept(heldItem.stack);
-		return returned;
-	}
-
-	public void setHeldItem(TransportedItemStack heldItem) {
-		this.heldItem = heldItem;
-	}
-
-	public void removeHeldItem() {
-		this.heldItem = null;
-	}
-
-	public void setCenteredHeldItem(TransportedItemStack heldItem) {
-		this.heldItem = heldItem;
-		this.heldItem.beltPosition = 0.5f;
-		this.heldItem.prevBeltPosition = 0.5f;
-	}
-
-	private boolean isOccupied(Direction side) {
-		if (!getHeldItemStack().isEmpty() && !canMergeItems())
-			return true;
-		if (!isOutputEmpty() && !canMergeItems())
-			return true;
-		if (!canAcceptItems.get())
-			return true;
-		return false;
-	}
-
-	private ItemStack tryInsertingFromSide(TransportedItemStack transportedStack, Direction side, boolean simulate) {
-		ItemStack inserted = transportedStack.stack;
-
-		if (isOccupied(side))
-			return inserted;
-
-		int size = transportedStack.stack.getCount();
-		transportedStack = transportedStack.copy();
-		transportedStack.beltPosition = side.getAxis()
-			.isVertical() ? .5f : 0;
-		transportedStack.insertedFrom = side;
-		transportedStack.prevSideOffset = transportedStack.sideOffset;
-		transportedStack.prevBeltPosition = transportedStack.beltPosition;
-		ItemStack remainder = insert(transportedStack, simulate);
-		if (remainder.getCount() != size)
-			blockEntity.notifyUpdate();
-
-		return remainder;
-	}
-
-	private void applyToAllItems(float maxDistanceFromCentre,
-								 Function<TransportedItemStack, TransportedResult> processFunction) {
-		if (heldItem == null)
-			return;
-		if (.5f - heldItem.beltPosition > maxDistanceFromCentre)
-			return;
-
-		boolean dirty = false;
-		TransportedItemStack transportedItemStack = heldItem;
-		ItemStack stackBefore = transportedItemStack.stack.copy();
-		TransportedResult result = processFunction.apply(transportedItemStack);
-		if (result == null || result.didntChangeFrom(stackBefore))
-			return;
-
-		dirty = true;
-		heldItem = null;
-		if (result.hasHeldOutput())
-			setCenteredHeldItem(result.getHeldOutput());
-
-		for (TransportedItemStack added : result.getOutputs()) {
-			if (getHeldItemStack().isEmpty()) {
-				setCenteredHeldItem(added);
-				continue;
-			}
-			ItemStack remainder = ItemHandlerHelper.insertItemStacked(processingOutputBuffer, added.stack, false);
-			Vec3 vec = VecHelper.getCenterOf(blockEntity.getBlockPos());
-			Containers.dropItemStack(blockEntity.getLevel(), vec.x, vec.y + .5f, vec.z, remainder);
-		}
-
-		if (dirty)
-			blockEntity.notifyUpdate();
-	}
-
-	public boolean isEmpty() {
-		return heldItem == null && isOutputEmpty();
-	}
-
-	public boolean isOutputEmpty() {
-		for (int i = 0; i < processingOutputBuffer.getSlots(); i++)
-			if (!processingOutputBuffer.getStackInSlot(i)
-				.isEmpty())
-				return false;
-		return true;
-	}
-
-	private Vec3 getWorldPositionOf(TransportedItemStack transported) {
-		return VecHelper.getCenterOf(blockEntity.getBlockPos());
-	}
-
-	@Override
-	public BehaviourType<?> getType() {
-		return TYPE;
-	}
-
-	public boolean isItemValid(ItemStack stack) {
-		return acceptedItems.test(stack);
-	}
+    @Override public void write(ValueOutput output) {
+        inventory.save(output.child("Inventory"));
+        var held = getHeldItem(); if (held != null) output.store("HeldItem", TransportedItemStack.CODEC, held);
+        if (allowMerge && !incoming.isEmpty()) output.store("Incoming", TransportedItemStack.CODEC.listOf(), incoming);
+    }
+    @Override public void read(ValueInput input) {
+        boolean canonical = input.child("Inventory").isPresent();
+        inventory.load(input.childOrEmpty("Inventory"));
+        heldMetadata = readTransported(input, "HeldItem"); incoming.clear();
+        if (!canonical) {
+            try (var tx = Transaction.openOuter()) {
+                if (heldMetadata != null) inventory.inputs.getFirst().setStack(heldMetadata.stack, tx);
+                for (var entry : input.childOrEmpty("OutputBuffer").childrenListOrEmpty("Items")) {
+                    int slot = entry.getIntOr("Slot", -1);
+                    var stack = entry.read(ItemStack.MAP_CODEC).orElse(ItemStack.EMPTY);
+                    if (slot >= 0 && slot < inventory.outputs.size() && !stack.isEmpty())
+                        inventory.outputs.get(slot).insert(ItemVariant.of(stack), stack.getCount(), tx);
+                }
+                tx.commit();
+            }
+        }
+        if (allowMerge) for (var entry : input.childrenListOrEmpty("Incoming")) {
+            var transported = readTransported(entry); if (transported != null) incoming.add(transported);
+        }
+        if (getHeldItemStack().isEmpty()) heldMetadata = null;
+    }
+    private static TransportedItemStack readTransported(ValueInput input, String name) {
+        return input.child(name).map(DepotBehaviour::readTransported).orElse(null);
+    }
+    private static TransportedItemStack readTransported(ValueInput value) {
+        if (value.read("Id", UUIDUtil.CODEC).isPresent()) return value.read(TransportedItemStack.MAP_CODEC).orElse(null);
+        var stack = value.read("Item", ItemStack.CODEC).orElse(ItemStack.EMPTY); if (stack.isEmpty()) return null;
+        var transported = new TransportedItemStack(stack, value.getFloatOr("Pos", 0));
+        transported.prevBeltPosition = value.getFloatOr("PrevPos", transported.beltPosition);
+        transported.sideOffset = value.getFloatOr("Offset", 0); transported.prevSideOffset = value.getFloatOr("PrevOffset", 0);
+        transported.angle = value.getIntOr("Angle", 0); transported.insertedAt = value.getIntOr("InSegment", 0);
+        transported.insertedFrom = Direction.from3DDataValue(value.getIntOr("InDirection", 1));
+        transported.locked = value.getBooleanOr("Locked", false); transported.lockedExternally = value.getBooleanOr("LockedExternally", false);
+        value.getString("FanProcessingType").ifPresent(name -> {
+            transported.processedBy=com.simibubi.create.content.kinetics.fan.processing.FanProcessing.resolve(name);
+            transported.unresolvedFanProcessingType=transported.processedBy==null?name:null;
+            transported.processingTime=value.getIntOr("FanProcessingTime",0);
+        });
+        return transported;
+    }
+    @SuppressWarnings("unchecked")
+    public <T extends BlockEntityBehaviour> T getBehaviour(BehaviourType<T> type) {
+        if (type == TYPE) return (T) this;
+        if (type == DirectBeltInputBehaviour.TYPE) return (T) directInput;
+        if (type == TransportedItemStackHandlerBehaviour.TYPE) return (T) transportedHandler;
+        return null;
+    }
+    @Override public BehaviourType<?> getType() { return TYPE; }
 }

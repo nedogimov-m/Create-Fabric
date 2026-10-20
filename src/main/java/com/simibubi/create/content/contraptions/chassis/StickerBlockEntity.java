@@ -1,129 +1,35 @@
 package com.simibubi.create.content.contraptions.chassis;
 
-import java.util.List;
-
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.compat.Mods;
-import com.simibubi.create.compat.computercraft.AbstractComputerBehaviour;
-import com.simibubi.create.compat.computercraft.ComputerCraftProxy;
-import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
-import com.simibubi.create.content.contraptions.glue.SuperGlueItem;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import dan200.computercraft.api.peripheral.PeripheralCapability;
-import dev.engine_room.flywheel.lib.visualization.VisualizationHelper;
-import net.createmod.catnip.animation.LerpedFloat;
-import net.createmod.catnip.animation.LerpedFloat.Chaser;
-import net.createmod.catnip.platform.CatnipServices;
-import net.minecraft.client.Minecraft;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
+import com.simibubi.create.*;
+import com.simibubi.create.content.contraptions.glue.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
-
-public class StickerBlockEntity extends SmartBlockEntity {
-
-	LerpedFloat piston;
-	boolean update;
-
-	public AbstractComputerBehaviour computerBehaviour;
-
-	public StickerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		piston = LerpedFloat.linear();
-		update = false;
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		if (Mods.COMPUTERCRAFT.isLoaded()) {
-			event.registerBlockEntity(
-				PeripheralCapability.get(),
-				AllBlockEntityTypes.STICKER.get(),
-				(be, context) -> be.computerBehaviour.getPeripheralCapability()
-			);
-		}
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(computerBehaviour = ComputerCraftProxy.behaviour(this));
-	}
-
-	@Override
-	public void initialize() {
-		super.initialize();
-		if (!level.isClientSide)
-			return;
-		piston.startWithValue(isBlockStateExtended() ? 1 : 0);
-	}
-
-	public boolean isBlockStateExtended() {
-		BlockState blockState = getBlockState();
-		boolean extended = AllBlocks.STICKER.has(blockState) && blockState.getValue(StickerBlock.EXTENDED);
-		return extended;
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		if (!level.isClientSide)
-			return;
-		piston.tickChaser();
-
-		if (isAttachedToBlock() && piston.getValue(0) != piston.getValue() && piston.getValue() == 1) {
-			SuperGlueItem.spawnParticles(level, worldPosition, getBlockState().getValue(StickerBlock.FACING), true);
-			CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> playSound(true));
-		}
-
-		if (!update)
-			return;
-		update = false;
-		int target = isBlockStateExtended() ? 1 : 0;
-		if (isAttachedToBlock() && target == 0 && piston.getChaseTarget() == 1)
-			CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> playSound(false));
-		piston.chase(target, .4f, Chaser.LINEAR);
-
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> VisualizationHelper.queueUpdate(this));
-	}
-
-	public boolean isAttachedToBlock() {
-		BlockState blockState = getBlockState();
-		if (!AllBlocks.STICKER.has(blockState))
-			return false;
-		Direction direction = blockState.getValue(StickerBlock.FACING);
-		return SuperGlueEntity.isValidFace(level, worldPosition.relative(direction), direction.getOpposite());
-	}
-
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-		if (clientPacket)
-			update = true;
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	public void playSound(boolean attach) {
-		AllSoundEvents.SLIME_ADDED.play(level, Minecraft.getInstance().player, worldPosition, 0.35f, attach ? 0.75f : 0.2f);
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		computerBehaviour.removePeripheral();
-	}
-
+/** Persisted state is the real block latch; interpolation and feedback are native client state. */
+public class StickerBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity {
+    private float previousPiston,piston,target;
+    private long animationTick=Long.MIN_VALUE;
+    public StickerBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.STICKER,pos,state);previousPiston=piston=target=extended(state)?1:0;}
+    private static boolean extended(BlockState state){return state.getBlock() instanceof StickerBlock&&state.getValue(StickerBlock.EXTENDED);}
+    public boolean isBlockStateExtended(){return extended(getBlockState());}
+    public boolean isAttachedToBlock(){
+        if(level==null||!(getBlockState().getBlock() instanceof StickerBlock))return false;var facing=getBlockState().getValue(StickerBlock.FACING);var next=worldPosition.relative(facing);
+        return LoadedLevelAccess.isLoaded(level,next)&&SuperGlueEntity.isValidFace(level,next,facing.getOpposite());
+    }
+    public float getPiston(float partial){return previousPiston+(piston-previousPiston)*partial;}
+    public void tickClientAnimation(){
+        if(level==null||!level.isClientSide()||animationTick==level.getGameTime())return;animationTick=level.getGameTime();
+        previousPiston=piston;piston=target>piston?Math.min(target,piston+.4f):Math.max(target,piston-.4f);
+        if(piston==1&&previousPiston!=1&&isAttachedToBlock()){SuperGlueItem.spawnParticles(level,worldPosition,getBlockState().getValue(StickerBlock.FACING),true);playSound(true);}
+        float next=isBlockStateExtended()?1:0;
+        if(next!=target){if(next==0&&target==1&&isAttachedToBlock())playSound(false);target=next;}
+    }
+    private void playSound(boolean attach){level.playLocalSound(worldPosition,AllSoundEvents.SLIME_ADDED,SoundSource.BLOCKS,.35f,attach?.75f:.2f,false);}
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){return super.getUpdateTag(registries);}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
 }

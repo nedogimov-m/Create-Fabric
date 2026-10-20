@@ -1,0 +1,13 @@
+{
+  "type": "create:deploying",
+  "ingredients": [
+    "minecraft:copper_door",
+    "minecraft:honeycomb_block"
+  ],
+  "keep_held_item": true,
+  "results": [
+    {
+      "id": "minecraft:waxed_copper_door"
+    }
+  ]
+}

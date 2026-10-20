@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/schematic_and_quill",
+    "particle": "create:item/schematic_and_quill"
+  }
+}

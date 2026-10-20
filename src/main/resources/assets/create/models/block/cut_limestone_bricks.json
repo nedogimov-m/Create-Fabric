@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "create:block/palettes/stone_types/brick/limestone_cut_brick",
+    "particle": "create:block/palettes/stone_types/brick/limestone_cut_brick"
+  }
+}

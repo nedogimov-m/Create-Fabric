@@ -1,0 +1,20 @@
+{
+  "type": "create:cutting",
+  "ingredients": [
+    "atmospheric:crustose_wood"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "id": "atmospheric:aspen_wood"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "atmospheric"
+      ]
+    }
+  ]
+}

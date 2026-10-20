@@ -1,151 +1,36 @@
 package com.simibubi.create.content.equipment.toolbox;
 
-import java.util.List;
-import java.util.WeakHashMap;
-import java.util.stream.Collectors;
-
-import com.simibubi.create.foundation.networking.ISyncPersistentData.PersistentDataPacket;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import net.createmod.catnip.platform.CatnipServices;
-import net.createmod.catnip.data.WorldAttached;
-import net.createmod.catnip.nbt.NBTHelper;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.transfer.v1.item.*;
+import net.fabricmc.fabric.api.transfer.v1.storage.base.SingleSlotStorage;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
+import net.minecraft.server.level.*;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 
-public class ToolboxHandler {
-
-	public static final WorldAttached<WeakHashMap<BlockPos, ToolboxBlockEntity>> toolboxes =
-		new WorldAttached<>(w -> new WeakHashMap<>());
-
-	public static void onLoad(ToolboxBlockEntity be) {
-		toolboxes.get(be.getLevel())
-			.put(be.getBlockPos(), be);
-	}
-
-	public static void onUnload(ToolboxBlockEntity be) {
-		toolboxes.get(be.getLevel())
-			.remove(be.getBlockPos());
-	}
-
-	static int validationTimer = 20;
-
-	public static void entityTick(Entity entity, Level world) {
-		if (world.isClientSide)
-			return;
-		if (!(world instanceof ServerLevel))
-			return;
-		if (!(entity instanceof ServerPlayer player))
-			return;
-		if (entity.tickCount % validationTimer != 0)
-			return;
-
-		if (!player.getPersistentData()
-			.contains("CreateToolboxData"))
-			return;
-
-		boolean sendData = false;
-		CompoundTag compound = player.getPersistentData()
-			.getCompound("CreateToolboxData");
-		for (int i = 0; i < 9; i++) {
-			String key = String.valueOf(i);
-			if (!compound.contains(key))
-				continue;
-
-			CompoundTag data = compound.getCompound(key);
-			BlockPos pos = NBTHelper.readBlockPos(data, "Pos");
-			int slot = data.getInt("Slot");
-
-			if (!world.isLoaded(pos))
-				continue;
-			if (!(world.getBlockState(pos)
-				.getBlock() instanceof ToolboxBlock)) {
-				compound.remove(key);
-				sendData = true;
-				continue;
-			}
-
-			BlockEntity prevBlockEntity = world.getBlockEntity(pos);
-			if (prevBlockEntity instanceof ToolboxBlockEntity)
-				((ToolboxBlockEntity) prevBlockEntity).connectPlayer(slot, player, i);
-		}
-
-		if (sendData)
-			syncData(player);
-	}
-
-	public static void playerLogin(Player player) {
-		if (!(player instanceof ServerPlayer))
-			return;
-		if (player.getPersistentData()
-			.contains("CreateToolboxData")
-			&& !player.getPersistentData()
-			.getCompound("CreateToolboxData")
-			.isEmpty()) {
-			syncData(player);
-		}
-	}
-
-	public static void syncData(Player player) {
-		CatnipServices.NETWORK.sendToClient((ServerPlayer) player,
-			new PersistentDataPacket(player));
-	}
-
-	public static List<ToolboxBlockEntity> getNearest(LevelAccessor world, Player player, int maxAmount) {
-		Vec3 location = player.position();
-		double maxRange = getMaxRange(player);
-		return toolboxes.get(world)
-			.keySet()
-			.stream()
-			.filter(p -> distance(location, p) < maxRange * maxRange)
-			.sorted((p1, p2) -> Double.compare(distance(location, p1), distance(location, p2)))
-			.limit(maxAmount)
-			.map(toolboxes.get(world)::get)
-			.filter(ToolboxBlockEntity::isFullyInitialized)
-			.collect(Collectors.toList());
-	}
-
-	public static void unequip(Player player, int hotbarSlot, boolean keepItems) {
-		CompoundTag compound = player.getPersistentData()
-			.getCompound("CreateToolboxData");
-		Level world = player.level();
-		String key = String.valueOf(hotbarSlot);
-		if (!compound.contains(key))
-			return;
-
-		CompoundTag prevData = compound.getCompound(key);
-		BlockPos prevPos = NBTHelper.readBlockPos(prevData, "Pos");
-		int prevSlot = prevData.getInt("Slot");
-
-		BlockEntity prevBlockEntity = world.getBlockEntity(prevPos);
-		if (prevBlockEntity instanceof ToolboxBlockEntity toolbox) {
-			toolbox.unequip(prevSlot, player, hotbarSlot, keepItems || !ToolboxHandler.withinRange(player, toolbox));
-		}
-		compound.remove(key);
-	}
-
-	public static boolean withinRange(Player player, ToolboxBlockEntity box) {
-		if (player.level() != box.getLevel())
-			return false;
-		double maxRange = getMaxRange(player);
-		return distance(player.position(), box.getBlockPos()) < maxRange * maxRange;
-	}
-
-	public static double distance(Vec3 location, BlockPos p) {
-		return location.distanceToSqr(p.getX() + 0.5f, p.getY(), p.getZ() + 0.5f);
-	}
-
-	public static double getMaxRange(Player player) {
-		return AllConfigs.server().equipment.toolboxRange.get()
-			.doubleValue();
-	}
-
+public final class ToolboxHandler {
+    private static final Map<Level,WeakHashMap<BlockPos,ToolboxBlockEntity>> TOOLBOXES=new WeakHashMap<>();
+    public static void onLoad(ToolboxBlockEntity box){if(box.getLevel()!=null)TOOLBOXES.computeIfAbsent(box.getLevel(),key->new WeakHashMap<>()).put(box.getBlockPos(),box);}
+    public static void onWorldUnload(Level level){if(level!=null)TOOLBOXES.remove(level);}
+    public static void onUnload(ToolboxBlockEntity box){var boxes=TOOLBOXES.get(box.getLevel());if(boxes!=null)boxes.remove(box.getBlockPos(),box);}
+    public static boolean live(ToolboxBlockEntity box){return box!=null&&box.getLevel()!=null&&!box.isRemoved()&&LoadedLevelAccess.blockEntity(box.getLevel(),box.getBlockPos())==box&&LoadedLevelAccess.blockState(box.getLevel(),box.getBlockPos()).getBlock() instanceof ToolboxBlock;}
+    public static ToolboxBlockEntity resolve(Player player,ToolboxBindings.Binding binding){if(binding==null||!binding.dimension().isEmpty()&&!binding.dimension().equals(player.level().dimension().identifier().toString()))return null;return LoadedLevelAccess.blockEntity(player.level(),binding.pos()) instanceof ToolboxBlockEntity box&&ToolboxBindings.matches(player,binding,box)&&live(box)?box:null;}
+    public static void entityTick(ServerPlayer player){if(player.tickCount%20!=0)return;for(int hotbar=0;hotbar<9;hotbar++){var binding=ToolboxBindings.get(player,hotbar);if(binding==null)continue;if(!binding.dimension().isEmpty()&&!binding.dimension().equals(player.level().dimension().identifier().toString())||!player.level().isLoaded(binding.pos()))continue;var box=resolve(player,binding);if(box==null){ToolboxBindings.remove(player,hotbar);continue;}if(box.getUniqueId()==null)continue;if(binding.owner()==null||binding.dimension().isEmpty())ToolboxBindings.set(player,hotbar,box,binding.compartment());box.connectPlayer(binding.compartment(),player,hotbar);}}
+    public static void unequip(Player player,int hotbar,boolean keepItems){if(hotbar<0||hotbar>8)return;var binding=ToolboxBindings.get(player,hotbar);if(binding==null)return;var box=resolve(player,binding);if(box!=null){box.disconnectPlayer(binding.compartment(),player);if(!keepItems&&withinRange(player,box))returnItems(player,box,hotbar,binding.compartment(),player.getInventory().getItem(hotbar).getCount(),false);}ToolboxBindings.remove(player,hotbar);}
+    public static boolean equip(ServerPlayer player,BlockPos pos,UUID owner,int compartment,int hotbar){if(hotbar<0||hotbar>8)return false;if(pos==null){unequip(player,hotbar,false);return true;}if(!player.level().isLoaded(pos)||!(LoadedLevelAccess.blockEntity(player.level(),pos) instanceof ToolboxBlockEntity box)||!live(box)||!withinRange(player,box)||owner==null||!owner.equals(box.getUniqueId()))return false;unequip(player,hotbar,false);if(compartment<0||compartment>=8)return true;ItemStack held=player.getInventory().getItem(hotbar);if(!held.isEmpty()&&!ToolboxInventory.canItemsShareCompartment(held,box.inventory.getFilter(compartment)))returnIncompatible(player,box,hotbar);ToolboxBindings.set(player,hotbar,box,compartment);box.connectPlayer(compartment,player,hotbar);return true;}
+    private static void returnIncompatible(Player player,ToolboxBlockEntity box,int hotbar){var source=PlayerInventoryStorage.of(player).getSlot(hotbar);if(source.isResourceBlank())return;ItemVariant original=source.getResource(),clean=ItemVariant.of(ToolboxInventory.cleanItemNBT(original.toStack()));try(var tx=Transaction.openOuter()){long inserted=box.inventory.inLimitedMode(()->box.inventory.insert(clean,source.getAmount(),tx));long remaining=source.getAmount()-inserted;long moved=new ItemReturnInvWrapper(player).insert(original,remaining,tx);long total=inserted+moved;if(total>0&&source.extract(original,total,tx)!=total)throw new IllegalStateException("Player toolbox return source changed");tx.commit();}}
+    public static int replenish(Player player,ToolboxBlockEntity box,int hotbar,int compartment,int amount,boolean simulate){if(amount<=0||!live(box)||!withinRange(player,box))return 0;SingleSlotStorage<ItemVariant> target=PlayerInventoryStorage.of(player).getSlot(hotbar);ItemVariant variant=target.getResource();if(variant.isBlank()){for(int i=3;i>=0;i--){var candidate=box.inventory.getSlot(compartment*4+i);if(!candidate.isResourceBlank()){variant=candidate.getResource();break;}}}if(variant.isBlank())return 0;try(var tx=Transaction.openOuter()){long available=box.inventory.extractCompartment(variant,amount,compartment,tx);long accepted=target.insert(variant,available,tx);if(accepted<available){long restored=box.inventory.insertCompartment(variant,available-accepted,compartment,tx,true);if(restored!=available-accepted)throw new IllegalStateException("Cannot restore toolbox replenishment remainder");}if(!simulate&&accepted>0)tx.commit();return (int)accepted;}}
+    public static int returnItems(Player player,ToolboxBlockEntity box,int hotbar,int compartment,int amount,boolean simulate){if(amount<=0||!live(box)||!withinRange(player,box))return 0;var source=PlayerInventoryStorage.of(player).getSlot(hotbar);if(source.isResourceBlank())return 0;ItemVariant original=source.getResource(),clean=ItemVariant.of(ToolboxInventory.cleanItemNBT(original.toStack()));try(var tx=Transaction.openOuter()){long moved=box.inventory.insertCompartment(clean,Math.min(amount,source.getAmount()),compartment,tx,true);if(source.extract(original,moved,tx)!=moved)throw new IllegalStateException("Player toolbox return source changed");if(!simulate)tx.commit();return (int)moved;}}
+    public static boolean disposeAll(ServerPlayer player,BlockPos pos,UUID owner){if(!player.level().isLoaded(pos)||!(LoadedLevelAccess.blockEntity(player.level(),pos) instanceof ToolboxBlockEntity box)||!live(box)||!withinRange(player,box)||owner==null||!owner.equals(box.getUniqueId()))return false;for(int hotbar=0;hotbar<9;hotbar++)if(ToolboxBindings.matches(player,ToolboxBindings.get(player,hotbar),box))unequip(player,hotbar,true);var storage=PlayerInventoryStorage.of(player);box.inventory.inLimitedMode(inventory->{try(var tx=Transaction.openOuter()){for(int slot=0;slot<36;slot++){var source=storage.getSlot(slot);if(source.isResourceBlank())continue;ItemVariant variant=source.getResource();long inserted=inventory.insert(variant,source.getAmount(),tx);if(source.extract(variant,inserted,tx)!=inserted)throw new IllegalStateException("Player toolbox disposal source changed");}tx.commit();}});return true;}
+    public static List<ToolboxBlockEntity> getNearest(Level level,Player player,int limit){var boxes=TOOLBOXES.get(level);if(boxes==null)return List.of();double range=getMaxRange(player);return boxes.values().stream().filter(ToolboxHandler::live).filter(ToolboxBlockEntity::isFullyInitialized).filter(box->distance(player.position(),box.getBlockPos())<range*range).sorted(Comparator.comparingDouble(box->distance(player.position(),box.getBlockPos()))).limit(Math.max(0,limit)).toList();}
+    public static boolean withinRange(Player player,ToolboxBlockEntity box){double range=getMaxRange(player);return player.level()==box.getLevel()&&distance(player.position(),box.getBlockPos())<range*range;}
+    public static double getMaxRange(Player player){return ToolboxConfig.get(player.level());}
+    public static double distance(Vec3 location,BlockPos pos){return location.distanceToSqr(pos.getX()+.5,pos.getY(),pos.getZ()+.5);}
+    public static void register(){ServerTickEvents.END_LEVEL_TICK.register(level->{for(ServerPlayer player:level.players())entityTick(player);});net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STOPPED.register(server->TOOLBOXES.keySet().removeIf(level->level.getServer()==server));}
+    private ToolboxHandler(){}
 }

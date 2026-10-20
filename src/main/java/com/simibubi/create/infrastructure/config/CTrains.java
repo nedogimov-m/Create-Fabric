@@ -1,8 +1,7 @@
 package com.simibubi.create.infrastructure.config;
 
-import net.createmod.catnip.config.ConfigBase;
 
-public class CTrains extends ConfigBase {
+public class CTrains extends NativeConfigBase {
 
 	public final ConfigBool trainsCauseDamage = b(true, "trainsCauseDamage", Comments.trainsCauseDamage);
 	public final ConfigInt maxTrackPlacementLength = i(32, 16, 128, "maxTrackPlacementLength", Comments.maxTrackPlacementLength);

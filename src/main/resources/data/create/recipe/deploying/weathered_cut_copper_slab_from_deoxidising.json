@@ -1,0 +1,13 @@
+{
+  "type": "create:deploying",
+  "ingredients": [
+    "minecraft:oxidized_cut_copper_slab",
+    "#minecraft:axes"
+  ],
+  "keep_held_item": true,
+  "results": [
+    {
+      "id": "minecraft:weathered_cut_copper_slab"
+    }
+  ]
+}

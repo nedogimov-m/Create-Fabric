@@ -21,6 +21,7 @@ public class BeltPressingCallbacks {
 
 	static ProcessingResult onItemReceived(TransportedItemStack transported,
 		TransportedItemStackHandlerBehaviour handler, PressingBehaviour behaviour) {
+        if(!behaviour.isCurrentOwner())return PASS;
 		if (behaviour.specifics.getKineticSpeed() == 0)
 			return PASS;
 		if (behaviour.running)
@@ -35,6 +36,7 @@ public class BeltPressingCallbacks {
 	static ProcessingResult whenItemHeld(TransportedItemStack transported, TransportedItemStackHandlerBehaviour handler,
 		PressingBehaviour behaviour) {
 
+        if(!behaviour.isCurrentOwner())return PASS;
 		if (behaviour.specifics.getKineticSpeed() == 0)
 			return PASS;
 		if (!behaviour.running)
@@ -42,6 +44,9 @@ public class BeltPressingCallbacks {
 		if (behaviour.runningTicks != PressingBehaviour.CYCLE / 2)
 			return HOLD;
 
+        if(behaviour.hasAppliedImpact())return HOLD;
+        if(behaviour.specifics instanceof PressingBehaviour.NativePressingBehaviourSpecifics)
+            return behaviour.applyNativeImpact()?HOLD:PASS;
 		behaviour.particleItems.clear();
 		ArrayList<ItemStack> results = new ArrayList<>();
 		if (!behaviour.specifics.tryProcessOnBelt(transported, results, false))
@@ -57,7 +62,7 @@ public class BeltPressingCallbacks {
 				boolean centered = BeltHelper.isItemUpright(stack);
 				copy.stack = stack;
 				copy.locked = true;
-				copy.angle = centered ? 180 : Create.RANDOM.nextInt(360);
+				copy.angle = centered ? 180 : behaviour.getWorld().getRandom().nextInt(360);
 				return copy;
 			})
 			.collect(Collectors.toList());
@@ -78,6 +83,7 @@ public class BeltPressingCallbacks {
 				handler.handleProcessingOnItem(transported, TransportedResult.convertToAndLeaveHeld(collect, left));
 		}
 
+        behaviour.markImpactApplied();
 		behaviour.blockEntity.sendData();
 		return HOLD;
 	}

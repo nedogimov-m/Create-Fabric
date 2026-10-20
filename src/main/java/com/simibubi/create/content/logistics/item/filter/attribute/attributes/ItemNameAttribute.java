@@ -30,17 +30,7 @@ public record ItemNameAttribute(String itemName) implements ItemAttribute {
 		.map(ItemNameAttribute::new, ItemNameAttribute::itemName);
 
 	private static String extractCustomName(ItemStack stack, Level level) {
-		if (stack.has(DataComponents.CUSTOM_NAME)) {
-			try {
-				String customName = stack.getOrDefault(DataComponents.CUSTOM_NAME, Component.empty()).getString();
-				Component component = Component.Serializer.fromJson(customName, level.registryAccess());
-				if (component != null) {
-					return component.getString();
-				}
-			} catch (JsonParseException ignored) {
-			}
-		}
-		return "";
+		var name=stack.get(DataComponents.CUSTOM_NAME);return name==null?"":name.getString();
 	}
 
 	@Override

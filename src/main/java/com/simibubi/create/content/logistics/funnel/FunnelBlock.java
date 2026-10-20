@@ -1,182 +1,49 @@
 package com.simibubi.create.content.logistics.funnel;
 
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllItems;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.logistics.box.PackageEntity;
-import com.simibubi.create.foundation.advancement.AdvancementBehaviour;
-import com.simibubi.create.foundation.block.ProperWaterloggedBlock;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.item.ItemHelper;
-
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.AxisDirection;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.*;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.EntityCollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
 
-public abstract class FunnelBlock extends AbstractDirectionalFunnelBlock {
-
-	public static final BooleanProperty EXTRACTING = BooleanProperty.create("extracting");
-
-	public FunnelBlock(Properties p_i48415_1_) {
-		super(p_i48415_1_);
-		registerDefaultState(defaultBlockState().setValue(EXTRACTING, false));
-	}
-
-	public abstract BlockState getEquivalentBeltFunnel(BlockGetter world, BlockPos pos, BlockState state);
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		BlockState state = super.getStateForPlacement(context);
-
-		boolean sneak = context.getPlayer() != null && context.getPlayer()
-			.isShiftKeyDown();
-		state = state.setValue(EXTRACTING, !sneak);
-
-		for (Direction direction : context.getNearestLookingDirections()) {
-			BlockState blockstate = state.setValue(FACING, direction.getOpposite());
-			if (blockstate.canSurvive(context.getLevel(), context.getClickedPos()))
-				return blockstate.setValue(POWERED, state.getValue(POWERED));
-		}
-
-		return state;
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(EXTRACTING));
-	}
-
-	@Override
-	public void onRemove(BlockState state, Level world, BlockPos pos, BlockState newState, boolean isMoving) {
-		if (newState.getBlock() instanceof BeltFunnelBlock bfb && bfb.isOfSameType(this))
-			return;
-		super.onRemove(state, world, pos, newState, isMoving);
-	}
-
-	@Override
-	public void setPlacedBy(Level pLevel, BlockPos pPos, BlockState pState, LivingEntity pPlacer, ItemStack pStack) {
-		super.setPlacedBy(pLevel, pPos, pState, pPlacer, pStack);
-		AdvancementBehaviour.setPlacedBy(pLevel, pPos, pPlacer);
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		boolean shouldntInsertItem = AllBlocks.MECHANICAL_ARM.isIn(stack) || !canInsertIntoFunnel(state);
-
-		if (AllItems.WRENCH.isIn(stack))
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		if (hitResult.getDirection() == getFunnelFacing(state) && !shouldntInsertItem) {
-			if (!level.isClientSide)
-				withBlockEntityDo(level, pos, be -> {
-					ItemStack toInsert = stack.copy();
-					ItemStack remainder = tryInsert(level, pos, toInsert, false);
-					if (!ItemStack.matches(remainder, toInsert) || remainder.getCount() != stack.getCount())
-						player.setItemInHand(hand, remainder);
-				});
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-	}
-
-	@Override
-	public InteractionResult onWrenched(BlockState state, UseOnContext context) {
-		Level world = context.getLevel();
-		if (!world.isClientSide)
-			world.setBlockAndUpdate(context.getClickedPos(), state.cycle(EXTRACTING));
-		return InteractionResult.SUCCESS;
-	}
-
-	@Override
-	public void entityInside(BlockState state, Level worldIn, BlockPos pos, Entity entityIn) {
-		if (worldIn.isClientSide)
-			return;
-		ItemStack stack = ItemHelper.fromItemEntity(entityIn);
-		if (stack.isEmpty())
-			return;
-		if (!canInsertIntoFunnel(state))
-			return;
-
-		Direction direction = getFunnelFacing(state);
-		Vec3 openPos = VecHelper.getCenterOf(pos)
-			.add(Vec3.atLowerCornerOf(direction.getNormal())
-				.scale(entityIn instanceof ItemEntity ? -.25f : -.125f));
-		Vec3 diff = entityIn.position()
-			.subtract(openPos);
-		double projectedDiff = direction.getAxis()
-			.choose(diff.x, diff.y, diff.z);
-		if (projectedDiff < 0 == (direction.getAxisDirection() == AxisDirection.POSITIVE))
-			return;
-		float yOffset = direction == Direction.UP ? 0.25f : direction == Direction.DOWN ? -0.5f : -0.5f;
-		FilteringBehaviour filter = BlockEntityBehaviour.get(worldIn, pos, FilteringBehaviour.TYPE);
-		if (filter.test(stack) && !PackageEntity.centerPackage(entityIn, openPos.add(0, yOffset, 0)))
-			return;
-
-		ItemStack remainder = tryInsert(worldIn, pos, stack, false);
-		if (remainder.isEmpty())
-			entityIn.discard();
-		if (remainder.getCount() < stack.getCount() && entityIn instanceof ItemEntity)
-			((ItemEntity) entityIn).setItem(remainder);
-	}
-
-	protected boolean canInsertIntoFunnel(BlockState state) {
-		return !state.getValue(POWERED) && !state.getValue(EXTRACTING);
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter world, BlockPos pos, CollisionContext context) {
-		Direction facing = state.getValue(FACING);
-		return facing == Direction.DOWN ? AllShapes.FUNNEL_CEILING
-			: facing == Direction.UP ? AllShapes.FUNNEL_FLOOR : AllShapes.FUNNEL_WALL.get(facing);
-	}
-
-	@Override
-	public VoxelShape getCollisionShape(BlockState state, BlockGetter world, BlockPos pos, CollisionContext context) {
-		if (context instanceof EntityCollisionContext
-			&& ((EntityCollisionContext) context).getEntity() instanceof ItemEntity && getFacing(state).getAxis()
-				.isHorizontal())
-			return AllShapes.FUNNEL_COLLISION.get(getFacing(state));
-		return getShape(state, world, pos, context);
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction direction, BlockState p_196271_3_, LevelAccessor world,
-		BlockPos pos, BlockPos p_196271_6_) {
-		updateWater(world, state, pos);
-		if (getFacing(state).getAxis()
-			.isVertical() || direction != Direction.DOWN)
-			return state;
-		BlockState equivalentFunnel =
-			ProperWaterloggedBlock.withWater(world, getEquivalentBeltFunnel(null, null, state), pos);
-		if (BeltFunnelBlock.isOnValidBelt(equivalentFunnel, world, pos))
-			return equivalentFunnel.setValue(BeltFunnelBlock.SHAPE,
-				BeltFunnelBlock.getShapeForPosition(world, pos, getFacing(state), state.getValue(EXTRACTING)));
-		return state;
-	}
-
+public class FunnelBlock extends AbstractFunnelBlock {
+    public static final EnumProperty<Direction> FACING=BlockStateProperties.FACING;
+    public static final BooleanProperty EXTRACTING=BooleanProperty.create("extracting");
+    public FunnelBlock(Properties properties,boolean brass){super(properties,brass);registerDefaultState(defaultBlockState().setValue(FACING,Direction.NORTH).setValue(EXTRACTING,false));}
+    public BeltFunnelBlock belt(){return brass?com.simibubi.create.AllBlocks.BRASS_BELT_FUNNEL:com.simibubi.create.AllBlocks.ANDESITE_BELT_FUNNEL;}
+    public BlockState getEquivalentBeltFunnel(BlockGetter level,BlockPos pos,BlockState state){return belt().defaultBlockState().setValue(BeltFunnelBlock.HORIZONTAL_FACING,getFacing(state)).setValue(POWERED,state.getValue(POWERED)).setValue(WATERLOGGED,state.getValue(WATERLOGGED));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){super.createBlockStateDefinition(builder);builder.add(FACING,EXTRACTING);}
+    @Override protected Direction getFacing(BlockState state){return state.getValue(FACING);}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){var state=super.getStateForPlacement(context).setValue(EXTRACTING,!context.isSecondaryUseActive());for(var look:context.getNearestLookingDirections()){var candidate=state.setValue(FACING,look.getOpposite());if(candidate.canSurvive(context.getLevel(),context.getClickedPos()))return candidate;}return state;}
+    @Override protected BlockState rotate(BlockState state,Rotation rotation){return state.setValue(FACING,rotation.rotate(getFacing(state)));}
+    @Override protected BlockState mirror(BlockState state,Mirror mirror){return state.rotate(mirror.getRotation(getFacing(state)));}
+    @Override public InteractionResult onWrenched(BlockState state,UseOnContext context){if(!context.getLevel().isClientSide())context.getLevel().setBlockAndUpdate(context.getClickedPos(),state.cycle(EXTRACTING));return InteractionResult.SUCCESS;}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){
+        var handled=super.useItemOn(stack,state,level,pos,player,hand,hit);if(handled.consumesAction())return handled;
+        if(!player.mayBuild()||!level.mayInteract(player,pos)||stack.is(com.simibubi.create.AllItems.WRENCH)||!canInsertIntoFunnel(state)||hit.getDirection()!=getFacing(state))return InteractionResult.PASS;
+        if(!level.isClientSide()){var remaining=tryInsert(level,pos,stack,false);if(remaining.getCount()!=stack.getCount())player.setItemInHand(hand,remaining);}return InteractionResult.SUCCESS;
+    }
+    public boolean canInsertIntoFunnel(BlockState state){return !state.getValue(POWERED)&&!state.getValue(EXTRACTING);}
+    @Override protected void entityInside(BlockState state,Level level,BlockPos pos,Entity entity,InsideBlockEffectApplier effects,boolean inside){
+        if(level.isClientSide()||!canInsertIntoFunnel(state)||entity.isRemoved())return;
+        var before=entity instanceof ItemEntity item?item.getItem():entity instanceof com.simibubi.create.content.logistics.box.PackageEntity box?box.getBox():ItemStack.EMPTY;if(before.isEmpty())return;
+        var facing=getFacing(state);var open=Vec3.atCenterOf(pos).add(facing.getUnitVec3().scale(entity instanceof ItemEntity?-.25:-.125));var diff=entity.position().subtract(open);double projection=facing.getAxis().choose(diff.x,diff.y,diff.z);if((projection<0)==(facing.getAxisDirection()==Direction.AxisDirection.POSITIVE))return;
+        var be=com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,pos);if(be instanceof FunnelBlockEntity funnel&&funnel.filtering.test(before)&&!com.simibubi.create.content.logistics.box.PackageEntity.centerPackage(entity,open.add(0,facing==Direction.UP?.25:-.5,0)))return;
+        var remaining=tryInsert(level,pos,before,false);if(remaining.isEmpty())entity.discard();else if(entity instanceof ItemEntity item&&remaining.getCount()!=before.getCount())item.setItem(remaining);
+    }
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return FunnelShapes.normal(getFacing(state));}
+    @Override protected VoxelShape getCollisionShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){if(context instanceof EntityCollisionContext entity&&entity.getEntity() instanceof ItemEntity&&getFacing(state).getAxis().isHorizontal())return FunnelShapes.collision(getFacing(state));return getShape(state,level,pos,context);}
+    @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction side,BlockPos neighborPos,BlockState neighbor,RandomSource random){
+        super.updateShape(state,level,ticks,pos,side,neighborPos,neighbor,random);if(getFacing(state).getAxis().isHorizontal()&&side==Direction.DOWN&&BeltFunnelBlock.isOnValidBelt(state,level,pos))return getEquivalentBeltFunnel(level,pos,state).setValue(BeltFunnelBlock.SHAPE,BeltFunnelBlock.getShapeForPosition(level,pos,getFacing(state),state.getValue(EXTRACTING)));return state;
+    }
 }

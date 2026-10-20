@@ -57,13 +57,13 @@ public class BigItemStack {
 		if (obj == this)
 			return true;
 		if (obj instanceof BigItemStack other)
-			return ItemStack.isSameItemSameComponents(stack, other.stack) && count == other.count;
+			return com.simibubi.create.foundation.item.ItemSampleEquality.same(stack, other.stack) && count == other.count;
 		return false;
 	}
 
 	@Override
 	public int hashCode() {
-		return (nullHash(stack) * 31) ^ Integer.hashCode(count);
+		return (com.simibubi.create.foundation.item.ItemSampleEquality.hash(stack) * 31) ^ Integer.hashCode(count);
 	}
 
 	int nullHash(Object o) {

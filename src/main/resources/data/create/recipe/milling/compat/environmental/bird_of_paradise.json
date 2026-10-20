@@ -1,0 +1,29 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "environmental:bird_of_paradise"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "count": 3,
+      "id": "minecraft:orange_dye"
+    },
+    {
+      "chance": 0.25,
+      "id": "minecraft:blue_dye"
+    },
+    {
+      "chance": 0.25,
+      "id": "minecraft:red_dye"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "environmental"
+      ]
+    }
+  ]
+}

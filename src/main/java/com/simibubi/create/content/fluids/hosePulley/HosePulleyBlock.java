@@ -3,81 +3,32 @@ package com.simibubi.create.content.fluids.hosePulley;
 import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.content.fluids.pipes.FluidPipeBlock;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
 
-public class HosePulleyBlock extends HorizontalKineticBlock implements IBE<HosePulleyBlockEntity> {
-
-	public HosePulleyBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return state.getValue(HORIZONTAL_FACING)
-			.getClockWise()
-			.getAxis();
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		Direction preferredHorizontalFacing = getPreferredHorizontalFacing(context);
-		return this.defaultBlockState()
-			.setValue(HORIZONTAL_FACING,
-				preferredHorizontalFacing != null ? preferredHorizontalFacing.getCounterClockWise()
-					: context.getHorizontalDirection()
-						.getOpposite());
-	}
-
-	@Override
-	public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-		return state.getValue(HORIZONTAL_FACING)
-			.getClockWise() == face;
-	}
-
-	public static boolean hasPipeTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-		return state.getValue(HORIZONTAL_FACING)
-			.getCounterClockWise() == face;
-	}
-
-	@Override
-	public Direction getPreferredHorizontalFacing(BlockPlaceContext context) {
-		Direction fromParent = super.getPreferredHorizontalFacing(context);
-		if (fromParent != null)
-			return fromParent;
-
-		Direction prefferedSide = null;
-		for (Direction facing : Iterate.horizontalDirections) {
-			BlockPos pos = context.getClickedPos()
-				.relative(facing);
-			BlockState blockState = context.getLevel()
-				.getBlockState(pos);
-			if (FluidPipeBlock.canConnectTo(context.getLevel(), pos, blockState, facing))
-				if (prefferedSide != null && prefferedSide.getAxis() != facing.getAxis()) {
-					prefferedSide = null;
-					break;
-				} else
-					prefferedSide = facing;
-		}
-		return prefferedSide == null ? null : prefferedSide.getOpposite();
-	}
-
-	@Override
-	public Class<HosePulleyBlockEntity> getBlockEntityClass() {
-		return HosePulleyBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends HosePulleyBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.HOSE_PULLEY.get();
-	}
-
+public final class HosePulleyBlock extends HorizontalKineticBlock {
+    public HosePulleyBlock(Properties properties){super(properties);registerDefaultState(defaultBlockState().setValue(HORIZONTAL_FACING,Direction.NORTH));}
+    @Override public void setPlacedBy(net.minecraft.world.level.Level level,net.minecraft.core.BlockPos pos,net.minecraft.world.level.block.state.BlockState state,net.minecraft.world.entity.LivingEntity placer,net.minecraft.world.item.ItemStack stack){super.setPlacedBy(level,pos,state,placer,stack);if(com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,pos) instanceof HosePulleyBlockEntity device)device.sourceAdvancements.place(placer);}
+    @Override public Direction.Axis getRotationAxis(BlockState state){return state.getValue(HORIZONTAL_FACING).getClockWise().getAxis();}
+    @Override public boolean hasShaftTowards(LevelReader level,BlockPos pos,BlockState state,Direction side){return state.getValue(HORIZONTAL_FACING).getClockWise()==side;}
+    public static boolean hasPipeTowards(BlockState state,Direction side){return state.getValue(HORIZONTAL_FACING).getCounterClockWise()==side;}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){var preferred=getPreferredHorizontalFacing(context);return defaultBlockState().setValue(HORIZONTAL_FACING,preferred==null?context.getHorizontalDirection().getOpposite():preferred.getCounterClockWise());}
+    @Override public Direction getPreferredHorizontalFacing(BlockPlaceContext context){
+        var parent=super.getPreferredHorizontalFacing(context);if(parent!=null)return parent;
+        Direction preferred=null;
+        for(var side:Direction.Plane.HORIZONTAL){
+            var pos=context.getClickedPos().relative(side);var state=LoadedLevelAccess.blockState(context.getLevel(),pos);
+            if(FluidPipeBlock.canConnectTo(context.getLevel(),pos,state,side)){
+                if(preferred!=null&&preferred.getAxis()!=side.getAxis())return null;preferred=side;
+            }
+        }return preferred==null?null:preferred.getOpposite();
+    }
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new HosePulleyBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.HOSE_PULLEY,HosePulleyBlockEntity::tick);}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
 }

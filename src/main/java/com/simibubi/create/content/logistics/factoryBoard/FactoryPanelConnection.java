@@ -7,7 +7,7 @@ import java.util.List;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
-import net.createmod.catnip.math.VecHelper;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Direction.Axis;
@@ -57,8 +57,7 @@ public class FactoryPanelConnection {
 
 		FactoryPanelBehaviour fromBehaviour = FactoryPanelBehaviour.at(level, to);
 		final Vec3 diff = calculatePathDiff(state, to);
-		final Vec3 start = fromBehaviour != null ? fromBehaviour.getSlotPositioning()
-			.getLocalOffset(level, to.pos(), state)
+		final Vec3 start = fromBehaviour != null ? FactoryPanelSlotPositioning.getCenterOfSlot(state, to.slot())
 			.add(Vec3.atLowerCornerOf(to.pos())) : Vec3.ZERO;
 		final float xRot = Mth.RAD_TO_DEG * FactoryPanelBlock.getXRot(state);
 		final float yRot = Mth.RAD_TO_DEG * FactoryPanelBlock.getYRot(state);
@@ -122,11 +121,11 @@ public class FactoryPanelConnection {
 					travelled = travelled.relative(d);
 					Vec3 testOffset = Vec3.atLowerCornerOf(travelled)
 						.scale(0.5);
-					testOffset = VecHelper.rotate(testOffset, 180, Axis.Y);
-					testOffset = VecHelper.rotate(testOffset, xRot + 90, Axis.X);
-					testOffset = VecHelper.rotate(testOffset, yRot, Axis.Y);
+					testOffset = FactoryPanelTransform.rotate(testOffset, 180, Axis.Y);
+					testOffset = FactoryPanelTransform.rotate(testOffset, xRot + 90, Axis.X);
+					testOffset = FactoryPanelTransform.rotate(testOffset, yRot, Axis.Y);
 					Vec3 v = start.add(testOffset);
-					if (!level.noCollision(new AABB(v, v).inflate(1 / 128f)))
+					if (level.isLoaded(BlockPos.containing(v)) && !level.noCollision(new AABB(v, v).inflate(1 / 128f)))
 						continue ModeFinder;
 				}
 			}
@@ -145,9 +144,9 @@ public class FactoryPanelConnection {
 
 		Vec3 diff = Vec3.atLowerCornerOf(to.pos()
 			.subtract(from.pos()));
-		diff = VecHelper.rotate(diff, -yRot, Axis.Y);
-		diff = VecHelper.rotate(diff, -xRot - 90, Axis.X);
-		diff = VecHelper.rotate(diff, -180, Axis.Y);
+		diff = FactoryPanelTransform.rotate(diff, -yRot, Axis.Y);
+		diff = FactoryPanelTransform.rotate(diff, -xRot - 90, Axis.X);
+		diff = FactoryPanelTransform.rotate(diff, -180, Axis.Y);
 		diff = diff.add(slotDiffx * .5, 0, slotDiffY * .5);
 		diff = diff.multiply(1, 0, 1);
 		return diff;

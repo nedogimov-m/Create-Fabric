@@ -11,9 +11,6 @@ import com.simibubi.create.api.contraption.transformable.TransformableBlock;
 import com.simibubi.create.api.contraption.transformable.TransformableBlockEntity;
 
 import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecs;
-import net.createmod.catnip.math.VecHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Direction.Axis;
@@ -32,21 +29,18 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.AttachFace;
 import net.minecraft.world.level.block.state.properties.BellAttachType;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.Vec3;
 
 public class StructureTransform {
-	public static final StreamCodec<ByteBuf, StructureTransform> STREAM_CODEC = StreamCodec.composite(
-	    BlockPos.STREAM_CODEC, i -> i.offset,
-		ByteBufCodecs.INT, i -> i.angle,
-		CatnipStreamCodecBuilders.nullable(CatnipStreamCodecs.AXIS), i -> i.rotationAxis,
-		CatnipStreamCodecBuilders.nullable(CatnipStreamCodecs.ROTATION), i -> i.rotation,
-		CatnipStreamCodecBuilders.nullable(CatnipStreamCodecs.MIRROR), i -> i.mirror,
-	    StructureTransform::new
-	);
+	public static final StreamCodec<ByteBuf, StructureTransform> STREAM_CODEC = StreamCodec.of((buf,value) -> {
+        BlockPos.STREAM_CODEC.encode(buf,value.offset);buf.writeInt(value.angle);
+        writeNullableEnum(buf,value.rotationAxis);writeNullableEnum(buf,value.rotation);writeNullableEnum(buf,value.mirror);
+    },buf -> new StructureTransform(BlockPos.STREAM_CODEC.decode(buf),buf.readInt(),readNullableEnum(buf,Axis.values()),readNullableEnum(buf,Rotation.values()),readNullableEnum(buf,Mirror.values())));
+    private static void writeNullableEnum(ByteBuf buf,Enum<?> value){buf.writeBoolean(value!=null);if(value!=null)ByteBufCodecs.VAR_INT.encode(buf,value.ordinal());}
+    private static <T> T readNullableEnum(ByteBuf buf,T[] values){if(!buf.readBoolean())return null;int ordinal=ByteBufCodecs.VAR_INT.decode(buf);if(ordinal<0||ordinal>=values.length)throw new io.netty.handler.codec.DecoderException("Invalid transform enum: "+ordinal);return values[ordinal];}
 
 	// Assuming structures cannot be rotated around multiple axes at once
 	public Axis rotationAxis;
@@ -97,30 +91,40 @@ public class StructureTransform {
 		mirror = Mirror.NONE;
 	}
 
+    // Original Catnip rotation convention: X/Z have the opposite sign from Vec3.xRot/zRot.
+    public static Vec3 rotate(Vec3 vec,double degrees,Axis axis){
+        if(degrees==0||vec==Vec3.ZERO||axis==null)return vec;
+        double radians=Math.toRadians(degrees),sin=Math.sin(radians),cos=Math.cos(radians);
+        return switch(axis){case X->new Vec3(vec.x,vec.y*cos-vec.z*sin,vec.z*cos+vec.y*sin);case Y->new Vec3(vec.x*cos+vec.z*sin,vec.y,vec.z*cos-vec.x*sin);case Z->new Vec3(vec.x*cos-vec.y*sin,vec.y*cos+vec.x*sin,vec.z);};
+    }
+    private static Vec3 rotateCentered(Vec3 vec,double degrees,Axis axis){return rotate(vec.subtract(.5,.5,.5),degrees,axis).add(.5,.5,.5);}
+    private static Vec3 mirror(Vec3 vec,Mirror mirror){return switch(mirror){case NONE->vec;case LEFT_RIGHT->new Vec3(vec.x,vec.y,-vec.z);case FRONT_BACK->new Vec3(-vec.x,vec.y,vec.z);};}
+    private static Vec3 mirrorCentered(Vec3 vec,Mirror mirror){return mirror(vec.subtract(.5,.5,.5),mirror).add(.5,.5,.5);}
+
 	public Vec3 applyWithoutOffsetUncentered(Vec3 localVec) {
 		Vec3 vec = localVec;
 		if (mirror != null)
-			vec = VecHelper.mirror(vec, mirror);
+			vec = mirror(vec, mirror);
 		if (rotationAxis != null)
-			vec = VecHelper.rotate(vec, angle, rotationAxis);
+			vec = rotate(vec, angle, rotationAxis);
 		return vec;
 	}
 
 	public Vec3 applyWithoutOffset(Vec3 localVec) {
 		Vec3 vec = localVec;
 		if (mirror != null)
-			vec = VecHelper.mirrorCentered(vec, mirror);
+			vec = mirrorCentered(vec, mirror);
 		if (rotationAxis != null)
-			vec = VecHelper.rotateCentered(vec, angle, rotationAxis);
+			vec = rotateCentered(vec, angle, rotationAxis);
 		return vec;
 	}
 
 	public Vec3 unapplyWithoutOffset(Vec3 globalVec) {
 		Vec3 vec = globalVec;
 		if (rotationAxis != null)
-			vec = VecHelper.rotateCentered(vec, -angle, rotationAxis);
+			vec = rotateCentered(vec, -angle, rotationAxis);
 		if (mirror != null)
-			vec = VecHelper.mirrorCentered(vec, mirror);
+			vec = mirrorCentered(vec, mirror);
 
 		return vec;
 	}
@@ -130,7 +134,7 @@ public class StructureTransform {
 	}
 
 	public BlockPos applyWithoutOffset(BlockPos localPos) {
-		return BlockPos.containing(applyWithoutOffset(VecHelper.getCenterOf(localPos)));
+		return BlockPos.containing(applyWithoutOffset(Vec3.atCenterOf(localPos)));
 	}
 
 	public BlockPos apply(BlockPos localPos) {
@@ -142,7 +146,7 @@ public class StructureTransform {
 	}
 
 	public BlockPos unapplyWithoutOffset(BlockPos globalPos) {
-		return BlockPos.containing(unapplyWithoutOffset(VecHelper.getCenterOf(globalPos)));
+		return BlockPos.containing(unapplyWithoutOffset(Vec3.atCenterOf(globalPos)));
 	}
 
 	public void apply(BlockEntity be) {
@@ -183,7 +187,7 @@ public class StructureTransform {
 		}
 
 		if (block instanceof FaceAttachedHorizontalDirectionalBlock) {
-			DirectionProperty facingProperty = FaceAttachedHorizontalDirectionalBlock.FACING;
+			EnumProperty<Direction> facingProperty = FaceAttachedHorizontalDirectionalBlock.FACING;
 			EnumProperty<AttachFace> faceProperty = FaceAttachedHorizontalDirectionalBlock.FACE;
 			Direction stateFacing = state.getValue(facingProperty);
 			AttachFace stateFace = state.getValue(faceProperty);

@@ -1,0 +1,19 @@
+{
+  "type": "create:pressing",
+  "ingredients": [
+    "atmospheric:crustose"
+  ],
+  "results": [
+    {
+      "id": "atmospheric:crustose_path"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "atmospheric"
+      ]
+    }
+  ]
+}

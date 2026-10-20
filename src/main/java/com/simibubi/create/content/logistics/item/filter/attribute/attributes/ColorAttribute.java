@@ -16,14 +16,11 @@ import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttribute
 import com.simibubi.create.content.logistics.item.filter.attribute.ItemAttributeType;
 
 import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.registry.RegisteredObjectsHelper;
-import net.minecraft.client.resources.language.I18n;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.FireworkRocketItem;
-import net.minecraft.world.item.FireworkStarItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.FireworkExplosion;
 import net.minecraft.world.level.Level;
@@ -37,13 +34,14 @@ public record ColorAttribute(DyeColor color) implements ItemAttribute {
 		.map(ColorAttribute::new, ColorAttribute::color);
 
 	private static Collection<DyeColor> findMatchingDyeColors(ItemStack stack) {
-		DyeColor color = DyeColor.getColor(stack);
+		DyeColor color = stack.getOrDefault(DataComponents.DYE,stack.get(DataComponents.BASE_COLOR));
 		if (color != null)
 			return Collections.singletonList(color);
 
 		Set<DyeColor> colors = new HashSet<>();
+        if(stack.has(DataComponents.FIREWORK_EXPLOSION))colors.addAll(getFireworkStarColors(stack.get(DataComponents.FIREWORK_EXPLOSION)));
 		if (stack.has(DataComponents.FIREWORKS)) {
-			if (stack.getItem() instanceof FireworkRocketItem || stack.getItem() instanceof FireworkStarItem) {
+			if (stack.getItem() instanceof FireworkRocketItem) {
 				List<FireworkExplosion> explosions = stack.get(DataComponents.FIREWORKS).explosions();
 				for (FireworkExplosion explosion : explosions) {
 					colors.addAll(getFireworkStarColors(explosion));
@@ -51,15 +49,16 @@ public record ColorAttribute(DyeColor color) implements ItemAttribute {
 			}
 		}
 
-		Arrays.stream(DyeColor.values()).filter(c -> RegisteredObjectsHelper.getKeyOrThrow(stack.getItem()).getPath().startsWith(c.getName() + "_")).forEach(colors::add);
+		Arrays.stream(DyeColor.values()).filter(c -> net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath().startsWith(c.getName() + "_")).forEach(colors::add);
+        for(var candidate:DyeColor.values())if(stack.is(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM,net.minecraft.resources.Identifier.fromNamespaceAndPath("c","dyed/"+candidate.getName()))))colors.add(candidate);
 
 		return colors;
 	}
 
 	private static Collection<DyeColor> getFireworkStarColors(FireworkExplosion explosion) {
 		Set<DyeColor> colors = new HashSet<>();
-		Arrays.stream(explosion.colors().toIntArray()).mapToObj(DyeColor::byFireworkColor).forEach(colors::add);
-		Arrays.stream(explosion.fadeColors().toIntArray()).mapToObj(DyeColor::byFireworkColor).forEach(colors::add);
+        Arrays.stream(explosion.colors().toIntArray()).mapToObj(DyeColor::byFireworkColor).filter(java.util.Objects::nonNull).forEach(colors::add);
+        Arrays.stream(explosion.fadeColors().toIntArray()).mapToObj(DyeColor::byFireworkColor).filter(java.util.Objects::nonNull).forEach(colors::add);
 		return colors;
 	}
 
@@ -75,7 +74,7 @@ public record ColorAttribute(DyeColor color) implements ItemAttribute {
 
 	@Override
 	public Object[] getTranslationParameters() {
-		return new Object[]{I18n.get("color.minecraft." + color.getName())};
+		return new Object[]{net.minecraft.network.chat.Component.translatable("color.minecraft." + color.getName())};
 	}
 
 	@Override

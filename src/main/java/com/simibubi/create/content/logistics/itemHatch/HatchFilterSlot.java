@@ -1,42 +1,12 @@
 package com.simibubi.create.content.logistics.itemHatch;
-
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.math.Axis;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.math.AngleHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.core.*;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
-
-public class HatchFilterSlot extends ValueBoxTransform {
-
-	@Override
-	public Vec3 getLocalOffset(LevelAccessor level, BlockPos pos, BlockState state) {
-		return VecHelper.rotateCentered(VecHelper.voxelSpace(8, 5.15, 9.5), angle(state), Direction.Axis.Y);
-	}
-
-	@Override
-	public float getScale() {
-		return super.getScale() * 0.965f;
-	}
-
-	public boolean testHit(LevelAccessor level, BlockPos pos, BlockState state, Vec3 localHit) {
-		return localHit.distanceTo(getLocalOffset(level, pos, state).subtract(0, 0.125, 0)) < scale / 2;
-	}
-
-	@Override
-	public void rotate(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms) {
-		ms.mulPose(Axis.YP.rotationDegrees(angle(state)));
-		ms.mulPose(Axis.XP.rotationDegrees(-45));
-	}
-
-	private float angle(BlockState state) {
-		return AngleHelper.horizontalAngle(state.getOptionalValue(ItemHatchBlock.FACING)
-			.orElse(Direction.NORTH));
-	}
-
+import net.minecraft.world.phys.*;
+/** Pinned 8/5.15/9.5 voxel position, source yaw,45-degree pitch and .965 scale factor. */
+public final class HatchFilterSlot {
+ public static final float SCALE=.5f*.965f;
+ public static float angle(BlockState state){var facing=state.getValue(ItemHatchBlock.FACING);return facing.getAxis()==Direction.Axis.X?-facing.toYRot():facing.toYRot();}
+ public static Vec3 position(BlockState state){return new Vec3(8/16d,5.15/16d,9.5/16d).subtract(.5,.5,.5).yRot((float)Math.toRadians(angle(state))).add(.5,.5,.5);}
+ public static boolean testHit(BlockState state,BlockPos pos,BlockHitResult hit){return hit.getLocation().subtract(Vec3.atLowerCornerOf(pos)).distanceTo(position(state).subtract(0,.125,0))<SCALE/2;}
+ private HatchFilterSlot(){}
 }

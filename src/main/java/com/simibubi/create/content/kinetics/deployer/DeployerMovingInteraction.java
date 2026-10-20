@@ -1,71 +1,19 @@
 package com.simibubi.create.content.kinetics.deployer;
 
-import java.util.UUID;
-
-import net.minecraft.nbt.CompoundTag;
-
-import org.apache.commons.lang3.tuple.MutablePair;
-
 import com.simibubi.create.AllItems;
 import com.simibubi.create.api.behaviour.interaction.MovingInteractionBehaviour;
+import com.simibubi.create.api.behaviour.movement.MovementBehaviour;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
-import com.simibubi.create.content.contraptions.behaviour.MovementContext;
-import com.simibubi.create.content.contraptions.mounted.MountedContraption;
-
-import net.createmod.catnip.nbt.NBTHelper;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.Tag;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
 
 public class DeployerMovingInteraction extends MovingInteractionBehaviour {
-
-	@Override
-	public boolean handlePlayerInteraction(Player player, InteractionHand activeHand, BlockPos localPos,
-		AbstractContraptionEntity contraptionEntity) {
-		MutablePair<StructureBlockInfo, MovementContext> actor = contraptionEntity.getContraption()
-			.getActorAt(localPos);
-		if (actor == null || actor.right == null)
-			return false;
-
-		MovementContext ctx = actor.right;
-		ItemStack heldStack = player.getItemInHand(activeHand);
-		if (heldStack.getItem()
-			.equals(AllItems.WRENCH.get())) {
-			DeployerBlockEntity.Mode mode = NBTHelper.readEnum(ctx.blockEntityData, "Mode", DeployerBlockEntity.Mode.class);
-			NBTHelper.writeEnum(ctx.blockEntityData, "Mode",
-				mode == DeployerBlockEntity.Mode.PUNCH ? DeployerBlockEntity.Mode.USE : DeployerBlockEntity.Mode.PUNCH);
-
-		} else {
-			if (ctx.world.isClientSide)
-				return true; // we'll try again on the server side
-			DeployerFakePlayer fake = null;
-
-			if (!(ctx.temporaryData instanceof DeployerFakePlayer) && ctx.world instanceof ServerLevel) {
-				UUID owner = ctx.blockEntityData.contains("Owner") ? ctx.blockEntityData.getUUID("Owner") : null;
-				DeployerFakePlayer deployerFakePlayer = new DeployerFakePlayer((ServerLevel) ctx.world, owner);
-				deployerFakePlayer.onMinecartContraption = ctx.contraption instanceof MountedContraption;
-				deployerFakePlayer.getInventory()
-					.load(ctx.blockEntityData.getList("Inventory", Tag.TAG_COMPOUND));
-				ctx.temporaryData = fake = deployerFakePlayer;
-				ctx.blockEntityData.remove("Inventory");
-			} else
-				fake = (DeployerFakePlayer) ctx.temporaryData;
-
-			if (fake == null)
-				return false;
-
-			ItemStack deployerItem = fake.getMainHandItem();
-			player.setItemInHand(activeHand, deployerItem.copy());
-			fake.setItemInHand(InteractionHand.MAIN_HAND, heldStack.copy());
-			ctx.blockEntityData.put("HeldItem", heldStack.saveOptional(player.registryAccess()));
-			ctx.data.put("HeldItem", heldStack.saveOptional(player.registryAccess()));
-		}
-//		if (index >= 0)
-//			setContraptionActorData(contraptionEntity, index, info, ctx);
-		return true;
-	}
+    @Override public boolean handlePlayerInteraction(Player player,InteractionHand hand,BlockPos pos,AbstractContraptionEntity owner){
+        var pair=owner.getContraption().getActorAt(pos);if(pair==null||pair.right==null)return false;if(owner.level().isClientSide())return true;
+        var context=pair.right;if(!(MovementBehaviour.REGISTRY.get(context.state) instanceof DeployerMovementBehaviour behaviour))return false;
+        if(player.getItemInHand(hand).is(AllItems.WRENCH)){behaviour.cancelStall(context);context.blockEntityData.putString("Mode",DeployerMovementBehaviour.getMode(context)==DeployerBlockEntity.Mode.PUNCH?"USE":"PUNCH");}
+        else{var fake=behaviour.getPlayer(context);if(fake==null)return false;behaviour.cancelStall(context);var held=player.getItemInHand(hand).copy();player.setItemInHand(hand,fake.getMainHandItem().copy());fake.setItemInHand(InteractionHand.MAIN_HAND,held);}
+        behaviour.sync(context);return true;
+    }
 }

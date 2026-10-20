@@ -1,191 +1,87 @@
 package com.simibubi.create.content.kinetics.gauge;
 
-import org.joml.Vector3f;
-
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.content.kinetics.base.DirectionalAxisKineticBlock;
-import com.simibubi.create.content.kinetics.base.IRotate;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.lang.Lang;
-import net.createmod.catnip.levelWrappers.WrappedLevel;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.theme.Color;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.Direction.AxisDirection;
+import com.simibubi.create.content.kinetics.base.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.core.particles.DustParticleOptions;
-import net.minecraft.util.Mth;
-import net.minecraft.util.RandomSource;
-import net.minecraft.util.StringRepresentable;
+import net.minecraft.util.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.*;
 
-public class GaugeBlock extends DirectionalAxisKineticBlock implements IBE<GaugeBlockEntity> {
-
-	public static final GaugeShaper GAUGE = GaugeShaper.make();
-	protected Type type;
-
-	public enum Type implements StringRepresentable {
-		SPEED, STRESS;
-
-		@Override
-		public String getSerializedName() {
-			return Lang.asId(name());
-		}
-	}
-
-	public static GaugeBlock speed(Properties properties) {
-		return new GaugeBlock(properties, Type.SPEED);
-	}
-
-	public static GaugeBlock stress(Properties properties) {
-		return new GaugeBlock(properties, Type.STRESS);
-	}
-
-	protected GaugeBlock(Properties properties, Type type) {
-		super(properties);
-		this.type = type;
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		Level world = context.getLevel();
-		Direction face = context.getClickedFace();
-		BlockPos placedOnPos = context.getClickedPos()
-			.relative(context.getClickedFace()
-				.getOpposite());
-		BlockState placedOnState = world.getBlockState(placedOnPos);
-		Block block = placedOnState.getBlock();
-
-		if (block instanceof IRotate && ((IRotate) block).hasShaftTowards(world, placedOnPos, placedOnState, face)) {
-			BlockState toPlace = defaultBlockState();
-			Direction horizontalFacing = context.getHorizontalDirection();
-			Direction nearestLookingDirection = context.getNearestLookingDirection();
-			boolean lookPositive = nearestLookingDirection.getAxisDirection() == AxisDirection.POSITIVE;
-			if (face.getAxis() == Axis.X) {
-				toPlace = toPlace.setValue(FACING, lookPositive ? Direction.NORTH : Direction.SOUTH)
-					.setValue(AXIS_ALONG_FIRST_COORDINATE, true);
-			} else if (face.getAxis() == Axis.Y) {
-				toPlace = toPlace.setValue(FACING, horizontalFacing.getOpposite())
-					.setValue(AXIS_ALONG_FIRST_COORDINATE, horizontalFacing.getAxis() == Axis.X);
-			} else {
-				toPlace = toPlace.setValue(FACING, lookPositive ? Direction.WEST : Direction.EAST)
-					.setValue(AXIS_ALONG_FIRST_COORDINATE, false);
-			}
-
-			return toPlace;
-		}
-
-		return super.getStateForPlacement(context);
-	}
-
-	@Override
-	protected Direction getFacingForPlacement(BlockPlaceContext context) {
-		return context.getClickedFace();
-	}
-
-	@Override
-	protected boolean getAxisAlignmentForPlacement(BlockPlaceContext context) {
-		return context.getHorizontalDirection()
-			.getAxis() != Axis.X;
-	}
-
-	public boolean shouldRenderHeadOnFace(Level world, BlockPos pos, BlockState state, Direction face) {
-		if (face.getAxis()
-			.isVertical())
-			return false;
-		if (face == state.getValue(FACING)
-			.getOpposite())
-			return false;
-		if (face.getAxis() == getRotationAxis(state))
-			return false;
-		if (getRotationAxis(state) == Axis.Y && face != state.getValue(FACING))
-			return false;
-		if (!Block.shouldRenderFace(state, world, pos, face, pos.relative(face)) && !(world instanceof WrappedLevel))
-			return false;
-		return true;
-	}
-
-	@Override
-	public void animateTick(BlockState stateIn, Level worldIn, BlockPos pos, RandomSource rand) {
-		BlockEntity be = worldIn.getBlockEntity(pos);
-		if (be == null || !(be instanceof GaugeBlockEntity gaugeBE))
-			return;
-		if (gaugeBE.dialTarget == 0)
-			return;
-		int color = gaugeBE.color;
-
-		for (Direction face : Iterate.directions) {
-			if (!shouldRenderHeadOnFace(worldIn, pos, stateIn, face))
-				continue;
-
-			Vector3f rgb = new Color(color).asVectorF();
-			Vec3 faceVec = Vec3.atLowerCornerOf(face.getNormal());
-			Direction positiveFacing = Direction.get(AxisDirection.POSITIVE, face.getAxis());
-			Vec3 positiveFaceVec = Vec3.atLowerCornerOf(positiveFacing.getNormal());
-			int particleCount = gaugeBE.dialTarget > 1 ? 4 : 1;
-
-			if (particleCount == 1 && rand.nextFloat() > 1 / 4f)
-				continue;
-
-			for (int i = 0; i < particleCount; i++) {
-				Vec3 mul = VecHelper.offsetRandomly(Vec3.ZERO, rand, .25f)
-					.multiply(new Vec3(1, 1, 1).subtract(positiveFaceVec))
-					.normalize()
-					.scale(.3f);
-				Vec3 offset = VecHelper.getCenterOf(pos)
-					.add(faceVec.scale(.55))
-					.add(mul);
-				worldIn.addParticle(new DustParticleOptions(rgb, 1), offset.x, offset.y, offset.z, mul.x, mul.y, mul.z);
-			}
-
-		}
-
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		return GAUGE.get(state.getValue(FACING), state.getValue(AXIS_ALONG_FIRST_COORDINATE));
-	}
-
-	@Override
-	public boolean hasAnalogOutputSignal(BlockState state) {
-		return true;
-	}
-
-	@Override
-	public int getAnalogOutputSignal(BlockState blockState, Level worldIn, BlockPos pos) {
-		BlockEntity be = worldIn.getBlockEntity(pos);
-		if (be instanceof GaugeBlockEntity gaugeBlockEntity) {
-			return Mth.ceil(Mth.clamp(gaugeBlockEntity.dialTarget * 14, 0, 15));
-		}
-		return 0;
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	public Class<GaugeBlockEntity> getBlockEntityClass() {
-		return GaugeBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends GaugeBlockEntity> getBlockEntityType() {
-		return type == Type.SPEED ? AllBlockEntityTypes.SPEEDOMETER.get() : AllBlockEntityTypes.STRESSOMETER.get();
-	}
+public final class GaugeBlock extends DirectionalAxisKineticBlock {
+    public enum Type { SPEED, STRESS }
+    public final Type type;
+    public static GaugeBlock speed(Properties properties) { return new GaugeBlock(properties, Type.SPEED); }
+    public static GaugeBlock stress(Properties properties) { return new GaugeBlock(properties, Type.STRESS); }
+    private GaugeBlock(Properties properties, Type type) {
+        super(properties); this.type = type;
+        registerDefaultState(defaultBlockState().setValue(FACING, Direction.UP).setValue(AXIS_ALONG_FIRST_COORDINATE, false));
+    }
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context) {
+        var level = context.getLevel(); var face = context.getClickedFace();
+        var support = context.getClickedPos().relative(face.getOpposite()); var state = LoadedLevelAccess.blockState(level, support);
+        if (state.getBlock() instanceof IRotate rotate && rotate.hasShaftTowards(level, support, state, face)) {
+            var horizontal = context.getHorizontalDirection();
+            boolean positive = context.getNearestLookingDirection().getAxisDirection() == Direction.AxisDirection.POSITIVE;
+            return switch (face.getAxis()) {
+                case X -> defaultBlockState().setValue(FACING, positive ? Direction.NORTH : Direction.SOUTH).setValue(AXIS_ALONG_FIRST_COORDINATE, true);
+                case Y -> defaultBlockState().setValue(FACING, horizontal.getOpposite()).setValue(AXIS_ALONG_FIRST_COORDINATE, horizontal.getAxis() == Direction.Axis.X);
+                case Z -> defaultBlockState().setValue(FACING, positive ? Direction.WEST : Direction.EAST).setValue(AXIS_ALONG_FIRST_COORDINATE, false);
+            };
+        }
+        return super.getStateForPlacement(context);
+    }
+    @Override protected Direction getFacingForPlacement(BlockPlaceContext context) { return context.getClickedFace(); }
+    @Override protected boolean getAxisAlignmentForPlacement(BlockPlaceContext context) { return context.getHorizontalDirection().getAxis() != Direction.Axis.X; }
+    @Override public void setPlacedBy(Level level,BlockPos pos,BlockState state,net.minecraft.world.entity.LivingEntity placer,net.minecraft.world.item.ItemStack stack){super.setPlacedBy(level,pos,state,placer,stack);if(placer instanceof net.minecraft.server.level.ServerPlayer player&&LoadedLevelAccess.blockEntity(level,pos) instanceof StressGaugeBlockEntity gauge)gauge.placedBy(player);}
+    @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return type == Type.SPEED ? new SpeedGaugeBlockEntity(pos, state) : new StressGaugeBlockEntity(pos, state); }
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> entityType) {
+        return type == Type.SPEED ? createTickerHelper(entityType, AllBlockEntityTypes.SPEEDOMETER, GaugeBlockEntity::tick)
+            : createTickerHelper(entityType, AllBlockEntityTypes.STRESSOMETER, StressGaugeBlockEntity::tick);
+    }
+    @Override protected RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
+    public boolean shouldRenderHeadOnFace(Level level, BlockPos pos, BlockState state, Direction face) {
+        var axis = getRotationAxis(state); var facing = state.getValue(FACING);
+        return face.getAxis().isHorizontal() && face != facing.getOpposite() && face.getAxis() != axis
+            && (axis != Direction.Axis.Y || face == facing)
+            && Block.shouldRenderFace(state, LoadedLevelAccess.blockState(level, pos.relative(face)), face);
+    }
+    @Override public void animateTick(BlockState state, Level level, BlockPos pos, RandomSource random) {
+        if (!(LoadedLevelAccess.blockEntity(level, pos) instanceof GaugeBlockEntity gauge) || gauge.dialTarget == 0) return;
+        for (var face : Direction.Plane.HORIZONTAL) {
+            if (!shouldRenderHeadOnFace(level, pos, state, face)) continue;
+            int count = gauge.dialTarget > 1 ? 4 : 1;
+            if (count == 1 && random.nextFloat() > 0.25f) continue;
+            for (int i = 0; i < count; i++) {
+                var spread = new Vec3(face.getAxis() == Direction.Axis.X ? 0 : (random.nextDouble() - 0.5) * 0.5,
+                    (random.nextDouble() - 0.5) * 0.5, face.getAxis() == Direction.Axis.Z ? 0 : (random.nextDouble() - 0.5) * 0.5).normalize().scale(0.3);
+                var at = Vec3.atCenterOf(pos).add(face.getStepX()*0.55, face.getStepY()*0.55, face.getStepZ()*0.55).add(spread);
+                level.addParticle(new DustParticleOptions(gauge.color, 1), at.x, at.y, at.z, spread.x, spread.y, spread.z);
+            }
+        }
+    }
+    @Override protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        var facing = state.getValue(FACING); var shaft = getRotationAxis(state);
+        // The original UP shape, oriented by its mounting normal and through-shaft axis.
+        double[] low = new double[3], high = new double[3], bodyLow = new double[3], bodyHigh = new double[3];
+        for (var axis : Direction.Axis.values()) {
+            int i = axis.ordinal(); boolean normal = axis == facing.getAxis(), alongShaft = axis == shaft;
+            low[i] = normal ? facing.getAxisDirection() == Direction.AxisDirection.POSITIVE ? 0 : 14 : alongShaft ? 0 : 1;
+            high[i] = normal ? facing.getAxisDirection() == Direction.AxisDirection.POSITIVE ? 2 : 16 : alongShaft ? 16 : 15;
+            bodyLow[i] = alongShaft ? 1 : 2; bodyHigh[i] = alongShaft ? 15 : 14;
+        }
+        return Shapes.or(box(low[0], low[1], low[2], high[0], high[1], high[2]), box(bodyLow[0], bodyLow[1], bodyLow[2], bodyHigh[0], bodyHigh[1], bodyHigh[2]));
+    }
+    @Override protected boolean hasAnalogOutputSignal(BlockState state) { return true; }
+    @Override protected int getAnalogOutputSignal(BlockState state, Level level, BlockPos pos, Direction side) {
+        return LoadedLevelAccess.blockEntity(level, pos) instanceof GaugeBlockEntity gauge ? gauge.getComparatorSignal() : 0;
+    }
+    @Override protected boolean isPathfindable(BlockState state, PathComputationType type) { return false; }
 }

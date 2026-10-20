@@ -1,78 +1,77 @@
 package com.simibubi.create.content.kinetics.gearbox;
 
-import java.util.Arrays;
-import java.util.List;
-
-import com.simibubi.create.AllBlockEntityTypes;
+import com.simibubi.create.content.kinetics.base.KineticBlock;
 import com.simibubi.create.AllItems;
-import com.simibubi.create.content.kinetics.base.RotatedPillarKineticBlock;
-import com.simibubi.create.foundation.block.IBE;
-
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.material.PushReaction;
-import net.minecraft.world.level.storage.loot.LootParams;
-import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.EnumProperty;
 
-public class GearboxBlock extends RotatedPillarKineticBlock implements IBE<GearboxBlockEntity> {
+public final class GearboxBlock extends KineticBlock {
+    public static final EnumProperty<Direction.Axis> AXIS = BlockStateProperties.AXIS;
 
-	public GearboxBlock(Properties properties) {
-		super(properties);
-	}
+    public GearboxBlock(Properties properties) {
+        super(properties);
+        registerDefaultState(stateDefinition.any().setValue(AXIS, Direction.Axis.Y));
+    }
 
-	@Override
-	public PushReaction getPistonPushReaction(BlockState state) {
-		return PushReaction.PUSH_ONLY;
-	}
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        builder.add(AXIS);
+    }
 
-	@SuppressWarnings("deprecation")
-	@Override
-	public List<ItemStack> getDrops(BlockState state, LootParams.Builder builder) {
-		if (state.getValue(AXIS).isVertical())
-			return super.getDrops(state, builder);
-		return Arrays.asList(new ItemStack(AllItems.VERTICAL_GEARBOX.get()));
-	}
+    @Override
+    public BlockState getStateForPlacement(BlockPlaceContext context) {
+        return defaultBlockState();
+    }
 
-	@Override
-	public ItemStack getCloneItemStack(BlockState state, HitResult target, LevelReader level, BlockPos pos,
-			Player player) {
-		if (state.getValue(AXIS).isVertical())
-			return super.getCloneItemStack(state, target, level, pos, player);
-		return new ItemStack(AllItems.VERTICAL_GEARBOX.get());
-	}
+    @Override
+    protected RenderShape getRenderShape(BlockState state) {
+        return RenderShape.MODEL;
+    }
 
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		return defaultBlockState().setValue(AXIS, Axis.Y);
-	}
+    @Override
+    protected BlockState rotate(BlockState state, Rotation rotation) {
+        if ((rotation == Rotation.CLOCKWISE_90 || rotation == Rotation.COUNTERCLOCKWISE_90)
+                && state.getValue(AXIS) != Direction.Axis.Y) {
+            return state.setValue(AXIS, state.getValue(AXIS) == Direction.Axis.X ? Direction.Axis.Z : Direction.Axis.X);
+        }
+        return state;
+    }
 
-	// IRotate:
+    @Override
+    public Direction.Axis getRotationAxis(BlockState state) {
+        return state.getValue(AXIS);
+    }
 
-	@Override
-	public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-		return face.getAxis() != state.getValue(AXIS);
-	}
+    @Override
+    protected java.util.List<ItemStack> getDrops(BlockState state, net.minecraft.world.level.storage.loot.LootParams.Builder params) {
+        return state.getValue(AXIS) == Direction.Axis.Y ? super.getDrops(state, params)
+                : java.util.List.of(new ItemStack(AllItems.VERTICAL_GEARBOX));
+    }
 
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return state.getValue(AXIS);
-	}
+    @Override
+    protected ItemStack getCloneItemStack(LevelReader level, BlockPos pos, BlockState state, boolean includeData) {
+        return state.getValue(AXIS) == Direction.Axis.Y ? super.getCloneItemStack(level, pos, state, includeData)
+                : new ItemStack(AllItems.VERTICAL_GEARBOX);
+    }
 
-	@Override
-	public Class<GearboxBlockEntity> getBlockEntityClass() {
-		return GearboxBlockEntity.class;
-	}
+    @Override
+    public boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face) {
+        return face.getAxis() != getRotationAxis(state);
+    }
 
-	@Override
-	public BlockEntityType<? extends GearboxBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.GEARBOX.get();
-	}
+    /** Canonical port signs reproduce upstream input-relative gearbox rotation rules. */
+    public double getPortModifier(BlockState state, Direction face) {
+        Direction.Axis first = getRotationAxis(state) == Direction.Axis.X ? Direction.Axis.Y : Direction.Axis.X;
+        return face.getAxisDirection().getStep() * (face.getAxis() == first ? 1 : -1);
+    }
 }

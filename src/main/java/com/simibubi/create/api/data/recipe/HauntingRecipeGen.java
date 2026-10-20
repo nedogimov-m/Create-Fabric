@@ -1,32 +1,41 @@
 package com.simibubi.create.api.data.recipe;
 
-import java.util.concurrent.CompletableFuture;
-import java.util.function.Supplier;
-
 import com.simibubi.create.AllRecipeTypes;
-import com.simibubi.create.content.kinetics.fan.processing.HauntingRecipe;
-
-import net.createmod.catnip.registry.RegisteredObjectsHelper;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.data.PackOutput;
+import com.simibubi.create.*;
+import com.simibubi.create.content.processing.recipe.ProcessingRecipeBuilder;
+import com.simibubi.create.foundation.data.recipe.*;
+import com.simibubi.create.content.decoration.palettes.AllPaletteStoneTypes;
+import com.simibubi.create.foundation.block.CopperBlockSet;
+import com.simibubi.create.foundation.block.CopperBlockSet.Variant;
+import java.util.*;
+import java.util.function.*;
+import net.createmod.catnip.lang.Lang;
+import net.fabricmc.fabric.api.resource.conditions.v1.ResourceConditions;
+import net.minecraft.core.registries.*;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.*;
+import net.minecraft.util.Mth;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.ItemLike;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.WeatheringCopper.WeatherState;
+import net.minecraft.world.level.material.Fluids;
 
-/**
- * The base class for Haunting recipe generation.
- * Addons should extend this and use the {@link ProcessingRecipeGen#create} methods
- * or the helper methods contained in this class to make recipes.
- * For an example of how you might do this, see Create's implementation: {@link com.simibubi.create.foundation.data.recipe.CreateHauntingRecipeGen}.
- * Needs to be added to a registered recipe provider to do anything, see {@link com.simibubi.create.foundation.data.recipe.CreateRecipeProvider}
- */
-public abstract class HauntingRecipeGen extends StandardProcessingRecipeGen<HauntingRecipe> {
+import com.simibubi.create.content.kinetics.fan.processing.FanProcessingRecipe;
+import java.util.concurrent.CompletableFuture;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.data.PackOutput;
+import net.minecraft.world.item.crafting.RecipeType;
 
+/** Source recipe-generator category backed by the native 26.3 serializer. */
+public abstract class HauntingRecipeGen extends StandardProcessingRecipeGen<FanProcessingRecipe> {
 	public GeneratedRecipe convert(ItemLike input, ItemLike result) {
 		return convert(() -> Ingredient.of(input), () -> result);
 	}
 
 	public GeneratedRecipe convert(Supplier<Ingredient> input, Supplier<ItemLike> result) {
-		return create(asResource(RegisteredObjectsHelper.getKeyOrThrow(result.get().asItem())
+		return create(asResource(BuiltInRegistries.ITEM.getKey(result.get().asItem())
 			.getPath()),
 			p -> p.withItemIngredients(input.get())
 				.output(result.get()));
@@ -38,13 +47,7 @@ public abstract class HauntingRecipeGen extends StandardProcessingRecipeGen<Haun
 			.whenModLoaded(mod.getId()));
 	}
 
-	public HauntingRecipeGen(PackOutput output, CompletableFuture<HolderLookup.Provider> registries, String defaultNamespace) {
-		super(output, registries, defaultNamespace);
-	}
 
-	@Override
-	protected AllRecipeTypes getRecipeType() {
-		return AllRecipeTypes.HAUNTING;
-	}
-
+    public HauntingRecipeGen(PackOutput output, CompletableFuture<HolderLookup.Provider> registries, String namespace) { super(output, registries, namespace); }
+    @Override protected RecipeType<FanProcessingRecipe> getRecipeType() { return AllRecipeTypes.HAUNTING; }
 }

@@ -16,7 +16,7 @@ import com.simibubi.create.content.logistics.stockTicker.PackageOrderWithCrafts.
 
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.items.ItemStackHandler;
+import net.minecraft.core.NonNullList;
 
 public class PackageRepackageHelper {
 
@@ -48,7 +48,7 @@ public class PackageRepackageHelper {
 		List<BigItemStack> exportingPackages = new ArrayList<>();
 		String address = "";
 		PackageOrderWithCrafts orderContext = null;
-		InventorySummary summary = new InventorySummary();
+		InventorySummary summary = InventorySummary.physical();
 
 		for (ItemStack box : collectedPackages.get(orderId)) {
 			address = PackageItem.getAddress(box);
@@ -58,9 +58,9 @@ public class PackageRepackageHelper {
 					orderContext = context;
 			}
 
-			ItemStackHandler contents = PackageItem.getContents(box);
-			for (int slot = 0; slot < contents.getSlots(); slot++)
-				summary.add(contents.getStackInSlot(slot));
+			var contents = PackageItem.getContents(box);
+			for (int slot = 0; slot < contents.size(); slot++)
+				summary.add(contents.get(slot));
 		}
 
 		List<BigItemStack> orderedStacks = new ArrayList<>();
@@ -93,7 +93,7 @@ public class PackageRepackageHelper {
 					continue;
 				if (targetedEntry != null) {
 					targetAmount = targetedEntry.count;
-					if (!ItemStack.isSameItemSameComponents(entry.stack, targetedEntry.stack))
+					if (!com.simibubi.create.foundation.item.ItemSampleEquality.same(entry.stack, targetedEntry.stack))
 						continue;
 				}
 
@@ -115,21 +115,21 @@ public class PackageRepackageHelper {
 		}
 
 		int currentSlot = 0;
-		ItemStackHandler target = new ItemStackHandler(PackageItem.SLOTS);
+		var target = NonNullList.withSize(PackageItem.SLOTS, ItemStack.EMPTY);
 
 		for (ItemStack item : outputSlots) {
-			target.setStackInSlot(currentSlot++, item);
+			target.set(currentSlot++, item);
 			if (currentSlot < PackageItem.SLOTS)
 				continue;
-			exportingPackages.add(new BigItemStack(PackageItem.containing(target), 1));
-			target = new ItemStackHandler(PackageItem.SLOTS);
+			exportingPackages.add(new BigItemStack(PackageItem.containingSlots(target), 1));
+			target = NonNullList.withSize(PackageItem.SLOTS, ItemStack.EMPTY);
 			currentSlot = 0;
 		}
 
-		for (int slot = 0; slot < target.getSlots(); slot++)
-			if (!target.getStackInSlot(slot)
+		for (int slot = 0; slot < target.size(); slot++)
+			if (!target.get(slot)
 				.isEmpty()) {
-				exportingPackages.add(new BigItemStack(PackageItem.containing(target), 1));
+				exportingPackages.add(new BigItemStack(PackageItem.containingSlots(target), 1));
 				break;
 			}
 
@@ -147,62 +147,60 @@ public class PackageRepackageHelper {
 		return exportingPackages;
 	}
 
-	private boolean isOrderComplete(int orderId) {
-		boolean finalLinkReached = false;
-		Links:
-		for (int linkCounter = 0; linkCounter < 1000; linkCounter++) {
-			if (finalLinkReached)
-				break;
-			Packages:
-			for (int packageCounter = 0; packageCounter < 1000; packageCounter++) {
-				for (ItemStack box : collectedPackages.get(orderId)) {
-					PackageOrderData data = box.get(AllDataComponents.PACKAGE_ORDER_DATA);
-					if (linkCounter != data.linkIndex())
-						continue;
-					if (packageCounter != data.fragmentIndex())
-						continue;
-					finalLinkReached = data.isFinalLink();
-					if (data.isFinal())
-						continue Links;
-					continue Packages;
-				}
-				return false;
-			}
-		}
-		return true;
-	}
+    private boolean isOrderComplete(int orderId) {
+        for (int link = 0; link < 1000; link++) {
+            boolean ended = false;
+            for (int fragment = 0; fragment < 1000; fragment++) {
+                PackageOrderData found = null;
+                for (var box : collectedPackages.get(orderId)) {
+                    var data = box.get(AllDataComponents.PACKAGE_ORDER_DATA);
+                    if (data.linkIndex() == link && data.fragmentIndex() == fragment) {found = data;break;}
+                }
+                if (found == null) return false;
+                if (found.isFinal()) {if (found.isFinalLink()) return true;ended = true;break;}
+            }
+            if (!ended) return false;
+        }
+        return false;
+    }
 
 	protected List<BigItemStack> repackBasedOnRecipes(InventorySummary summary, PackageOrderWithCrafts order, String address, RandomSource r) {
 		if (order.orderedCrafts().isEmpty())
 			return List.of();
 		
 		List<BigItemStack> packages = new ArrayList<>();
-		for (CraftingEntry craftingEntry : order.orderedCrafts()) {
-			int packagesToCreate = 0;
-			Crafts: for (int i = 0; i < craftingEntry.count(); i++) {
-				for (BigItemStack required : craftingEntry.pattern().stacks()) {
-					if (required.stack.isEmpty())
-						continue;
-					if (summary.getCountOf(required.stack) <= 0)
-						break Crafts;
-					summary.add(required.stack, -1);
-				}
-				packagesToCreate++;
-			}
-			
-			ItemStackHandler target = new ItemStackHandler(PackageItem.SLOTS);
-			List<BigItemStack> stacks = craftingEntry.pattern().stacks();
-			for (int currentSlot = 0; currentSlot < Math.min(stacks.size(), target.getSlots()); currentSlot++)
-				target.setStackInSlot(currentSlot, stacks.get(currentSlot).stack.copyWithCount(1));
-			
-			ItemStack box = PackageItem.containing(target);
-			PackageItem.setOrder(box, r.nextInt(), 0, true, 0, true,
-				PackageOrderWithCrafts.singleRecipe(craftingEntry.pattern()
-					.stacks()));
-			packages.add(new BigItemStack(box, packagesToCreate));
-		}
-		
+		for(CraftingEntry craft:order.orderedCrafts()){
+            var produced=new ArrayList<BigItemStack>();
+            for(int attempt=0;attempt<craft.count();attempt++){
+                var actual=NonNullList.withSize(PackageItem.SLOTS,ItemStack.EMPTY);var consumed=new ArrayList<ItemStack>();boolean complete=true;
+                var pattern=craft.pattern().stacks();
+                if(pattern.size()>actual.size())throw new IllegalArgumentException("Crafting pattern exceeds real package slots");
+                for(int slot=0;slot<pattern.size();slot++){
+                    var required=pattern.get(slot);if(required.stack.isEmpty())continue;
+                    var taken=summary.takeMatchingOne(required.stack);
+                    if(taken.isEmpty()){complete=false;break;}
+                    actual.set(slot,taken);consumed.add(taken);
+                }
+                if(!complete){consumed.forEach(item->summary.add(item,1));break;}
+                BigItemStack same=null;
+                // Source counts identical crafts before choosing their one random box style.
+                // Compare the real material slots so distinct components retain separate owners.
+                for(var existing:produced)if(sameContents(PackageItem.getContents(existing.stack),actual)){same=existing;break;}
+                if(same!=null)same.count++;else produced.add(new BigItemStack(PackageItem.containingSlots(actual),1));
+            }
+            for(var actual:produced){PackageItem.setOrder(actual.stack,r.nextInt(),0,true,0,true,PackageOrderWithCrafts.singleRecipe(craft.pattern().stacks()));packages.add(actual);}
+        }
+        
 		return packages;
 	}
+
+    private static boolean sameContents(List<ItemStack> first,List<ItemStack> second){
+        if(first.size()!=second.size())return false;
+        for(int slot=0;slot<first.size();slot++){
+            var left=first.get(slot);var right=second.get(slot);
+            if(left.getCount()!=right.getCount()||!ItemStack.isSameItemSameComponents(left,right))return false;
+        }
+        return true;
+    }
 
 }

@@ -1,51 +1,15 @@
 package com.simibubi.create.content.redstone.displayLink.source;
 
-import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
+import com.simibubi.create.content.redstone.displayLink.*;
 import com.simibubi.create.content.redstone.thresholdSwitch.ThresholdSwitchBlockEntity;
-import com.simibubi.create.foundation.gui.ModularGuiLineBuilder;
-import com.simibubi.create.foundation.utility.CreateLang;
+import java.util.*;
 
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-
-public class FillLevelDisplaySource extends PercentOrProgressBarDisplaySource {
-
-	@Override
-	protected Float getProgress(DisplayLinkContext context) {
-		BlockEntity be = context.getSourceBlockEntity();
-		if (!(be instanceof ThresholdSwitchBlockEntity tsbe))
-			return null;
-		return Math.max(0,
-			(float) (tsbe.currentLevel - tsbe.currentMinLevel) / (tsbe.currentMaxLevel - tsbe.currentMinLevel));
-	}
-
-	@Override
-	protected boolean progressBarActive(DisplayLinkContext context) {
-		return context.sourceConfig()
-			.getInt("Mode") != 0;
-	}
-
-	@Override
-	protected String getTranslationKey() {
-		return "fill_level";
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void initConfigurationWidgets(DisplayLinkContext context, ModularGuiLineBuilder builder, boolean isFirstLine) {
-		super.initConfigurationWidgets(context, builder, isFirstLine);
-		if (isFirstLine)
-			return;
-		builder.addSelectionScrollInput(0, 120,
-			(si, l) -> si.forOptions(CreateLang.translatedOptions("display_source.fill_level", "percent", "progress_bar"))
-				.titled(CreateLang.translateDirect("display_source.fill_level.display")),
-			"Mode");
-	}
-
-	@Override
-	protected boolean allowsLabeling(DisplayLinkContext context) {
-		return true;
-	}
-
+/** Actual measured threshold range; unknown targets defer display delivery. */
+public final class FillLevelDisplaySource extends PercentOrProgressBarDisplaySource {
+    @Override public boolean isAvailable(DisplayLinkContext context){return super.isAvailable(context)&&context.getSourceBlockEntity()instanceof ThresholdSwitchBlockEntity sensor&&sensor.hasValidSample();}
+    @Override protected Float getProgress(DisplayLinkContext context){if(!(context.getSourceBlockEntity()instanceof ThresholdSwitchBlockEntity sensor)||!sensor.hasValidSample())return null;double range=sensor.currentMaxLevel-(double)sensor.currentMinLevel;if(range<=0)return sensor.currentLevel>=sensor.currentMaxLevel?1f:0f;return (float)Math.clamp((sensor.currentLevel-(double)sensor.currentMinLevel)/range,0,1);}
+    @Override protected boolean progressBarActive(DisplayLinkContext context){return context.sourceConfig().getIntOr("Mode",0)!=0;}
+    @Override protected boolean allowsLabeling(DisplayLinkContext context){return true;}
+    @Override public List<DisplaySourceConfiguration> configuration(DisplayLinkContext context){var options=new ArrayList<>(super.configuration(context));options.add(DisplaySourceConfiguration.choice("Mode","create.display_source.fill_level.percent","create.display_source.fill_level.progress_bar"));return List.copyOf(options);}
+    @Override protected String getTranslationKey(){return "fill_level";}
 }

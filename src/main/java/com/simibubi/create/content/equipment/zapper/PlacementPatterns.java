@@ -8,11 +8,11 @@ import org.jetbrains.annotations.NotNull;
 import com.google.common.base.Predicates;
 import com.mojang.serialization.Codec;
 import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.foundation.gui.AllIcons;
+
 
 import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
-import net.createmod.catnip.lang.Lang;
+
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.util.RandomSource;
@@ -20,22 +20,22 @@ import net.minecraft.util.StringRepresentable;
 import net.minecraft.world.item.ItemStack;
 
 public enum PlacementPatterns implements StringRepresentable {
-	Solid(AllIcons.I_PATTERN_SOLID),
-	Checkered(AllIcons.I_PATTERN_CHECKERED),
-	InverseCheckered(AllIcons.I_PATTERN_CHECKERED_INVERSED),
-	Chance25(AllIcons.I_PATTERN_CHANCE_25),
-	Chance50(AllIcons.I_PATTERN_CHANCE_50),
-	Chance75(AllIcons.I_PATTERN_CHANCE_75);
+	Solid("I_PATTERN_SOLID"),
+	Checkered("I_PATTERN_CHECKERED"),
+	InverseCheckered("I_PATTERN_CHECKERED_INVERSED"),
+	Chance25("I_PATTERN_CHANCE_25"),
+	Chance50("I_PATTERN_CHANCE_50"),
+	Chance75("I_PATTERN_CHANCE_75");
 
 	public static final Codec<PlacementPatterns> CODEC = StringRepresentable.fromValues(PlacementPatterns::values);
-	public static final StreamCodec<ByteBuf, PlacementPatterns> STREAM_CODEC = CatnipStreamCodecBuilders.ofEnum(PlacementPatterns.class);
+	public static final StreamCodec<ByteBuf, PlacementPatterns> STREAM_CODEC = com.simibubi.create.content.equipment.zapper.ZapperCodecs.enumCodec(PlacementPatterns.class);
 
 	public final String translationKey;
-	public final AllIcons icon;
+	public final String iconKey;
 
-	private PlacementPatterns(AllIcons icon) {
-		this.translationKey = Lang.asId(name());
-		this.icon = icon;
+	private PlacementPatterns(String icon) {
+		this.translationKey = name().toLowerCase(java.util.Locale.ROOT);
+		this.iconKey = icon;
 	}
 
 	public static void applyPattern(List<BlockPos> blocksIn, ItemStack stack, RandomSource random) {
@@ -68,6 +68,6 @@ public enum PlacementPatterns implements StringRepresentable {
 
 	@Override
 	public @NotNull String getSerializedName() {
-		return Lang.asId(name());
+		return name().toLowerCase(java.util.Locale.ROOT);
 	}
 }

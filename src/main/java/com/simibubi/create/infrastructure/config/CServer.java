@@ -1,8 +1,7 @@
 package com.simibubi.create.infrastructure.config;
 
-import net.createmod.catnip.config.ConfigBase;
 
-public class CServer extends ConfigBase {
+public class CServer extends NativeConfigBase {
 
 	public final ConfigGroup infrastructure = group(0, "infrastructure", Comments.infrastructure);
 	public final ConfigInt tickrateSyncTimer =

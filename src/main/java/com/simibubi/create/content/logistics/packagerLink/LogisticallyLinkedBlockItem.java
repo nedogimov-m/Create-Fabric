@@ -1,135 +1,38 @@
 package com.simibubi.create.content.logistics.packagerLink;
 
-import java.util.List;
-import java.util.UUID;
-
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.foundation.block.IBE;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.utility.CreateLang;
-
+import java.util.UUID;
+import java.util.function.Consumer;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.TooltipFlag;
-import net.minecraft.world.item.component.CustomData;
-import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.component.*;
+import net.minecraft.world.item.context.*;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
 
 public class LogisticallyLinkedBlockItem extends BlockItem {
-
-	public LogisticallyLinkedBlockItem(Block pBlock, Properties pProperties) {
-		super(pBlock, pProperties);
-	}
-
-	@Override
-	public boolean isFoil(@NotNull ItemStack pStack) {
-		return isTuned(pStack);
-	}
-
-	public static boolean isTuned(ItemStack pStack) {
-		return pStack.has(DataComponents.BLOCK_ENTITY_DATA);
-	}
-
-	@Nullable
-	public static UUID networkFromStack(ItemStack pStack) {
-		CompoundTag tag = pStack.getOrDefault(DataComponents.BLOCK_ENTITY_DATA, CustomData.EMPTY).copyTag();
-		if (!tag.hasUUID("Freq"))
-			return null;
-		return tag.getUUID("Freq");
-	}
-
-	@Override
-	public void appendHoverText(@NotNull ItemStack stack, @NotNull TooltipContext tooltipContext,
-								@NotNull List<Component> tooltipComponents, @NotNull TooltipFlag tooltipFlag) {
-		super.appendHoverText(stack, tooltipContext, tooltipComponents, tooltipFlag);
-
-		CompoundTag tag = stack.getOrDefault(DataComponents.BLOCK_ENTITY_DATA, CustomData.EMPTY).copyTag();
-		if (!tag.hasUUID("Freq"))
-			return;
-
-		CreateLang.translate("logistically_linked.tooltip")
-			.style(ChatFormatting.GOLD)
-			.addTo(tooltipComponents);
-
-		CreateLang.translate("logistically_linked.tooltip_clear")
-			.style(ChatFormatting.GRAY)
-			.addTo(tooltipComponents);
-	}
-
-	@Override
-	public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand usedHand) {
-		ItemStack stack = player.getItemInHand(usedHand);
-		if (isTuned(stack)) {
-			if (level.isClientSide) {
-				level.playSound(player, player.blockPosition(), SoundEvents.ITEM_FRAME_REMOVE_ITEM, SoundSource.BLOCKS, 0.75f, 1.0f);
-			} else {
-				player.displayClientMessage(CreateLang.translateDirect("logistically_linked.cleared"), true);
-				stack.remove(DataComponents.BLOCK_ENTITY_DATA);
-			}
-			return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
-		} else {
-			return super.use(level, player, usedHand);
-		}
-	}
-
-	@Override
-	public @NotNull InteractionResult useOn(UseOnContext pContext) {
-		ItemStack stack = pContext.getItemInHand();
-		BlockPos pos = pContext.getClickedPos();
-		Level level = pContext.getLevel();
-		Player player = pContext.getPlayer();
-		InteractionHand hand = pContext.getHand();
-
-		if (player == null)
-			return InteractionResult.FAIL;
-		if (player.isShiftKeyDown())
-			return super.useOn(pContext);
-
-		LogisticallyLinkedBehaviour link = BlockEntityBehaviour.get(level, pos, LogisticallyLinkedBehaviour.TYPE);
-		boolean tuned = isTuned(stack);
-
-		if (link != null) {
-			if (level.isClientSide)
-				return InteractionResult.SUCCESS;
-			if (!link.mayInteractMessage(player))
-				return InteractionResult.SUCCESS;
-
-			assignFrequency(stack, player, link.freqId);
-			return InteractionResult.SUCCESS;
-		}
-
-		InteractionResult useOn = super.useOn(pContext);
-		if (level.isClientSide || useOn == InteractionResult.FAIL)
-			return useOn;
-
-		player.displayClientMessage(tuned ? CreateLang.translateDirect("logistically_linked.connected")
-			: CreateLang.translateDirect("logistically_linked.new_network_started"), true);
-		return useOn;
-	}
-
-	public static void assignFrequency(ItemStack stack, Player player, UUID frequency) {
-		CompoundTag tag = stack.getOrDefault(DataComponents.BLOCK_ENTITY_DATA, CustomData.EMPTY).copyTag();
-		tag.putUUID("Freq", frequency);
-
-		player.displayClientMessage(CreateLang.translateDirect("logistically_linked.tuned"), true);
-
-		BlockEntity.addEntityType(tag, ((IBE<?>) ((BlockItem) stack.getItem()).getBlock()).getBlockEntityType());
-		stack.set(DataComponents.BLOCK_ENTITY_DATA, CustomData.of(tag));
-	}
-
+    public LogisticallyLinkedBlockItem(Block block,Properties properties) { super(block,properties); }
+    public static UUID networkFromStack(ItemStack stack) { var data=stack.get(DataComponents.BLOCK_ENTITY_DATA);return data==null?null:data.copyTagWithoutId().read("Freq",UUIDUtil.CODEC).orElse(null); }
+    public static boolean isTuned(ItemStack stack) { return networkFromStack(stack)!=null; }
+    @Override public boolean isFoil(ItemStack stack) { return isTuned(stack); }
+    public static void assignFrequency(ItemStack stack,Player player,UUID id) {
+        if(!(stack.getItem() instanceof LogisticallyLinkedBlockItem))return;var tag=new net.minecraft.nbt.CompoundTag();tag.store("Freq",UUIDUtil.CODEC,id);var type=stack.getItem() instanceof com.simibubi.create.content.logistics.factoryBoard.FactoryPanelBlockItem?com.simibubi.create.AllBlockEntityTypes.FACTORY_PANEL:stack.getItem() instanceof com.simibubi.create.content.logistics.redstoneRequester.RedstoneRequesterBlockItem?com.simibubi.create.AllBlockEntityTypes.REDSTONE_REQUESTER:stack.getItem() instanceof BlockItem blockItem&&blockItem.getBlock() instanceof com.simibubi.create.content.logistics.stockTicker.StockTickerBlock?com.simibubi.create.AllBlockEntityTypes.STOCK_TICKER:com.simibubi.create.AllBlockEntityTypes.PACKAGER_LINK;stack.set(DataComponents.BLOCK_ENTITY_DATA,TypedEntityData.of(type,tag));
+        if(player!=null)player.sendOverlayMessage(Component.translatable("create.logistically_linked.tuned"));
+    }
+    @Override public InteractionResult use(Level level,Player player,InteractionHand hand) { var stack=player.getItemInHand(hand);if(!isTuned(stack))return super.use(level,player,hand);if(!level.isClientSide()){stack.remove(DataComponents.BLOCK_ENTITY_DATA);player.sendOverlayMessage(Component.translatable("create.logistically_linked.cleared"));}return InteractionResult.SUCCESS; }
+    @Override public InteractionResult useOn(UseOnContext context) {
+        var player=context.getPlayer();if(player==null||!player.mayBuild()||!context.getLevel().mayInteract(player,context.getClickedPos()))return InteractionResult.PASS;
+        if(!player.isShiftKeyDown()){
+            var link=BlockEntityBehaviour.get(context.getLevel(),context.getClickedPos(),LogisticallyLinkedBehaviour.TYPE);
+            if(link!=null){if(!context.getLevel().isClientSide()&&link.mayInteractMessage(player))assignFrequency(context.getItemInHand(),player,link.freqId);return InteractionResult.SUCCESS;}
+        }
+        boolean tuned=isTuned(context.getItemInHand());var result=super.useOn(context);
+        if(result.consumesAction()&&!context.getLevel().isClientSide())player.sendOverlayMessage(Component.translatable(tuned?"create.logistically_linked.connected":"create.logistically_linked.new_network_started"));return result;
+    }
+    @Override public void appendHoverText(ItemStack stack,TooltipContext context,TooltipDisplay display,Consumer<Component> lines,TooltipFlag flag) { if(isTuned(stack)){lines.accept(Component.translatable("create.logistically_linked.tooltip").withStyle(ChatFormatting.GOLD));lines.accept(Component.translatable("create.logistically_linked.tooltip_clear").withStyle(ChatFormatting.GRAY));} }
 }

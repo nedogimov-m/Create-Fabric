@@ -1,234 +1,82 @@
 package com.simibubi.create.content.redstone.link;
 
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.block.WrenchableDirectionalBlock;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
 import net.minecraft.world.level.pathfinder.PathComputationType;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.redstone.Orientation;
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
 
-public class RedstoneLinkBlock extends WrenchableDirectionalBlock implements IBE<RedstoneLinkBlockEntity> {
-
-	public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
-	public static final BooleanProperty RECEIVER = BooleanProperty.create("receiver");
-
-	public RedstoneLinkBlock(Properties properties) {
-		super(properties);
-		registerDefaultState(defaultBlockState().setValue(POWERED, false)
-			.setValue(RECEIVER, false));
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level level, BlockPos pos, Block block, BlockPos fromPos,
-		boolean isMoving) {
-		if (level.isClientSide)
-			return;
-
-		Direction blockFacing = state.getValue(FACING);
-		if (fromPos.equals(pos.relative(blockFacing.getOpposite()))) {
-			if (!canSurvive(state, level, pos)) {
-				level.destroyBlock(pos, true);
-				return;
-			}
-		}
-
-		if (!level.getBlockTicks()
-			.willTickThisTick(pos, this))
-			level.scheduleTick(pos, this, 1);
-	}
-
-	@Override
-	public void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource r) {
-		updateTransmittedSignal(state, level, pos);
-
-		if (state.getValue(RECEIVER))
-			return;
-		Direction attachedFace = state.getValue(RedstoneLinkBlock.FACING)
-			.getOpposite();
-		BlockPos attachedPos = pos.relative(attachedFace);
-		level.blockUpdated(pos, level.getBlockState(pos)
-			.getBlock());
-		level.blockUpdated(attachedPos, level.getBlockState(attachedPos)
-			.getBlock());
-	}
-
-	@Override
-	public void onPlace(BlockState state, Level worldIn, BlockPos pos, BlockState oldState, boolean isMoving) {
-		if (state.getBlock() == oldState.getBlock() || isMoving)
-			return;
-		updateTransmittedSignal(state, worldIn, pos);
-	}
-
-	@Override
-	public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pMovedByPiston) {
-		IBE.onRemove(pState, pLevel, pPos, pNewState);
-	}
-
-	public void updateTransmittedSignal(BlockState state, Level level, BlockPos pos) {
-		if (level.isClientSide)
-			return;
-		if (state.getValue(RECEIVER))
-			return;
-
-		int power = getPower(level, state, pos);
-		int powerFromPanels = getBlockEntityOptional(level, pos).map(be -> {
-			if (be.panelSupport == null)
-				return 0;
-			Boolean tri = be.panelSupport.shouldBePoweredTristate();
-			if (tri == null)
-				return -1;
-			return tri ? 15 : 0;
-		})
-			.orElse(0);
-
-		// Suppress update if an input panel exists but is not loaded
-		if (powerFromPanels == -1)
-			return;
-
-		power = Math.max(power, powerFromPanels);
-
-		boolean previouslyPowered = state.getValue(POWERED);
-		if (previouslyPowered != power > 0)
-			level.setBlock(pos, state.cycle(POWERED), Block.UPDATE_CLIENTS);
-
-		int transmit = power;
-		withBlockEntityDo(level, pos, be -> be.transmit(transmit));
-	}
-
-	private static int getPower(Level level, BlockState state, BlockPos pos) {
-		int power = 0;
-		for (Direction direction : Iterate.directions)
-			power = Math.max(level.getSignal(pos.relative(direction), direction), power);
-		for (Direction direction : Iterate.directions) {
-			if (state.getValue(FACING).getOpposite() != direction)
-				power = Math.max(level.getSignal(pos.relative(direction), Direction.UP), power);
-		}
-		return power;
-	}
-
-	@Override
-	public boolean isSignalSource(BlockState state) {
-		return state.getValue(POWERED) && state.getValue(RECEIVER);
-	}
-
-	@Override
-	public int getDirectSignal(BlockState blockState, BlockGetter blockAccess, BlockPos pos, Direction side) {
-		if (side != blockState.getValue(FACING))
-			return 0;
-		return getSignal(blockState, blockAccess, pos, side);
-	}
-
-	@Override
-	public int getSignal(BlockState state, BlockGetter blockAccess, BlockPos pos, Direction side) {
-		if (!state.getValue(RECEIVER))
-			return 0;
-		return getBlockEntityOptional(blockAccess, pos).map(RedstoneLinkBlockEntity::getReceivedSignal)
-			.orElse(0);
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		builder.add(POWERED, RECEIVER);
-		super.createBlockStateDefinition(builder);
-	}
-
-	@Override
-	protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
-		if (player.isShiftKeyDown() && toggleMode(state, level, pos) == InteractionResult.SUCCESS) {
-			level.scheduleTick(pos, this, 1);
-			return InteractionResult.SUCCESS;
-		}
-		return InteractionResult.PASS;
-	}
-
-	public InteractionResult toggleMode(BlockState state, Level level, BlockPos pos) {
-		if (level.isClientSide)
-			return InteractionResult.SUCCESS;
-
-		return onBlockEntityUse(level, pos, be -> {
-			Boolean wasReceiver = state.getValue(RECEIVER);
-			boolean blockPowered = level.hasNeighborSignal(pos);
-			level.setBlock(pos, state.cycle(RECEIVER)
-				.setValue(POWERED, blockPowered), Block.UPDATE_ALL);
-			be.transmit(wasReceiver ? 0 : getPower(level, state, pos));
-			return InteractionResult.SUCCESS;
-		});
-	}
-
-	@Override
-	public InteractionResult onWrenched(BlockState state, UseOnContext context) {
-		if (toggleMode(state, context.getLevel(), context.getClickedPos()) == InteractionResult.SUCCESS) {
-			context.getLevel()
-				.scheduleTick(context.getClickedPos(), this, 1);
-			return InteractionResult.SUCCESS;
-		}
-		return super.onWrenched(state, context);
-	}
-
-	@Override
-	public BlockState getRotatedBlockState(BlockState originalState, Direction _targetedFace) {
-		return originalState;
-	}
-
-	@Override
-	public boolean canConnectRedstone(BlockState state, BlockGetter world, BlockPos pos, Direction side) {
-		return side != null;
-	}
-
-	@Override
-	public boolean canSurvive(BlockState state, LevelReader worldIn, BlockPos pos) {
-		BlockPos neighbourPos = pos.relative(state.getValue(FACING)
-			.getOpposite());
-		BlockState neighbour = worldIn.getBlockState(neighbourPos);
-		return !neighbour.canBeReplaced();
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		BlockState state = defaultBlockState();
-		state = state.setValue(FACING, context.getClickedFace());
-		return state;
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		return AllShapes.REDSTONE_BRIDGE.get(state.getValue(FACING));
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	@Override
-	public Class<RedstoneLinkBlockEntity> getBlockEntityClass() {
-		return RedstoneLinkBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends RedstoneLinkBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.REDSTONE_LINK.get();
-	}
-
+public final class RedstoneLinkBlock extends BaseEntityBlock {
+    public static final EnumProperty<Direction> FACING=BlockStateProperties.FACING;
+    public static final BooleanProperty POWERED=BlockStateProperties.POWERED,RECEIVER=BooleanProperty.create("receiver");
+    public RedstoneLinkBlock(Properties properties){super(properties.isRedstoneConductor((state,level,pos)->false));
+        registerDefaultState(defaultBlockState().setValue(POWERED,false).setValue(RECEIVER,false));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(FACING,POWERED,RECEIVER);}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){return defaultBlockState().setValue(FACING,context.getClickedFace());}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new RedstoneLinkBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity>BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.REDSTONE_LINK,RedstoneLinkBlockEntity::tick);}
+    @Override protected boolean canSurvive(BlockState state,LevelReader level,BlockPos pos){return !LoadedLevelAccess.blockState(level,pos.relative(state.getValue(FACING).getOpposite())).canBeReplaced();}
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block neighbor,Orientation orientation,boolean moved){if(level instanceof ServerLevel server)server.scheduleTick(pos,this,1);}
+    @Override protected void onPlace(BlockState state,Level level,BlockPos pos,BlockState old,boolean moved){
+        if(level instanceof ServerLevel server){if(!old.is(this))server.scheduleTick(pos,this,1);
+            else if(old.getValue(RECEIVER)!=state.getValue(RECEIVER)||old.getValue(POWERED)!=state.getValue(POWERED))notifySelfAndSupport(level,pos,state);}
+    }
+    @Override protected void tick(BlockState state,ServerLevel level,BlockPos pos,RandomSource random){
+        var support=pos.relative(state.getValue(FACING).getOpposite());
+        if(LoadedLevelAccess.isLoaded(level,support)&&!canSurvive(state,level,pos)){level.destroyBlock(pos,true);return;}
+        updateTransmittedSignal(state,level,pos);if(!state.getValue(RECEIVER))notifySelfAndSupport(level,pos,state);
+    }
+    public void updateTransmittedSignal(BlockState state,Level level,BlockPos pos){
+        if(level.isClientSide()||state.getValue(RECEIVER))return;
+        if(!(LoadedLevelAccess.blockEntity(level,pos) instanceof RedstoneLinkBlockEntity entity))return;
+        var panels=entity.panelSupport.shouldBePoweredTristate();if(panels==null)return;
+        var signals=new LoadedSignals(level);int power=panels?15:0;
+        for(var side:Direction.values())power=Math.max(power,signals.getSignal(pos.relative(side),side));
+        for(var side:Direction.values())if(side!=state.getValue(FACING).getOpposite())power=Math.max(power,signals.getSignal(pos.relative(side),Direction.UP));
+        if(state.getValue(POWERED)!=(power>0))LoadedLevelAccess.setBlockQuiet(level,pos,state.setValue(POWERED,power>0));
+        entity.transmit(power);
+    }
+    private record LoadedSignals(Level level)implements SignalGetter{
+        @Override public BlockState getBlockState(BlockPos pos){return LoadedLevelAccess.blockState(level,pos);}
+        @Override public BlockEntity getBlockEntity(BlockPos pos){return LoadedLevelAccess.blockEntity(level,pos);}
+        @Override public net.minecraft.world.level.material.FluidState getFluidState(BlockPos pos){return getBlockState(pos).getFluidState();}
+        @Override public int getHeight(){return level.getHeight();}@Override public int getMinY(){return level.getMinY();}
+    }
+    @Override protected boolean isSignalSource(BlockState state){return state.getValue(RECEIVER)&&state.getValue(POWERED);}
+    @Override protected int getSignal(BlockState state,BlockGetter level,BlockPos pos,Direction side){return state.getValue(RECEIVER)&&LoadedLevelAccess.blockEntity(level,pos)instanceof RedstoneLinkBlockEntity link?link.getReceivedSignal():0;}
+    @Override protected int getDirectSignal(BlockState state,BlockGetter level,BlockPos pos,Direction side){return side==state.getValue(FACING)?getSignal(state,level,pos,side):0;}
+    @Override protected boolean shouldRedstoneWireConnectTo(BlockState state,BlockGetter level,BlockPos pos,Direction side){return side!=null;}
+    @Override protected void affectNeighborsAfterRemoval(BlockState state,ServerLevel level,BlockPos pos,boolean moved){if(state.getValue(RECEIVER)&&state.getValue(POWERED))notifySelfAndSupport(level,pos,state);}
+    public static void notifySelfAndSupport(Level level,BlockPos pos,BlockState state){
+        for(var center:new BlockPos[]{pos,pos.relative(state.getValue(FACING).getOpposite())})for(var side:Direction.values()){
+            var next=center.relative(side);if(LoadedLevelAccess.isLoaded(level,next))level.neighborChanged(LoadedLevelAccess.blockState(level,next),next,state.getBlock(),null,false);
+        }
+    }
+    public InteractionResult toggleMode(BlockState state,Level level,BlockPos pos){
+        if(level instanceof ServerLevel server){
+            boolean receiver=!state.getValue(RECEIVER);
+            LoadedLevelAccess.setBlockQuiet(level,pos,state.setValue(RECEIVER,receiver).setValue(POWERED,false));
+            if(LoadedLevelAccess.blockEntity(level,pos)instanceof RedstoneLinkBlockEntity entity){entity.transmit(0);entity.refreshMode();}
+            server.scheduleTick(pos,this,1);
+        }return InteractionResult.SUCCESS;
+    }
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){return player.isShiftKeyDown()?toggleMode(state,level,pos):InteractionResult.PASS;}
+    public InteractionResult onWrenched(BlockState state,UseOnContext context){return toggleMode(state,context.getLevel(),context.getClickedPos());}
+    @Override protected BlockState rotate(BlockState state,Rotation rotation){return state.setValue(FACING,rotation.rotate(state.getValue(FACING)));}
+    @Override protected BlockState mirror(BlockState state,Mirror mirror){return state.rotate(mirror.getRotation(state.getValue(FACING)));}
+    @Override protected boolean isPathfindable(BlockState state,PathComputationType type){return false;}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return RedstoneLinkFrequencySlot.shape(state.getValue(FACING));}
 }

@@ -1,117 +1,40 @@
 package com.simibubi.create.content.kinetics.belt;
 
-import java.util.Map;
-
-import com.simibubi.create.AllTags.AllItemTags;
-
-import it.unimi.dsi.fastutil.objects.Object2BooleanOpenHashMap;
-import net.createmod.catnip.math.VecHelper;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Vec3i;
-import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
-import net.minecraft.util.Mth;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.neoforge.capabilities.Capabilities;
 
-public class BeltHelper {
-
-	public static Map<Item, Boolean> uprightCache = new Object2BooleanOpenHashMap<>();
-	public static final ResourceManagerReloadListener LISTENER = resourceManager -> uprightCache.clear();
-
-	public static boolean isItemUpright(ItemStack stack) {
-		return uprightCache.computeIfAbsent(
-			stack.getItem(),
-			item -> {
-				boolean isFluidHandler = stack.getCapability(Capabilities.FluidHandler.ITEM) != null;
-				boolean useUpright = AllItemTags.UPRIGHT_ON_BELT.matches(stack);
-				boolean forceDisableUpright = !AllItemTags.NOT_UPRIGHT_ON_BELT.matches(stack);
-
-				return (isFluidHandler || useUpright) && forceDisableUpright;
-			}
-		);
-	}
-
-	public static BeltBlockEntity getSegmentBE(LevelAccessor world, BlockPos pos) {
-		if (world instanceof Level l && !l.isLoaded(pos))
-			return null;
-		BlockEntity blockEntity = world.getBlockEntity(pos);
-		if (!(blockEntity instanceof BeltBlockEntity))
-			return null;
-		return (BeltBlockEntity) blockEntity;
-	}
-
-	public static BeltBlockEntity getControllerBE(LevelAccessor world, BlockPos pos) {
-		BeltBlockEntity segment = getSegmentBE(world, pos);
-		if (segment == null)
-			return null;
-		BlockPos controllerPos = segment.controller;
-		if (controllerPos == null)
-			return null;
-		return getSegmentBE(world, controllerPos);
-	}
-
-	public static BeltBlockEntity getBeltForOffset(BeltBlockEntity controller, float offset) {
-		return getBeltAtSegment(controller, (int) Math.floor(offset));
-	}
-
-	public static BeltBlockEntity getBeltAtSegment(BeltBlockEntity controller, int segment) {
-		BlockPos pos = getPositionForOffset(controller, segment);
-		BlockEntity be = controller.getLevel()
-			.getBlockEntity(pos);
-		if (be == null || !(be instanceof BeltBlockEntity))
-			return null;
-		return (BeltBlockEntity) be;
-	}
-
-	public static BlockPos getPositionForOffset(BeltBlockEntity controller, int offset) {
-		BlockPos pos = controller.getBlockPos();
-		Vec3i vec = controller.getBeltFacing()
-			.getNormal();
-		BeltSlope slope = controller.getBlockState()
-			.getValue(BeltBlock.SLOPE);
-		int verticality = slope == BeltSlope.DOWNWARD ? -1 : slope == BeltSlope.UPWARD ? 1 : 0;
-
-		return pos.offset(offset * vec.getX(), Mth.clamp(offset, 0, controller.beltLength - 1) * verticality,
-			offset * vec.getZ());
-	}
-
-	public static Vec3 getVectorForOffset(BeltBlockEntity controller, float offset) {
-		BeltSlope slope = controller.getBlockState()
-			.getValue(BeltBlock.SLOPE);
-		int verticality = slope == BeltSlope.DOWNWARD ? -1 : slope == BeltSlope.UPWARD ? 1 : 0;
-		float verticalMovement = verticality;
-		if (offset < .5)
-			verticalMovement = 0;
-		verticalMovement = verticalMovement * (Math.min(offset, controller.beltLength - .5f) - .5f);
-		Vec3 vec = VecHelper.getCenterOf(controller.getBlockPos());
-		Vec3 horizontalMovement = Vec3.atLowerCornerOf(controller.getBeltFacing()
-			.getNormal())
-			.scale(offset - .5f);
-
-		if (slope == BeltSlope.VERTICAL)
-			horizontalMovement = Vec3.ZERO;
-
-		vec = vec.add(horizontalMovement)
-			.add(0, verticalMovement, 0);
-		return vec;
-	}
-
-	public static Vec3 getBeltVector(BlockState state) {
-		BeltSlope slope = state.getValue(BeltBlock.SLOPE);
-		int verticality = slope == BeltSlope.DOWNWARD ? -1 : slope == BeltSlope.UPWARD ? 1 : 0;
-		Vec3 horizontalMovement = Vec3.atLowerCornerOf(state.getValue(BeltBlock.HORIZONTAL_FACING)
-			.getNormal());
-		if (slope == BeltSlope.VERTICAL)
-			return new Vec3(0, state.getValue(BeltBlock.HORIZONTAL_FACING)
-				.getAxisDirection()
-				.getStep(), 0);
-		return new Vec3(0, verticality, 0).add(horizontalMovement);
-	}
-
+public final class BeltHelper {
+    public static BeltBlockEntity getSegmentBE(Level level, BlockPos pos) {
+        return level.isLoaded(pos) && level.getBlockEntity(pos) instanceof BeltBlockEntity belt ? belt : null;
+    }
+    public static BeltBlockEntity getControllerBE(Level level, BlockPos pos) {
+        var belt = getSegmentBE(level, pos);
+        return belt == null ? null : getSegmentBE(level, belt.getController());
+    }
+    public static BlockPos getPositionForOffset(BeltBlockEntity controller, int offset) {
+        var state = controller.getBlockState();
+        var facing = state.getValue(BeltBlock.HORIZONTAL_FACING);
+        var slope = state.getValue(BeltBlock.SLOPE);
+        if (slope == BeltSlope.VERTICAL) return controller.getBlockPos().above(offset * facing.getAxisDirection().getStep());
+        int vertical = slope == BeltSlope.UPWARD ? 1 : slope == BeltSlope.DOWNWARD ? -1 : 0;
+        return controller.getBlockPos().relative(facing, offset).above(vertical * Math.clamp(offset, 0, Math.max(0, controller.beltLength - 1)));
+    }
+    private static final net.minecraft.tags.TagKey<net.minecraft.world.item.Item> UPRIGHT = net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, com.simibubi.create.Create.asResource("upright_on_belt"));
+    private static final net.minecraft.tags.TagKey<net.minecraft.world.item.Item> NOT_UPRIGHT = net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, com.simibubi.create.Create.asResource("not_upright_on_belt"));
+    public static boolean isItemUpright(net.minecraft.world.item.ItemStack stack) {
+        if (stack.is(NOT_UPRIGHT)) return false;
+        return stack.is(UPRIGHT) || net.fabricmc.fabric.api.transfer.v1.context.ContainerItemContext.withConstant(stack)
+                .find(net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage.ITEM) != null;
+    }
+    public static Vec3 getVectorForOffset(BeltBlockEntity controller, float offset) {
+        var state = controller.getBlockState();
+        var facing = state.getValue(BeltBlock.HORIZONTAL_FACING);
+        var slope = state.getValue(BeltBlock.SLOPE);
+        int vertical = slope == BeltSlope.UPWARD ? 1 : slope == BeltSlope.DOWNWARD ? -1 : 0;
+        double y = vertical * Math.clamp(offset - 0.5, 0, Math.max(0, controller.beltLength - 1));
+        if (slope == BeltSlope.VERTICAL) return Vec3.atCenterOf(controller.getBlockPos()).add(0, (offset - 0.5) * facing.getAxisDirection().getStep(), 0);
+        return Vec3.atCenterOf(controller.getBlockPos()).add(facing.getStepX() * (offset - 0.5), y, facing.getStepZ() * (offset - 0.5));
+    }
+    private BeltHelper() {}
 }

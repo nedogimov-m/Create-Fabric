@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "net.createmod.ponder.test.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "PonderNavigationAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "variants": {
+    "shape=none": {
+      "model": "minecraft:block/air"
+    },
+    "shape=ae": {
+      "model": "create:block/track/ascending",
+      "y": 270
+    },
+    "shape=an": {
+      "model": "create:block/track/ascending",
+      "y": 180
+    },
+    "shape=as": {
+      "model": "create:block/track/ascending"
+    },
+    "shape=aw": {
+      "model": "create:block/track/ascending",
+      "y": 90
+    },
+    "shape=cr_d": {
+      "model": "create:block/track/cross_diag"
+    },
+    "shape=cr_ndx": {
+      "model": "create:block/track/cross_d2_xo"
+    },
+    "shape=cr_ndz": {
+      "model": "create:block/track/cross_d2_zo"
+    },
+    "shape=cr_o": {
+      "model": "create:block/track/cross_ortho"
+    },
+    "shape=cr_pdx": {
+      "model": "create:block/track/cross_d1_xo"
+    },
+    "shape=cr_pdz": {
+      "model": "create:block/track/cross_d1_zo"
+    },
+    "shape=nd": {
+      "model": "create:block/track/diag_2"
+    },
+    "shape=pd": {
+      "model": "create:block/track/diag"
+    },
+    "shape=te": {
+      "model": "create:block/track/teleport",
+      "y": 270
+    },
+    "shape=tn": {
+      "model": "create:block/track/teleport",
+      "y": 180
+    },
+    "shape=ts": {
+      "model": "create:block/track/teleport"
+    },
+    "shape=tw": {
+      "model": "create:block/track/teleport",
+      "y": 90
+    },
+    "shape=xo": {
+      "model": "create:block/track/x_ortho"
+    },
+    "shape=zo": {
+      "model": "create:block/track/z_ortho"
+    }
+  }
+}

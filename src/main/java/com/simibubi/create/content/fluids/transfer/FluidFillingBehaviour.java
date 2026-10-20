@@ -1,316 +1,116 @@
 package com.simibubi.create.content.fluids.transfer;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
-import com.simibubi.create.foundation.fluid.FluidHelper;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import it.unimi.dsi.fastutil.PriorityQueue;
-import it.unimi.dsi.fastutil.objects.ObjectHeapPriorityQueue;
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.math.BBHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.tags.BlockTags;
-import net.minecraft.tags.FluidTags;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.DoorBlock;
-import net.minecraft.world.level.block.LiquidBlock;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import com.simibubi.create.content.fluids.hosePulley.HosePulleyBlockEntity;
+import net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext;
+import net.minecraft.core.*;
+import net.minecraft.tags.*;
+import net.minecraft.world.attribute.EnvironmentAttributes;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.levelgen.structure.BoundingBox;
-import net.minecraft.world.level.material.Fluid;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.level.material.*;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.ticks.LevelTickAccess;
-import net.minecraft.world.ticks.LevelTicks;
+import java.util.*;
 
-public class FluidFillingBehaviour extends FluidManipulationBehaviour {
-
-	public static final BehaviourType<FluidFillingBehaviour> TYPE = new BehaviourType<>();
-
-	PriorityQueue<BlockPosEntry> queue;
-
-	List<BlockPosEntry> infinityCheckFrontier;
-	Set<BlockPos> infinityCheckVisited;
-
-	public FluidFillingBehaviour(SmartBlockEntity be) {
-		super(be);
-		queue = new ObjectHeapPriorityQueue<>((p, p2) -> -comparePositions(p, p2));
-		revalidateIn = 1;
-		infinityCheckFrontier = new ArrayList<>();
-		infinityCheckVisited = new HashSet<>();
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		if (!infinityCheckFrontier.isEmpty() && rootPos != null) {
-			Fluid fluid = getWorld().getFluidState(rootPos)
-				.getType();
-			if (fluid != Fluids.EMPTY)
-				continueValidation(fluid);
-		}
-		if (revalidateIn > 0)
-			revalidateIn--;
-	}
-
-	protected void continueValidation(Fluid fluid) {
-		try {
-			search(fluid, infinityCheckFrontier, infinityCheckVisited,
-				(p, d) -> infinityCheckFrontier.add(new BlockPosEntry(p, d)), true);
-		} catch (ChunkNotLoadedException e) {
-			infinityCheckFrontier.clear();
-			infinityCheckVisited.clear();
-			setLongValidationTimer();
-			return;
-		}
-
-		int maxBlocks = maxBlocks();
-
-		if (infinityCheckVisited.size() >= maxBlocks && maxBlocks != -1 && !fillInfinite()) {
-			if (!infinite) {
-				reset();
-				infinite = true;
-				blockEntity.sendData();
-			}
-			infinityCheckFrontier.clear();
-			setLongValidationTimer();
-			return;
-		}
-
-		if (!infinityCheckFrontier.isEmpty())
-			return;
-		if (infinite) {
-			reset();
-			return;
-		}
-
-		infinityCheckVisited.clear();
-	}
-
-	public boolean tryDeposit(Fluid fluid, BlockPos root, boolean simulate) {
-		if (!Objects.equals(root, rootPos)) {
-			reset();
-			rootPos = root;
-			queue.enqueue(new BlockPosEntry(root, 0));
-			affectedArea = BoundingBox.fromCorners(rootPos, rootPos);
-			return false;
-		}
-
-		if (counterpartActed) {
-			counterpartActed = false;
-			softReset(root);
-			return false;
-		}
-
-		if (affectedArea == null)
-			affectedArea = BoundingBox.fromCorners(root, root);
-
-		if (revalidateIn == 0) {
-			visited.clear();
-			infinityCheckFrontier.clear();
-			infinityCheckVisited.clear();
-			infinityCheckFrontier.add(new BlockPosEntry(root, 0));
-			setValidationTimer();
-			softReset(root);
-		}
-
-		Level world = getWorld();
-		int maxRange = maxRange();
-		int maxRangeSq = maxRange * maxRange;
-		int maxBlocks = maxBlocks();
-		boolean evaporate = world.dimensionType()
-			.ultraWarm() && FluidHelper.isTag(fluid, FluidTags.WATER);
-		boolean canPlaceSources = AllConfigs.server().fluids.fluidFillPlaceFluidSourceBlocks.get();
-
-		if ((!fillInfinite() && infinite) || evaporate || !canPlaceSources) {
-			FluidState fluidState = world.getFluidState(rootPos);
-			boolean equivalentTo = fluidState.getType()
-				.isSame(fluid);
-			if (!equivalentTo && !evaporate && canPlaceSources)
-				return false;
-			if (simulate)
-				return true;
-			playEffect(world, root, fluid, false);
-			if (evaporate) {
-				int i = root.getX();
-				int j = root.getY();
-				int k = root.getZ();
-				world.playSound(null, i, j, k, SoundEvents.FIRE_EXTINGUISH, SoundSource.BLOCKS, 0.5F,
-					2.6F + (world.random.nextFloat() - world.random.nextFloat()) * 0.8F);
-			} else if (!canPlaceSources)
-				blockEntity.award(AllAdvancements.HOSE_PULLEY);
-			return true;
-		}
-
-		boolean success = false;
-		for (int i = 0; !success && !queue.isEmpty() && i < searchedPerTick; i++) {
-			BlockPosEntry entry = queue.first();
-			BlockPos currentPos = entry.pos();
-
-			if (visited.contains(currentPos)) {
-				queue.dequeue();
-				continue;
-			}
-
-			if (!simulate)
-				visited.add(currentPos);
-
-			if (visited.size() >= maxBlocks && maxBlocks != -1) {
-				infinite = true;
-				if (!fillInfinite()) {
-					visited.clear();
-					queue.clear();
-					return false;
-				}
-			}
-
-			SpaceType spaceType = getAtPos(world, currentPos, fluid);
-			if (spaceType == SpaceType.BLOCKING)
-				continue;
-			if (spaceType == SpaceType.FILLABLE) {
-				success = true;
-				if (!simulate) {
-					playEffect(world, currentPos, fluid, false);
-
-					BlockState blockState = world.getBlockState(currentPos);
-					if (blockState.hasProperty(BlockStateProperties.WATERLOGGED) && fluid.isSame(Fluids.WATER)) {
-						if (!blockEntity.isVirtual())
-							world.setBlock(currentPos,
-								updatePostWaterlogging(blockState.setValue(BlockStateProperties.WATERLOGGED, true)),
-								2 | 16);
-					} else {
-						replaceBlock(world, currentPos, blockState);
-						if (!blockEntity.isVirtual())
-							world.setBlock(currentPos, FluidHelper.convertToStill(fluid)
-								.defaultFluidState()
-								.createLegacyBlock(), 2 | 16);
-					}
-
-					LevelTickAccess<Fluid> pendingFluidTicks = world.getFluidTicks();
-					if (pendingFluidTicks instanceof LevelTicks<Fluid> serverTickList) {
-						serverTickList.clearArea(new BoundingBox(currentPos));
-					}
-
-					affectedArea = BBHelper.encapsulate(affectedArea, currentPos);
-				}
-			}
-
-			if (simulate && success)
-				return true;
-
-			visited.add(currentPos);
-			queue.dequeue();
-
-			for (Direction side : Iterate.directions) {
-				if (side == Direction.UP)
-					continue;
-
-				BlockPos offsetPos = currentPos.relative(side);
-				if (visited.contains(offsetPos))
-					continue;
-				if (offsetPos.distSqr(rootPos) > maxRangeSq)
-					continue;
-
-				SpaceType nextSpaceType = getAtPos(world, offsetPos, fluid);
-				if (nextSpaceType != SpaceType.BLOCKING)
-					queue.enqueue(new BlockPosEntry(offsetPos, entry.distance() + 1));
-			}
-		}
-
-		if (!simulate && success)
-			blockEntity.award(AllAdvancements.HOSE_PULLEY);
-		return success;
-	}
-
-	protected void softReset(BlockPos root) {
-		visited.clear();
-		queue.clear();
-		queue.enqueue(new BlockPosEntry(root, 0));
-		infinite = false;
-		setValidationTimer();
-		blockEntity.sendData();
-	}
-
-	enum SpaceType {
-		FILLABLE, FILLED, BLOCKING
-	}
-
-	protected SpaceType getAtPos(Level world, BlockPos pos, Fluid toFill) {
-		BlockState blockState = world.getBlockState(pos);
-		FluidState fluidState = blockState.getFluidState();
-
-		if (blockState.hasProperty(BlockStateProperties.WATERLOGGED))
-			return toFill.isSame(Fluids.WATER)
-				? blockState.getValue(BlockStateProperties.WATERLOGGED) ? SpaceType.FILLED : SpaceType.FILLABLE
-				: SpaceType.BLOCKING;
-
-		if (blockState.getBlock() instanceof LiquidBlock)
-			return blockState.getValue(LiquidBlock.LEVEL) == 0
-				? toFill.isSame(fluidState.getType()) ? SpaceType.FILLED : SpaceType.BLOCKING
-				: SpaceType.FILLABLE;
-
-		if (fluidState.getType() != Fluids.EMPTY
-			&& blockState.getCollisionShape(getWorld(), pos, CollisionContext.empty())
-			.isEmpty())
-			return toFill.isSame(fluidState.getType()) ? SpaceType.FILLED : SpaceType.BLOCKING;
-
-		return canBeReplacedByFluid(world, pos, blockState) ? SpaceType.FILLABLE : SpaceType.BLOCKING;
-	}
-
-	protected void replaceBlock(Level world, BlockPos pos, BlockState state) {
-		BlockEntity blockEntity = state.hasBlockEntity() ? world.getBlockEntity(pos) : null;
-		Block.dropResources(state, world, pos, blockEntity);
-	}
-
-	// From FlowingFluidBlock#isBlocked
-	protected boolean canBeReplacedByFluid(BlockGetter world, BlockPos pos, BlockState pState) {
-		Block block = pState.getBlock();
-		if (!(block instanceof DoorBlock) && !pState.is(BlockTags.ALL_SIGNS) && !pState.is(Blocks.LADDER)
-			&& !pState.is(Blocks.SUGAR_CANE) && !pState.is(Blocks.BUBBLE_COLUMN)) {
-			if (!pState.is(Blocks.NETHER_PORTAL) && !pState.is(Blocks.END_PORTAL) && !pState.is(Blocks.END_GATEWAY)
-				&& !pState.is(Blocks.STRUCTURE_VOID)) {
-				return !pState.blocksMotion();
-			} else {
-				return false;
-			}
-		} else {
-			return false;
-		}
-	}
-
-	protected BlockState updatePostWaterlogging(BlockState state) {
-		if (state.hasProperty(BlockStateProperties.LIT))
-			state = state.setValue(BlockStateProperties.LIT, false);
-		return state;
-	}
-
-	@Override
-	public void reset() {
-		super.reset();
-		queue.clear();
-		infinityCheckFrontier.clear();
-		infinityCheckVisited.clear();
-	}
-
-	@Override
-	public BehaviourType<?> getType() {
-		return TYPE;
-	}
+/** Upstream bottom-first placement queue, downward search and periodic infinite-pool check. */
+public final class FluidFillingBehaviour extends FluidManipulationBehaviour {
+    private final PriorityQueue<BlockPosEntry> queue=new PriorityQueue<>((first,second)->-comparePositions(first,second));
+    private final List<BlockPosEntry> infinityFrontier=new ArrayList<>();
+    private final Set<BlockPos> infinityVisited=new HashSet<>();
+    public FluidFillingBehaviour(HosePulleyBlockEntity owner){super(owner);revalidateIn=1;}
+    public void tick(BlockPos root,Fluid buffered){
+        if(!Objects.equals(rootPos,root)){reset();rootPos=root.immutable();queue.add(new BlockPosEntry(root,0));include(root);}
+        if(counterpartActed){counterpartActed=false;softReset(root);}
+        if(!infinityFrontier.isEmpty()){
+            var fluid=state(root).getFluidState().getType();if(fluid!=Fluids.EMPTY)continueValidation(fluid);else infinityFrontier.clear();
+        }
+        if(revalidateIn>0)revalidateIn--;
+        if(revalidateIn==0){visited.clear();infinityFrontier.clear();infinityVisited.clear();infinityFrontier.add(new BlockPosEntry(root,0));softReset(root);}
+        // Exploration is a cache, so it must make bounded progress even when a full buffer accepts no transfer.
+        // World changes and the removal of a fillable candidate remain inside the caller's transaction.
+        if(buffered!=Fluids.EMPTY&&(!infinite||fillInfinite()))advanceFilledQueue(buffered);
+    }
+    private void advanceFilledQueue(Fluid fluid){
+        for(int count=0;count<searchedPerTick&&!queue.isEmpty();count++){
+            var entry=queue.element();var pos=entry.pos();
+            if(visited.contains(pos)){queue.remove();continue;}
+            if(!getWorld().isLoaded(pos))return;
+            var space=spaceAt(pos,fluid);if(space==SpaceType.FILLABLE)return;
+            visited.add(pos);queue.remove();
+            if(visited.size()>=maxBlocks()&&maxBlocks()!=-1&&!fillInfinite()){infinite=true;visited.clear();queue.clear();pulley().fluidChanged();return;}
+            if(space!=SpaceType.BLOCKING)addNeighbours(entry,fluid);
+        }
+    }
+    private void addNeighbours(BlockPosEntry entry,Fluid fluid){
+        long rangeSq=(long)maxRange()*maxRange();
+        for(var side:Direction.values()){
+            if(side==Direction.UP)continue;var next=entry.pos().relative(side);
+            if(visited.contains(next)||next.distSqr(rootPos)>rangeSq||getWorld().isOutsideBuildHeight(next)||!getWorld().isLoaded(next))continue;
+            if(spaceAt(next,fluid)!=SpaceType.BLOCKING)queue.add(new BlockPosEntry(next,entry.distance()+1));
+        }
+    }
+    private void continueValidation(Fluid fluid){
+        try{search(still(fluid),infinityFrontier,infinityVisited,(pos,distance)->infinityFrontier.add(new BlockPosEntry(pos,distance)),true);}
+        catch(ChunkNotLoadedException missing){infinityFrontier.clear();infinityVisited.clear();setLongValidationTimer();return;}
+        if(infinityVisited.size()>=maxBlocks()&&maxBlocks()!=-1&&!fillInfinite()){
+            if(!infinite){reset();infinite=true;pulley().fluidChanged();}infinityFrontier.clear();setLongValidationTimer();return;
+        }
+        if(!infinityFrontier.isEmpty())return;
+        if(infinite){reset();return;}infinityVisited.clear();
+    }
+    public boolean tryDeposit(Fluid fluid,BlockPos root,TransactionContext tx){
+        if(!Objects.equals(root,rootPos)||counterpartActed||!getWorld().isLoaded(root))return false;
+        enlist(tx);include(root);
+        boolean evaporate=fluid.is(FluidTags.WATER)&&getWorld().environmentAttributes().getValue(EnvironmentAttributes.WATER_EVAPORATES,root);
+        boolean place=pulley().settings().placeSources();
+        if((!fillInfinite()&&infinite)||evaporate||!place){
+            if(!state(root).getFluidState().getType().isSame(fluid)&&!evaporate&&place)return false;
+            edit(root,state(root),fluid,false,false,evaporate,tx);
+            if(!evaporate&&!place)com.simibubi.create.content.fluids.WorldFluidEdit.onAcceptedApply(getWorld(),root,()->pulley().sourceAdvancements.award("hose_pulley"),false,tx);return true;
+        }
+        boolean success=false;
+        for(int count=0;!success&&!queue.isEmpty()&&count<searchedPerTick;count++){
+            var entry=queue.element();var pos=entry.pos();
+            if(visited.contains(pos)){queue.remove();continue;}
+            if(!getWorld().isLoaded(pos))return false;
+            visited.add(pos);
+            if(visited.size()>=maxBlocks()&&maxBlocks()!=-1){
+                infinite=true;if(!fillInfinite()){visited.clear();queue.clear();return false;}
+            }
+            var space=spaceAt(pos,fluid);
+            // A block can change after it was queued; discard it rather than repeatedly checking it forever.
+            if(space==SpaceType.BLOCKING){queue.remove();continue;}
+            if(space==SpaceType.FILLABLE){
+                var old=state(pos);var replacement=still(fluid).defaultFluidState().createLegacyBlock();boolean waterlog=old.hasProperty(BlockStateProperties.WATERLOGGED)&&fluid.isSame(Fluids.WATER);
+                if(waterlog){replacement=old.setValue(BlockStateProperties.WATERLOGGED,true);if(replacement.hasProperty(BlockStateProperties.LIT))replacement=replacement.setValue(BlockStateProperties.LIT,false);}
+                edit(pos,replacement,fluid,false,!waterlog,false,tx);com.simibubi.create.content.fluids.WorldFluidEdit.onAcceptedApply(getWorld(),pos,()->pulley().sourceAdvancements.award("hose_pulley"),false,tx);include(pos);success=true;
+            }
+            queue.remove();
+            addNeighbours(entry,fluid);
+        }return success;
+    }
+    private void softReset(BlockPos root){visited.clear();queue.clear();queue.add(new BlockPosEntry(root,0));infinite=false;setValidationTimer();pulley().fluidChanged();}
+    private enum SpaceType {FILLABLE,FILLED,BLOCKING}
+    private SpaceType spaceAt(BlockPos pos,Fluid toFill){
+        if(!getWorld().isLoaded(pos)||getWorld().isOutsideBuildHeight(pos))return SpaceType.BLOCKING;
+        var block=state(pos);var fluid=block.getFluidState();
+        if(block.hasProperty(BlockStateProperties.WATERLOGGED))return toFill.isSame(Fluids.WATER)?block.getValue(BlockStateProperties.WATERLOGGED)?SpaceType.FILLED:SpaceType.FILLABLE:SpaceType.BLOCKING;
+        if(block.getBlock() instanceof LiquidBlock)return block.getValue(LiquidBlock.LEVEL)==0?toFill.isSame(fluid.getType())?SpaceType.FILLED:SpaceType.BLOCKING:SpaceType.FILLABLE;
+        if(!fluid.isEmpty()&&block.getCollisionShape(getWorld(),pos,CollisionContext.empty()).isEmpty())return toFill.isSame(fluid.getType())?SpaceType.FILLED:SpaceType.BLOCKING;
+        var type=block.getBlock();
+        if(type instanceof DoorBlock||block.is(BlockTags.ALL_SIGNS)||block.is(Blocks.LADDER)||block.is(Blocks.SUGAR_CANE)||block.is(Blocks.BUBBLE_COLUMN)||block.is(Blocks.NETHER_PORTAL)||block.is(Blocks.END_PORTAL)||block.is(Blocks.END_GATEWAY)||block.is(Blocks.STRUCTURE_VOID))return SpaceType.BLOCKING;
+        return block.isSolid()?SpaceType.BLOCKING:SpaceType.FILLABLE;
+    }
+    @Override public void reset(){super.reset();queue.clear();infinityFrontier.clear();infinityVisited.clear();}
+    private record Extra(List<BlockPosEntry> queue,List<BlockPosEntry> frontier,Set<BlockPos> visited){}
+    @Override protected Object snapshotExtra(){return new Extra(List.copyOf(queue),List.copyOf(infinityFrontier),Set.copyOf(infinityVisited));}
+    @Override protected void restoreExtra(Object snapshot){var s=(Extra)snapshot;queue.clear();queue.addAll(s.queue);infinityFrontier.clear();infinityFrontier.addAll(s.frontier);infinityVisited.clear();infinityVisited.addAll(s.visited);}
+    @Override public void load(ValueInput in){super.load(in);queue.clear();infinityFrontier.clear();infinityVisited.clear();if(rootPos!=null)queue.add(new BlockPosEntry(rootPos,0));}
+    public static final com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType<FluidFillingBehaviour> TYPE=new com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType<>();
+    @Override public com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType<?> getType(){return TYPE;}
+    @Override public void tick(){super.tick();if(getWorld()!=null&&!getWorld().isClientSide()&&!pulley().isMoving())tick(pulley().rootPos(),pulley().tank.getResource().getFluid());}
+    @Override public void write(ValueOutput output){save(output.child("Filling"));}
+    @Override public void read(ValueInput input){load(input.childOrEmpty("Filling"));}
 
 }

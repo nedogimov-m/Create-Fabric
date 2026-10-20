@@ -1,208 +1,62 @@
 package com.simibubi.create.content.logistics.tableCloth;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
-
-import org.jetbrains.annotations.Nullable;
-
-import org.jetbrains.annotations.Unmodifiable;
-
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import com.simibubi.create.AllDataComponents;
+import com.simibubi.create.*;
 import com.simibubi.create.content.logistics.BigItemStack;
 import com.simibubi.create.content.logistics.packager.InventorySummary;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.IntAttached;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import java.util.function.Consumer;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.UUIDUtil;
+import net.minecraft.core.*;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.network.codec.*;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
 
-public class ShoppingListItem extends Item {
-	public record ShoppingList(@Unmodifiable List<IntAttached<BlockPos>> purchases, UUID shopOwner, UUID shopNetwork) {
-		public static final Codec<ShoppingList> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-			Codec.list(IntAttached.codec(BlockPos.CODEC)).fieldOf("purchases").forGetter(ShoppingList::purchases),
-			UUIDUtil.CODEC.fieldOf("shop_owner").forGetter(ShoppingList::shopOwner),
-			UUIDUtil.CODEC.fieldOf("shop_network").forGetter(ShoppingList::shopNetwork)
-		).apply(instance, ShoppingList::new));
-
-		public static final StreamCodec<ByteBuf, ShoppingList> STREAM_CODEC = StreamCodec.composite(
-			CatnipStreamCodecBuilders.list(IntAttached.streamCodec(BlockPos.STREAM_CODEC)), ShoppingList::purchases,
-		    UUIDUtil.STREAM_CODEC, ShoppingList::shopOwner,
-		    UUIDUtil.STREAM_CODEC, ShoppingList::shopNetwork,
-		    ShoppingList::new
-		);
-
-		public ShoppingList duplicate() {
-			return new ShoppingList(new ArrayList<>(purchases.stream()
-				.map(ia -> IntAttached.with(ia.getFirst(), ia.getSecond()))
-				.toList()), shopOwner, shopNetwork);
-		}
-
-		public int getPurchases(BlockPos clothPos) {
-			for (IntAttached<BlockPos> entry : purchases)
-				if (clothPos.equals(entry.getValue()))
-					return entry.getFirst();
-			return 0;
-		}
-
-		public Couple<InventorySummary> bakeEntries(LevelAccessor level, @Nullable BlockPos clothPosToIgnore) {
-			InventorySummary input = new InventorySummary();
-			InventorySummary output = new InventorySummary();
-
-			for (IntAttached<BlockPos> entry : purchases) {
-				if (clothPosToIgnore != null && clothPosToIgnore.equals(entry.getValue()))
-					continue;
-				if (!(level.getBlockEntity(entry.getValue()) instanceof TableClothBlockEntity dcbe))
-					continue;
-				input.add(dcbe.getPaymentItem(), dcbe.getPaymentAmount() * entry.getFirst());
-				for (BigItemStack stackEntry : dcbe.requestData.encodedRequest().stacks())
-					output.add(stackEntry.stack, stackEntry.count * entry.getFirst());
-			}
-
-			return Couple.create(output, input);
-		}
-
-		public static class Mutable {
-			private final List<IntAttached<BlockPos>> purchases = new ArrayList<>();
-			private final UUID shopOwner;
-			private final UUID shopNetwork;
-
-			public Mutable(ShoppingList list) {
-				this.purchases.addAll(list.purchases);
-				this.shopOwner = list.shopOwner;
-				this.shopNetwork = list.shopNetwork;
-			}
-
-			// Y value of clothPos is pixel perfect (x16)
-			public void addPurchases(BlockPos clothPos, int amount) {
-				for (IntAttached<BlockPos> entry : purchases) {
-					if (clothPos.equals(entry.getValue())) {
-						entry.setFirst(entry.getFirst() + amount);
-						return;
-					}
-				}
-				purchases.add(IntAttached.with(amount, clothPos));
-			}
-
-			public ShoppingList toImmutable() {
-				return new ShoppingList(purchases, shopOwner, shopNetwork);
-			}
-		}
-	}
-
-	public ShoppingListItem(Properties pProperties) {
-		super(pProperties);
-	}
-
-	public static ShoppingList getList(ItemStack stack) {
-		return stack.get(AllDataComponents.SHOPPING_LIST);
-	}
-
-	public static ItemStack saveList(ItemStack stack, ShoppingList list, String address) {
-		stack.set(AllDataComponents.SHOPPING_LIST, list);
-		stack.set(AllDataComponents.SHOPPING_LIST_ADDRESS, address);
-		return stack;
-	}
-
-	public static String getAddress(ItemStack stack) {
-		return stack.getOrDefault(AllDataComponents.SHOPPING_LIST_ADDRESS, "");
-	}
-
-	@Override
-	public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltipComponents,
-								TooltipFlag tooltipFlag) {
-		ShoppingList list = getList(stack);
-
-		if (list != null) {
-			Couple<InventorySummary> lists = list.bakeEntries(context.level(), null);
-
-			if (lists != null) {
-				for (InventorySummary items : lists) {
-					List<BigItemStack> entries = items.getStacksByCount();
-					boolean cost = items == lists.getSecond();
-
-					if (cost)
-						tooltipComponents.add(Component.empty());
-
-					if (entries.size() == 1) {
-						BigItemStack entry = entries.get(0);
-						(cost ? CreateLang.translate("table_cloth.total_cost") : CreateLang.text(""))
-							.style(ChatFormatting.GOLD)
-							.add(CreateLang.builder()
-								.add(entry.stack.getHoverName().plainCopy())
-								.text(" x")
-								.text(String.valueOf(entry.count))
-								.style(cost ? ChatFormatting.YELLOW : ChatFormatting.GRAY))
-							.addTo(tooltipComponents);
-
-					} else {
-						if (cost)
-							CreateLang.translate("table_cloth.total_cost")
-								.style(ChatFormatting.GOLD)
-								.addTo(tooltipComponents);
-						for (BigItemStack entry : entries) {
-							CreateLang.builder()
-								.add(entry.stack.getHoverName().plainCopy())
-								.text(" x")
-								.text(String.valueOf(entry.count))
-								.style(cost ? ChatFormatting.YELLOW : ChatFormatting.GRAY)
-								.addTo(tooltipComponents);
-						}
-					}
-				}
-			}
-		}
-
-		CreateLang.translate("table_cloth.hand_to_shop_keeper")
-			.style(ChatFormatting.GRAY)
-			.addTo(tooltipComponents);
-
-		CreateLang.translate("table_cloth.sneak_click_discard")
-			.style(ChatFormatting.DARK_GRAY)
-			.addTo(tooltipComponents);
-	}
-
-	@Override
-	public InteractionResultHolder<ItemStack> use(Level pLevel, Player pPlayer, InteractionHand pUsedHand) {
-		if (pUsedHand == InteractionHand.OFF_HAND || pPlayer == null || !pPlayer.isShiftKeyDown())
-			return new InteractionResultHolder<>(InteractionResult.PASS, pPlayer.getItemInHand(pUsedHand));
-
-		CreateLang.translate("table_cloth.shopping_list_discarded")
-			.sendStatus(pPlayer);
-		pPlayer.playSound(SoundEvents.BOOK_PAGE_TURN);
-		return new InteractionResultHolder<>(InteractionResult.SUCCESS, ItemStack.EMPTY);
-	}
-
-	@Override
-	public InteractionResult useOn(UseOnContext pContext) {
-		InteractionHand pUsedHand = pContext.getHand();
-		Player pPlayer = pContext.getPlayer();
-		if (pUsedHand == InteractionHand.OFF_HAND || pPlayer == null || !pPlayer.isShiftKeyDown())
-			return InteractionResult.PASS;
-		pPlayer.setItemInHand(pUsedHand, ItemStack.EMPTY);
-
-		CreateLang.translate("table_cloth.shopping_list_discarded")
-			.sendStatus(pPlayer);
-		pPlayer.playSound(SoundEvents.BOOK_PAGE_TURN);
-		return InteractionResult.SUCCESS;
-	}
+public final class ShoppingListItem extends Item {
+    public record Purchase(int count,BlockPos pos){
+        public static final Codec<Purchase> CODEC=RecordCodecBuilder.create(i->i.group(Codec.intRange(1,BigItemStack.INF).fieldOf("first").forGetter(Purchase::count),BlockPos.CODEC.fieldOf("second").forGetter(Purchase::pos)).apply(i,Purchase::new));
+        public static final StreamCodec<RegistryFriendlyByteBuf,Purchase> STREAM_CODEC=StreamCodec.composite(ByteBufCodecs.INT,Purchase::count,BlockPos.STREAM_CODEC,Purchase::pos,Purchase::new);
+    }
+    public record Baked(InventorySummary goods,InventorySummary payments,boolean valid){static Baked invalid(){return new Baked(new InventorySummary(),new InventorySummary(),false);}}
+    public record ShoppingList(List<Purchase> purchases,UUID shopOwner,UUID shopNetwork){
+        public static final Codec<ShoppingList> CODEC=RecordCodecBuilder.create(i->i.group(Purchase.CODEC.listOf().fieldOf("purchases").forGetter(ShoppingList::purchases),UUIDUtil.CODEC.fieldOf("shop_owner").forGetter(ShoppingList::shopOwner),UUIDUtil.CODEC.fieldOf("shop_network").forGetter(ShoppingList::shopNetwork)).apply(i,ShoppingList::new));
+        public static final StreamCodec<RegistryFriendlyByteBuf,ShoppingList> STREAM_CODEC=StreamCodec.composite(Purchase.STREAM_CODEC.apply(ByteBufCodecs.list(1024)),ShoppingList::purchases,UUIDUtil.STREAM_CODEC,ShoppingList::shopOwner,UUIDUtil.STREAM_CODEC,ShoppingList::shopNetwork,ShoppingList::new);
+        public ShoppingList{purchases=List.copyOf(purchases);}
+        public int getPurchases(BlockPos pos){long count=0;for(var entry:purchases)if(entry.pos.equals(pos))count+=entry.count;return (int)Math.clamp(count,0,BigItemStack.INF);}
+        public ShoppingList withPurchases(BlockPos pos,int amount){var next=new ArrayList<Purchase>();for(var entry:purchases)if(!entry.pos.equals(pos))next.add(entry);if(amount>0)next.add(new Purchase(amount,pos.immutable()));return new ShoppingList(next,shopOwner,shopNetwork);}
+        public Baked bakeEntries(Level level,BlockPos ignore){
+            if(level==null||purchases.size()>1024)return Baked.invalid();var goods=new InventorySummary();var payments=new InventorySummary();
+            for(var entry:purchases){
+                if(entry.count<1||entry.count>BigItemStack.INF)return Baked.invalid();if(entry.pos.equals(ignore))continue;
+                if(!(LoadedLevelAccess.blockEntity(level,entry.pos) instanceof TableClothBlockEntity cloth)||!cloth.isShop()||!shopOwner.equals(cloth.owner)||cloth.getPaymentItem().isEmpty())return Baked.invalid();
+                var ticker=cloth.getTicker();if(ticker==null||!shopNetwork.equals(ticker.behaviour.freqId))return Baked.invalid();
+                if(!add(payments,cloth.getPaymentItem(),(long)cloth.getPaymentAmount()*entry.count))return Baked.invalid();
+                for(var item:cloth.requestData.encodedRequest().stacks())if(item.count<1||!add(goods,item.stack,(long)item.count*entry.count))return Baked.invalid();
+            }
+            return new Baked(goods,payments,true);
+        }
+        private static boolean add(InventorySummary summary,ItemStack item,long amount){if(item.isEmpty()||amount<=0||amount+summary.getCountOf(item)>BigItemStack.INF)return false;summary.add(item.copyWithCount(1),(int)amount);return true;}
+    }
+    public static java.util.function.Function<ShoppingList,Baked> TOOLTIP_BAKE=list->Baked.invalid();
+    public ShoppingListItem(Properties properties){super(properties.stacksTo(1));}
+    public static ShoppingList getList(ItemStack stack){return stack.get(AllDataComponents.SHOPPING_LIST);}
+    public static String getAddress(ItemStack stack){return stack.getOrDefault(AllDataComponents.SHOPPING_LIST_ADDRESS,"");}
+    public static ItemStack saveList(ItemStack stack,ShoppingList list,String address){stack.set(AllDataComponents.SHOPPING_LIST,list);stack.set(AllDataComponents.SHOPPING_LIST_ADDRESS,address);return stack;}
+    @Override public InteractionResult use(Level level,Player player,InteractionHand hand){
+        if(hand!=InteractionHand.MAIN_HAND||!player.isShiftKeyDown())return InteractionResult.PASS;
+        if(!level.isClientSide()){player.setItemInHand(hand,ItemStack.EMPTY);player.sendOverlayMessage(Component.translatable("create.table_cloth.shopping_list_discarded"));level.playSound(null,player.blockPosition(),net.minecraft.sounds.SoundEvents.BOOK_PAGE_TURN,net.minecraft.sounds.SoundSource.PLAYERS,1,1);}return InteractionResult.SUCCESS;
+    }
+    @Override public InteractionResult useOn(UseOnContext context){return context.getPlayer()==null?InteractionResult.PASS:use(context.getLevel(),context.getPlayer(),context.getHand());}
+    @Override public void appendHoverText(ItemStack stack,TooltipContext context,TooltipDisplay display,Consumer<Component> lines,TooltipFlag flag){
+        var list=getList(stack);if(list!=null){var baked=TOOLTIP_BAKE.apply(list);if(baked.valid){for(var entry:baked.goods.getStacksByCount())lines.accept(entry.stack.getHoverName().copy().append(" x"+entry.count).withStyle(ChatFormatting.GRAY));lines.accept(Component.translatable("create.table_cloth.total_cost").withStyle(ChatFormatting.GOLD));for(var entry:baked.payments.getStacksByCount())lines.accept(entry.stack.getHoverName().copy().append(" x"+entry.count).withStyle(ChatFormatting.YELLOW));}}
+        lines.accept(Component.translatable("create.table_cloth.hand_to_shop_keeper").withStyle(ChatFormatting.GRAY));lines.accept(Component.translatable("create.table_cloth.sneak_click_discard").withStyle(ChatFormatting.DARK_GRAY));
+    }
 }

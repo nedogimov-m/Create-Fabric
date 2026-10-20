@@ -1,277 +1,62 @@
 package com.simibubi.create.content.redstone.nixieTube;
 
-import java.lang.ref.WeakReference;
-import java.util.List;
-import java.util.Optional;
-
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.compat.Mods;
-import com.simibubi.create.compat.computercraft.AbstractComputerBehaviour;
-import com.simibubi.create.compat.computercraft.ComputerCraftProxy;
-import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock;
-import com.simibubi.create.content.trains.signal.SignalBlockEntity;
-import com.simibubi.create.content.trains.signal.SignalBlockEntity.SignalState;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.simibubi.create.foundation.utility.DynamicComponent;
-
-import dan200.computercraft.api.peripheral.PeripheralCapability;
-import net.createmod.catnip.data.Couple;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.network.chat.*;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
-
-public class NixieTubeBlockEntity extends SmartBlockEntity {
-	public static final class ComputerSignal {
-		public static final class TubeDisplay {
-			public static final int ENCODED_SIZE = 7;
-
-			public byte r = 63, g = 63, b = 63;
-			public byte blinkPeriod = 0, blinkOffTime = 0;
-			public byte glowWidth = 1, glowHeight = 1;
-
-			public void decode(byte[] data, int offset) {
-				r = data[offset];
-				g = data[offset + 1];
-				b = data[offset + 2];
-				blinkPeriod = data[offset + 3];
-				blinkOffTime = data[offset + 4];
-				glowWidth = data[offset + 5];
-				glowHeight = data[offset + 6];
-			}
-
-			public void encode(byte[] data, int offset) {
-				data[offset] = r;
-				data[offset + 1] = g;
-				data[offset + 2] = b;
-				data[offset + 3] = blinkPeriod;
-				data[offset + 4] = blinkOffTime;
-				data[offset + 5] = glowWidth;
-				data[offset + 6] = glowHeight;
-			}
-		}
-
-		public @NotNull TubeDisplay first = new TubeDisplay();
-		public @NotNull TubeDisplay second = new TubeDisplay();
-
-		public void decode(byte[] encoded) {
-			first.decode(encoded, 0);
-			second.decode(encoded, TubeDisplay.ENCODED_SIZE);
-		}
-
-		public byte[] encode() {
-			byte[] encoded = new byte[TubeDisplay.ENCODED_SIZE * 2];
-			first.encode(encoded, 0);
-			second.encode(encoded, TubeDisplay.ENCODED_SIZE);
-			return encoded;
-		}
-	}
-
-	private static final Couple<String> EMPTY = Couple.create("", "");
-	private static final String EMPTY_COMPONENT_JSON = "\"\""; // Same as Component.literal("")
-
-	private int redstoneStrength;
-	private Optional<DynamicComponent> customText;
-	private int nixieIndex;
-	private Couple<String> displayedStrings;
-	public AbstractComputerBehaviour computerBehaviour;
-
-	private WeakReference<SignalBlockEntity> cachedSignalTE;
-	public @Nullable SignalState signalState;
-	public @Nullable ComputerSignal computerSignal;
-
-	public NixieTubeBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		customText = Optional.empty();
-		redstoneStrength = 0;
-		cachedSignalTE = new WeakReference<>(null);
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		if (Mods.COMPUTERCRAFT.isLoaded()) {
-			event.registerBlockEntity(
-				PeripheralCapability.get(),
-				AllBlockEntityTypes.NIXIE_TUBE.get(),
-				(be, context) -> be.computerBehaviour.getPeripheralCapability()
-			);
-		}
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		if (!level.isClientSide)
-			return;
-
-		signalState = null;
-		if (computerBehaviour.hasAttachedComputer()) {
-			if (level.isClientSide && cachedSignalTE.get() != null) {
-				cachedSignalTE = new WeakReference<>(null);
-			}
-			return;
-		} else {
-			computerSignal = null;
-		}
-
-		SignalBlockEntity signalBlockEntity = cachedSignalTE.get();
-
-		if (signalBlockEntity == null || signalBlockEntity.isRemoved()) {
-			Direction facing = NixieTubeBlock.getFacing(getBlockState());
-			BlockEntity blockEntity = level.getBlockEntity(worldPosition.relative(facing.getOpposite()));
-			if (blockEntity instanceof SignalBlockEntity signal) {
-				signalState = signal.getState();
-				cachedSignalTE = new WeakReference<>(signal);
-			}
-			return;
-		}
-
-		signalState = signalBlockEntity.getState();
-	}
-
-	@Override
-	public void initialize() {
-		if (level.isClientSide)
-			updateDisplayedStrings();
-	}
-
-	//
-
-	public boolean reactsToRedstone() {
-		return !computerBehaviour.hasAttachedComputer() && customText.isEmpty();
-	}
-
-	public Couple<String> getDisplayedStrings() {
-		if (displayedStrings == null)
-			return EMPTY;
-		return displayedStrings;
-	}
-
-	public MutableComponent getFullText() {
-		return customText.map(DynamicComponent::get)
-				.orElse(Component.literal("" + redstoneStrength));
-	}
-
-	public void updateRedstoneStrength(int signalStrength) {
-		clearCustomText();
-		redstoneStrength = signalStrength;
-		DisplayLinkBlock.notifyGatherers(level, worldPosition);
-		notifyUpdate();
-	}
-
-	public void displayCustomText(String tagElement, int nixiePositionInRow) {
-		if (tagElement == null)
-			return;
-		if (customText.filter(d -> d.sameAs(tagElement))
-				.isPresent())
-			return;
-
-		DynamicComponent component = customText.orElseGet(DynamicComponent::new);
-		component.displayCustomText(level, worldPosition, tagElement);
-		customText = Optional.of(component);
-		nixieIndex = nixiePositionInRow;
-		DisplayLinkBlock.notifyGatherers(level, worldPosition);
-		notifyUpdate();
-	}
-
-	public void displayEmptyText(int nixiePositionInRow) {
-		displayCustomText(EMPTY_COMPONENT_JSON, nixiePositionInRow);
-	}
-
-	public void updateDisplayedStrings() {
-		if (signalState != null || computerSignal != null)
-			return;
-		customText.map(DynamicComponent::resolve)
-				.ifPresentOrElse(
-						fullText -> displayedStrings = Couple.create(charOrEmpty(fullText, nixieIndex * 2),
-								charOrEmpty(fullText, nixieIndex * 2 + 1)),
-						() -> displayedStrings = Couple.create(redstoneStrength < 10 ? "0" : "1",
-								String.valueOf(redstoneStrength % 10)));
-	}
-
-	public void clearCustomText() {
-		nixieIndex = 0;
-		customText = Optional.empty();
-	}
-
-	public int getRedstoneStrength() {
-		return redstoneStrength;
-	}
-
-	//
-
-	@Override
-	protected void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(nbt, registries, clientPacket);
-
-		if (nbt.contains("CustomText")) {
-			DynamicComponent component = customText.orElseGet(DynamicComponent::new);
-			component.read(worldPosition, nbt, registries);
-
-			if (component.isValid()) {
-				customText = Optional.of(component);
-				nixieIndex = nbt.getInt("CustomTextIndex");
-			} else {
-				customText = Optional.empty();
-				nixieIndex = 0;
-			}
-		} else {
-			customText = Optional.empty();
-			nixieIndex = 0;
-		}
-
-		if (customText.isEmpty())
-			redstoneStrength = nbt.getInt("RedstoneStrength");
-		if (clientPacket || isVirtual()) {
-			if (nbt.contains("ComputerSignal")) {
-				byte[] encodedComputerSignal = nbt.getByteArray("ComputerSignal");
-				if (computerSignal == null)
-					computerSignal = new ComputerSignal();
-				computerSignal.decode(encodedComputerSignal);
-			} else {
-				computerSignal = null;
-			}
-			updateDisplayedStrings();
-		}
-	}
-
-	@Override
-	protected void write(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(nbt, registries, clientPacket);
-
-		if (customText.isPresent()) {
-			nbt.putInt("CustomTextIndex", nixieIndex);
-			customText.get()
-					.write(nbt, registries);
-		} else
-			nbt.putInt("RedstoneStrength", redstoneStrength);
-		if (clientPacket && computerSignal != null)
-			nbt.putByteArray("ComputerSignal", computerSignal.encode());
-	}
-
-	private String charOrEmpty(String string, int index) {
-		return string.length() <= index ? " " : string.substring(index, index + 1);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(computerBehaviour = ComputerCraftProxy.behaviour(this));
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		computerBehaviour.removePeripheral();
-	}
-
+/** Concrete source redstone/custom text state. DisplayLink/CC/signal integration is not replaced by dummy behaviours. */
+public final class NixieTubeBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity {
+    public static final class ComputerSignal {
+        public static final class TubeDisplay {
+            public static final int ENCODED_SIZE=7;
+            public byte r=63,g=63,b=63,blinkPeriod=0,blinkOffTime=0,glowWidth=1,glowHeight=1;
+            public void decode(byte[] data,int at){r=data[at];g=data[at+1];b=data[at+2];blinkPeriod=data[at+3];blinkOffTime=data[at+4];glowWidth=data[at+5];glowHeight=data[at+6];}
+            public void encode(byte[] data,int at){data[at]=r;data[at+1]=g;data[at+2]=b;data[at+3]=blinkPeriod;data[at+4]=blinkOffTime;data[at+5]=glowWidth;data[at+6]=glowHeight;}
+        }
+        public TubeDisplay first=new TubeDisplay(),second=new TubeDisplay();
+        public void decode(byte[] data){if(data.length!=TubeDisplay.ENCODED_SIZE*2)throw new IllegalArgumentException("Invalid original nixie computer signal size");first.decode(data,0);second.decode(data,TubeDisplay.ENCODED_SIZE);}
+        public byte[] encode(){var data=new byte[TubeDisplay.ENCODED_SIZE*2];first.encode(data,0);second.encode(data,TubeDisplay.ENCODED_SIZE);return data;}
+    }
+    public ComputerSignal computerSignal;
+    public record DisplayedStrings(String first,String second){}
+    private int redstoneStrength,nixieIndex;
+    private DynamicComponent customText;
+    private DisplayedStrings displayedStrings=new DisplayedStrings("0","0");
+    private boolean initializedInput;
+    public NixieTubeBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.NIXIE_TUBE,pos,state);}
+    public boolean reactsToRedstone(){return customText==null;}
+    public DisplayedStrings getDisplayedStrings(){return displayedStrings;}
+    public MutableComponent getFullText(){return customText==null?Component.literal(Integer.toString(redstoneStrength)):customText.get();}
+    public int getRedstoneStrength(){return redstoneStrength;}
+    public int getCustomTextIndex(){return nixieIndex;}
+    public void updateRedstoneStrength(int strength){clearCustomText();redstoneStrength=Math.clamp(strength,0,15);updateDisplayedStrings();if(level!=null)com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock.notifyGatherers(level,worldPosition);notifyUpdate();}
+    public void displayCustomText(String json,int index){
+        if(json==null)return;if(customText!=null&&customText.sameAs(json)&&nixieIndex==index)return;
+        var text=new DynamicComponent();text.displayCustomText(level,worldPosition,json);if(!text.isValid())return;customText=text;nixieIndex=Math.clamp(index,0,Integer.MAX_VALUE/2-1);updateDisplayedStrings();if(level!=null)com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock.notifyGatherers(level,worldPosition);notifyUpdate();
+    }
+    public void displayEmptyText(int index){displayCustomText("\"\"",index);}
+    public void clearCustomText(){customText=null;nixieIndex=0;updateDisplayedStrings();}
+    public void updateDisplayedStrings(){String text=customText==null?null:customText.resolve();displayedStrings=text==null?new DisplayedStrings(redstoneStrength<10?"0":"1",Integer.toString(redstoneStrength%10)):new DisplayedStrings(charOrEmpty(text,nixieIndex*2),charOrEmpty(text,nixieIndex*2+1));}
+    private static String charOrEmpty(String text,int index){return index<0||index>=text.length()?" ":text.substring(index,index+1);}
+    public void copyDisplayFrom(NixieTubeBlockEntity other){redstoneStrength=other.redstoneStrength;nixieIndex=other.nixieIndex;customText=other.customText==null?null:other.customText.copy();updateDisplayedStrings();notifyUpdate();}
+    public void notifyUpdate(){setChanged();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),2);}
+    public static void tick(Level level,BlockPos pos,BlockState state,NixieTubeBlockEntity entity){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, entity)) {
+            if (!createTick.shouldTick()) return;
+if(!level.isClientSide()&&!entity.initializedInput){entity.initializedInput=true;NixieTubeBlock.updateDisplayedRedstoneValue(entity,state,false);}
+        }
+    }
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);if(customText==null)out.putInt("RedstoneStrength",redstoneStrength);else{out.putInt("CustomTextIndex",nixieIndex);customText.write(out);}if(clientPacket&&computerSignal!=null)out.store("ComputerSignal",com.mojang.serialization.Codec.BYTE_BUFFER,java.nio.ByteBuffer.wrap(computerSignal.encode()));}
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);customText=null;if(in.getString("CustomText").isPresent()){var text=new DynamicComponent();text.read(worldPosition,in);if(text.isValid())customText=text;}nixieIndex=customText==null?0:Math.clamp(in.getIntOr("CustomTextIndex",0),0,Integer.MAX_VALUE/2-1);redstoneStrength=Math.clamp(in.getIntOr("RedstoneStrength",0),0,15);initializedInput=false;updateDisplayedStrings();
+        if(clientPacket){var encoded=in.read("ComputerSignal",com.mojang.serialization.Codec.BYTE_BUFFER);if(encoded.isEmpty())computerSignal=null;else{var buffer=encoded.get().duplicate();var bytes=new byte[buffer.remaining()];buffer.get(bytes);if(computerSignal==null)computerSignal=new ComputerSignal();computerSignal.decode(bytes);}}
+    }
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){return super.getUpdateTag(registries);}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
 }

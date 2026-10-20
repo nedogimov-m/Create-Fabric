@@ -1,85 +1,17 @@
 package com.simibubi.create.content.equipment.armor;
 
-import java.util.EnumMap;
-import java.util.List;
-import java.util.function.Supplier;
-
-import com.simibubi.create.AllItems;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.Create;
-
+import com.simibubi.create.*;
+import java.util.Map;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.sounds.SoundEvent;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.world.item.ArmorItem;
-import net.minecraft.world.item.ArmorMaterial;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.item.crafting.Ingredient;
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.neoforge.registries.DeferredRegister;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.equipment.*;
 
-import org.jetbrains.annotations.ApiStatus.Internal;
-
-public class AllArmorMaterials {
-	private static final DeferredRegister<ArmorMaterial> ARMOR_MATERIALS = DeferredRegister.create(Registries.ARMOR_MATERIAL, Create.ID);
-
-	public static final Holder<ArmorMaterial> COPPER = register(
-				"copper",
-				new int[] { 2, 4, 3, 1, 4 },
-				7,
-				AllSoundEvents.COPPER_ARMOR_EQUIP.getMainEventHolder(),
-				0.0F,
-				0.0F,
-				() -> Ingredient.of(Items.COPPER_INGOT)
-			);
-
-	public static final Holder<ArmorMaterial> CARDBOARD = register(
-				"cardboard",
-				new int[] { 1, 1, 1, 1, 2 },
-				4,
-				SoundEvents.ARMOR_EQUIP_LEATHER,
-				0.0F,
-				0.0F,
-				() -> Ingredient.of(AllItems.CARDBOARD)
-	);
-
-	private static Holder<ArmorMaterial> register(
-			String name,
-			int[] defense,
-			int enchantmentValue,
-			Holder<SoundEvent> equipSound,
-			float toughness,
-			float knockbackResistance,
-			Supplier<Ingredient> repairIngredient
-	) {
-		List<ArmorMaterial.Layer> list = List.of(new ArmorMaterial.Layer(Create.asResource(name)));
-		return register(name, defense, enchantmentValue, equipSound, toughness, knockbackResistance, repairIngredient, list);
-	}
-
-	private static Holder<ArmorMaterial> register(
-			String name,
-			int[] defense,
-			int enchantmentValue,
-			Holder<SoundEvent> equipSound,
-			float toughness,
-			float knockbackResistance,
-			Supplier<Ingredient> repairIngridient,
-			List<ArmorMaterial.Layer> layers
-	) {
-		EnumMap<ArmorItem.Type, Integer> enummap = new EnumMap<>(ArmorItem.Type.class);
-
-		for (ArmorItem.Type armoritem$type : ArmorItem.Type.values()) {
-			enummap.put(armoritem$type, defense[armoritem$type.ordinal()]);
-		}
-
-		return ARMOR_MATERIALS.register(name,
-				() -> new ArmorMaterial(enummap, enchantmentValue, equipSound, repairIngridient, layers, toughness, knockbackResistance)
-		);
-	}
-
-	@Internal
-	public static void register(IEventBus eventBus) {
-		ARMOR_MATERIALS.register(eventBus);
-	}
+/** Pinned defense/enchantability/repair values expressed as real native armor materials. */
+public final class AllArmorMaterials {
+    public static final ArmorMaterial COPPER=new ArmorMaterial(7,Map.of(ArmorType.HELMET,2,ArmorType.CHESTPLATE,4,ArmorType.LEGGINGS,3,ArmorType.BOOTS,1,ArmorType.BODY,4),7,Holder.direct(AllSoundEvents.COPPER_ARMOR_EQUIP),0,0,TagKey.create(Registries.ITEM,Create.asResource("repairs/copper_armor")),ResourceKey.create(EquipmentAssets.ROOT_ID,Create.asResource("copper_diving")));
+    public static final ArmorMaterial CARDBOARD=new ArmorMaterial(4,Map.of(ArmorType.HELMET,1,ArmorType.CHESTPLATE,1,ArmorType.LEGGINGS,1,ArmorType.BOOTS,1,ArmorType.BODY,2),4,SoundEvents.ARMOR_EQUIP_LEATHER,0,0,TagKey.create(Registries.ITEM,Create.asResource("repairs/cardboard_armor")),ResourceKey.create(EquipmentAssets.ROOT_ID,Create.asResource("cardboard")));
+    private AllArmorMaterials(){}
 }

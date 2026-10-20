@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:block/bars/andesite_bars",
+    "particle": "create:block/bars/andesite_bars"
+  }
+}

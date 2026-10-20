@@ -1,125 +1,41 @@
 package com.simibubi.create.content.kinetics.belt.transport;
 
-import com.simibubi.create.content.kinetics.belt.BeltHelper;
-import com.simibubi.create.content.logistics.funnel.BeltFunnelBlock;
-import com.simibubi.create.content.logistics.funnel.BeltFunnelBlock.Shape;
-import com.simibubi.create.content.logistics.funnel.FunnelBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.inventory.InvManipulationBehaviour;
-import com.simibubi.create.foundation.item.ItemHelper.ExtractionCountMode;
+import com.simibubi.create.content.kinetics.belt.*;
+import com.simibubi.create.content.logistics.funnel.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.util.Mth;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
-
-public class BeltFunnelInteractionHandler {
-
-	public static boolean checkForFunnels(BeltInventory beltInventory, TransportedItemStack currentItem,
-										  float nextOffset) {
-		boolean beltMovementPositive = beltInventory.beltMovementPositive;
-		int firstUpcomingSegment = (int) Math.floor(currentItem.beltPosition);
-		int step = beltMovementPositive ? 1 : -1;
-		firstUpcomingSegment = Mth.clamp(firstUpcomingSegment, 0, beltInventory.belt.beltLength - 1);
-
-		for (int segment = firstUpcomingSegment; beltMovementPositive ? segment <= nextOffset
-			: segment + 1 >= nextOffset; segment += step) {
-			BlockPos funnelPos = BeltHelper.getPositionForOffset(beltInventory.belt, segment)
-				.above();
-			Level world = beltInventory.belt.getLevel();
-			BlockState funnelState = world.getBlockState(funnelPos);
-			if (!(funnelState.getBlock() instanceof BeltFunnelBlock))
-				continue;
-			Direction funnelFacing = funnelState.getValue(BeltFunnelBlock.HORIZONTAL_FACING);
-			Direction movementFacing = beltInventory.belt.getMovementFacing();
-			boolean blocking = funnelFacing == movementFacing.getOpposite();
-			if (funnelFacing == movementFacing)
-				continue;
-			if (funnelState.getValue(BeltFunnelBlock.SHAPE) == Shape.PUSHING)
-				continue;
-
-			float funnelEntry = segment + .5f;
-			if (funnelState.getValue(BeltFunnelBlock.SHAPE) == Shape.EXTENDED)
-				funnelEntry += .499f * (beltMovementPositive ? -1 : 1);
-			boolean hasCrossed = nextOffset > funnelEntry && beltMovementPositive
-				|| nextOffset < funnelEntry && !beltMovementPositive;
-			if (!hasCrossed)
-				return false;
-			if (blocking)
-				currentItem.beltPosition = funnelEntry;
-
-			if (world.isClientSide || funnelState.getOptionalValue(BeltFunnelBlock.POWERED).orElse(false))
-				if (blocking)
-					return true;
-				else
-					continue;
-
-			BlockEntity be = world.getBlockEntity(funnelPos);
-			if (!(be instanceof FunnelBlockEntity funnelBE))
-				return true;
-
-			InvManipulationBehaviour inserting = funnelBE.getBehaviour(InvManipulationBehaviour.TYPE);
-			FilteringBehaviour filtering = funnelBE.getBehaviour(FilteringBehaviour.TYPE);
-
-			if (inserting == null || filtering != null && !filtering.test(currentItem.stack))
-				if (blocking)
-					return true;
-				else
-					continue;
-
-			if (beltInventory.belt.invVersionTracker.stillWaiting(inserting))
-				continue;
-
-			int amountToExtract = funnelBE.getAmountToExtract();
-			ExtractionCountMode modeToExtract = funnelBE.getModeToExtract();
-
-			ItemStack toInsert = currentItem.stack.copy();
-			if (amountToExtract > toInsert.getCount() && modeToExtract != ExtractionCountMode.UPTO)
-				if (blocking)
-					return true;
-				else
-					continue;
-
-			if (amountToExtract != -1 && modeToExtract != ExtractionCountMode.UPTO) {
-				toInsert.setCount(Math.min(amountToExtract, toInsert.getCount()));
-				ItemStack remainder = inserting.simulate()
-					.insert(toInsert);
-				if (!remainder.isEmpty())
-					if (blocking)
-						return true;
-					else
-						continue;
-				else
-					beltInventory.belt.invVersionTracker.awaitNewVersion(inserting);
-			}
-
-			ItemStack remainder = inserting.insert(toInsert);
-			if (ItemStack.matches(toInsert, remainder)) {
-				beltInventory.belt.invVersionTracker.awaitNewVersion(inserting);
-				if (blocking)
-					return true;
-				else
-					continue;
-			}
-
-			int notFilled = currentItem.stack.getCount() - toInsert.getCount();
-			if (!remainder.isEmpty()) {
-				remainder.grow(notFilled);
-			} else if (notFilled > 0)
-				remainder = currentItem.stack.copyWithCount(notFilled);
-
-			funnelBE.flap(true);
-			funnelBE.onTransfer(toInsert);
-			currentItem.stack = remainder;
-			beltInventory.belt.notifyUpdate();
-			if (blocking)
-				return true;
-		}
-
-		return false;
-	}
-
+/** Crossing tests preserve Create's blocking front and non-blocking side intake. */
+public final class BeltFunnelInteractionHandler {
+    public static float checkForFunnels(BeltBlockEntity belt,BeltInventory inventory,TransportedItemStack item,float next){
+        var world=belt.getLevel();boolean positive=belt.getDirectionAwareBeltMovementSpeed()>0;
+        var motion=positive?belt.getBeltFacing():belt.getBeltFacing().getOpposite();
+        int step=positive?1:-1;
+        for(int segment=Math.clamp((int)Math.floor(item.beltPosition),0,belt.beltLength-1);segment>=0&&segment<belt.beltLength;segment+=step){
+            if(positive?segment>next:segment+1<next)break;
+            var pos=BeltHelper.getPositionForOffset(belt,segment).above();var state=LoadedLevelAccess.blockState(world,pos);
+            if(!(state.getBlock() instanceof BeltFunnelBlock))continue;
+            var facing=state.getValue(BeltFunnelBlock.HORIZONTAL_FACING);var shape=state.getValue(BeltFunnelBlock.SHAPE);
+            if(facing==motion||shape==BeltFunnelBlock.Shape.PUSHING)continue;
+            boolean blocking=facing==motion.getOpposite();float entry=segment+.5f;
+            if(shape==BeltFunnelBlock.Shape.EXTENDED)entry+=positive?-.499f:.499f;
+            if(positive?next<=entry:next>=entry)break;
+            if(!world.isClientSide()&&!state.getValue(BeltFunnelBlock.POWERED)&&LoadedLevelAccess.blockEntity(world,pos) instanceof FunnelBlockEntity funnel){
+                boolean exact=funnel.isExact();int amount=exact?funnel.getAmountToExtract():item.stack.getCount();
+                if(amount<=item.stack.getCount()){
+                    try(var tx=Transaction.openOuter()){
+                        long accepted=funnel.insert(ItemVariant.of(item.stack),amount,exact,tx);
+                        if(accepted>0&&inventory.extractItem(item.id,(int)accepted,tx)==accepted)tx.commit();
+                    }
+                    // Transaction aborts can replace snapshot objects; use the current UUID handle.
+                    var current=inventory.byId(item.id);if(current==null)return blocking?entry:next;
+                    item=current;
+                }
+            }
+            if(blocking)return entry;
+        }
+        return next;
+    }
+    private BeltFunnelInteractionHandler(){}
 }

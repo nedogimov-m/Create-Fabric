@@ -1,41 +1,32 @@
 package com.simibubi.create.content.processing.basin;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
-import com.simibubi.create.Create;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.foundation.advancement.CreateAdvancement;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.simibubi.create.foundation.blockEntity.behaviour.simple.DeferralBehaviour;
 import com.simibubi.create.foundation.recipe.RecipeFinder;
-import com.simibubi.create.foundation.recipe.trie.AbstractVariant;
-import com.simibubi.create.foundation.recipe.trie.RecipeTrie;
-import com.simibubi.create.foundation.recipe.trie.RecipeTrieFinder;
-
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeInput;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 
-import net.neoforged.neoforge.capabilities.Capabilities.FluidHandler;
-import net.neoforged.neoforge.capabilities.Capabilities.ItemHandler;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
-import net.neoforged.neoforge.items.IItemHandler;
-
+/** Genuine basin operating lifecycle over the single existing transaction-backed basin owner. */
 public abstract class BasinOperatingBlockEntity extends KineticBlockEntity {
-
 	public DeferralBehaviour basinChecker;
 	public boolean basinRemoved;
 	protected Recipe<?> currentRecipe;
 
-	public BasinOperatingBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
-		super(typeIn, pos, state);
+	public BasinOperatingBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+		super(type, pos, state);
 	}
 
 	@Override
@@ -46,44 +37,37 @@ public abstract class BasinOperatingBlockEntity extends KineticBlockEntity {
 	}
 
 	@Override
-	public void onSpeedChanged(float prevSpeed) {
-		super.onSpeedChanged(prevSpeed);
-		if (getSpeed() == 0)
-			basinRemoved = true;
-		basinRemoved = false;
+	public void onSpeedChanged(float previousSpeed) {
+		super.onSpeedChanged(previousSpeed);
 		basinChecker.scheduleUpdate();
 	}
 
 	@Override
 	public void tick() {
-		if (basinRemoved) {
-			basinRemoved = false;
-			onBasinRemoved();
-			sendData();
-			return;
-		}
+		if (!handleBasinRemoval())
+			super.tick();
+	}
 
-		super.tick();
+	/** The real native static owner tick also consumes this source lifecycle state. */
+	protected final boolean handleBasinRemoval() {
+		if (!basinRemoved)
+			return false;
+		basinRemoved = false;
+		currentRecipe = null;
+		onBasinRemoved();
+		basinChecker.scheduleUpdate();
+		sendData();
+		return true;
 	}
 
 	protected boolean updateBasin() {
-		if (!isSpeedRequirementFulfilled())
+		if (basinRemoved || !isSpeedRequirementFulfilled() || getSpeed() == 0 || isRunning()
+				|| !(level instanceof ServerLevel) || getBasin().isEmpty())
 			return true;
-		if (getSpeed() == 0)
-			return true;
-		if (isRunning())
-			return true;
-		if (level == null || level.isClientSide)
-			return true;
-		Optional<BasinBlockEntity> basin = getBasin();
-		if (!basin.filter(BasinBlockEntity::canContinueProcessing)
-			.isPresent())
-			return true;
-
-		List<Recipe<?>> recipes = getMatchingRecipes();
+		var recipes = getMatchingRecipes();
 		if (recipes.isEmpty())
 			return true;
-		currentRecipe = recipes.get(0);
+		currentRecipe = recipes.getFirst();
 		startProcessingBasin();
 		sendData();
 		return true;
@@ -99,72 +83,72 @@ public abstract class BasinOperatingBlockEntity extends KineticBlockEntity {
 	}
 
 	protected <I extends RecipeInput> boolean matchBasinRecipe(Recipe<I> recipe) {
-		if (recipe == null)
+		if (!(recipe instanceof BasinRecipe processing))
 			return false;
-		Optional<BasinBlockEntity> basin = getBasin();
-		if (!basin.isPresent())
-			return false;
-		return BasinRecipe.match(basin.get(), recipe);
+		return getBasin().filter(basin -> basin.process(processing, true)).isPresent();
 	}
 
 	protected void applyBasinRecipe() {
-		if (currentRecipe == null)
-			return;
+		applyBasinRecipeTransaction();
+	}
 
-		Optional<BasinBlockEntity> optionalBasin = getBasin();
-		if (!optionalBasin.isPresent())
-			return;
-		BasinBlockEntity basin = optionalBasin.get();
-		boolean wasEmpty = basin.canContinueProcessing();
-		if (!BasinRecipe.apply(basin, currentRecipe))
-			return;
+	/** A boolean result for the native press; all consumption/RNG/remainders remain in Basin.process. */
+	protected final boolean applyBasinRecipeTransaction() {
+		if (!(currentRecipe instanceof BasinRecipe processing))
+			return false;
+		var optional = getBasin();
+		if (optional.isEmpty())
+			return false;
+		var basin = optional.get();
+		if (!basin.process(processing, false))
+			return false;
 		getProcessedRecipeTrigger().ifPresent(this::award);
-		basin.inputTank.sendDataImmediately();
-
-		// Continue mixing
-		if (wasEmpty && matchBasinRecipe(currentRecipe)) {
+		if (matchBasinRecipe(currentRecipe)) {
 			continueWithPreviousRecipe();
 			sendData();
 		}
-
 		basin.notifyChangeOfContents();
+		return true;
 	}
 
 	protected List<Recipe<?>> getMatchingRecipes() {
-		Optional<BasinBlockEntity> $basin = getBasin();
-		BasinBlockEntity basin;
-		if ($basin.isEmpty() || (basin = $basin.get()).isEmpty())
+		var optional = getBasin();
+		if (optional.isEmpty() || optional.get().isEmpty())
 			return new ArrayList<>();
+		var matches = new ArrayList<Recipe<?>>();
+		for (var holder : RecipeFinder.get(getRecipeCacheKey(), level, this::matchStaticFilters))
+			if (matchBasinRecipe(holder.value()))
+				matches.add(holder.value());
+		sortMatchingRecipes(matches);
+		return matches;
+	}
 
-		List<Recipe<?>> list = new ArrayList<>();
-		try {
+	protected final void sortMatchingRecipes(List<Recipe<?>> recipes) {
+		recipes.sort(Comparator.comparingInt(BasinOperatingBlockEntity::ingredientCount).reversed());
+	}
 
-			IItemHandler availableItems = level.getCapability(ItemHandler.BLOCK, basin.getBlockPos(), null);
-			IFluidHandler availableFluids = level.getCapability(FluidHandler.BLOCK, basin.getBlockPos(), null);
+	private static int ingredientCount(Recipe<?> recipe) {
+		return recipe instanceof BasinRecipe basin
+			? (int) basin.ingredients().stream().filter(ingredient -> ingredient.left().isPresent()).count()
+			: recipe.placementInfo().ingredients().size();
+	}
 
-			// no point even searching, since no recipe will ever match
-			if (availableItems == null && availableFluids == null) {
-				return list;
-			}
-
-			RecipeTrie<?> trie = RecipeTrieFinder.get(getRecipeCacheKey(), level, this::matchStaticFilters);
-			Set<AbstractVariant> availableVariants = RecipeTrie.getVariants(availableItems, availableFluids);
-
-			for (Recipe<?> r : trie.lookup(availableVariants))
-				if (matchBasinRecipe(r))
-					list.add(r);
-		} catch (Exception e) {
-			Create.LOGGER.error("Failed to get recipe trie, falling back to slow logic", e);
-			list.clear();
-
-			for (RecipeHolder<? extends Recipe<?>> r : RecipeFinder.get(getRecipeCacheKey(), level, this::matchStaticFilters))
-				if (matchBasinRecipe(r.value()))
-					list.add(r.value());
+	/** Preserve real recipe keys for the existing mixer save/reload/reload-generation checks. */
+	protected final RecipeHolder<BasinRecipe> findBasinRecipe() {
+		if (!(level instanceof ServerLevel server))
+			return null;
+		for (var recipe : getMatchingRecipes()) {
+			if (!(recipe instanceof BasinRecipe processing))
+				continue;
+			for (var holder : server.getServer().getRecipeManager().getRecipes())
+				if (holder.value() == processing)
+					return new RecipeHolder<>(holder.id(), processing);
+			// Existing native brewing/vanilla-crafting conversions retain their real source key.
+			var converted = getBasin().map(basin -> basin.findRecipe(processing.getType())).orElse(null);
+			if (converted != null && converted.value().equals(processing))
+				return converted;
 		}
-
-		list.sort((r1, r2) -> r2.getIngredients().size() - r1.getIngredients().size());
-
-		return list;
+		return null;
 	}
 
 	protected abstract void onBasinRemoved();
@@ -172,10 +156,8 @@ public abstract class BasinOperatingBlockEntity extends KineticBlockEntity {
 	protected Optional<BasinBlockEntity> getBasin() {
 		if (level == null)
 			return Optional.empty();
-		BlockEntity basinBE = level.getBlockEntity(worldPosition.below(2));
-		if (!(basinBE instanceof BasinBlockEntity))
-			return Optional.empty();
-		return Optional.of((BasinBlockEntity) basinBE);
+		var owner = LoadedLevelAccess.blockEntity(level, worldPosition.below(2));
+		return owner instanceof BasinBlockEntity basin ? Optional.of(basin) : Optional.empty();
 	}
 
 	protected Optional<CreateAdvancement> getProcessedRecipeTrigger() {

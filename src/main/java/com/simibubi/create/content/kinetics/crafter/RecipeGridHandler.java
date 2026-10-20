@@ -1,253 +1,92 @@
 package com.simibubi.create.content.kinetics.crafter;
 
-import static com.simibubi.create.content.kinetics.base.HorizontalKineticBlock.HORIZONTAL_FACING;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Predicate;
-
-import org.apache.commons.lang3.tuple.Pair;
-
-import com.google.common.base.Predicates;
-import com.simibubi.create.AllBlocks;
+import com.mojang.serialization.*;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.AllRecipeTypes;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import net.createmod.catnip.data.Iterate;
+import com.simibubi.create.Create;
 import net.createmod.catnip.math.Pointing;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.RegistryAccess;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.CraftingInput;
-import net.minecraft.world.item.crafting.CraftingRecipe;
-import net.minecraft.world.item.crafting.FireworkRocketRecipe;
-import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.item.crafting.RecipeType;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.core.*;
+import net.minecraft.core.registries.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.crafting.*;
+import java.util.*;
 
-public class RecipeGridHandler {
-
-	public static List<MechanicalCrafterBlockEntity> getAllCraftersOfChain(MechanicalCrafterBlockEntity root) {
-		return getAllCraftersOfChainIf(root, Predicates.alwaysTrue());
-	}
-
-	public static List<MechanicalCrafterBlockEntity> getAllCraftersOfChainIf(MechanicalCrafterBlockEntity root,
-		Predicate<MechanicalCrafterBlockEntity> test) {
-		return getAllCraftersOfChainIf(root, test, false);
-	}
-
-	public static List<MechanicalCrafterBlockEntity> getAllCraftersOfChainIf(MechanicalCrafterBlockEntity root,
-		Predicate<MechanicalCrafterBlockEntity> test, boolean poweredStart) {
-		List<MechanicalCrafterBlockEntity> crafters = new ArrayList<>();
-		List<Pair<MechanicalCrafterBlockEntity, MechanicalCrafterBlockEntity>> frontier = new ArrayList<>();
-		Set<MechanicalCrafterBlockEntity> visited = new HashSet<>();
-		frontier.add(Pair.of(root, null));
-
-		boolean empty = false;
-		boolean allEmpty = true;
-
-		while (!frontier.isEmpty()) {
-			Pair<MechanicalCrafterBlockEntity, MechanicalCrafterBlockEntity> pair = frontier.remove(0);
-			MechanicalCrafterBlockEntity current = pair.getKey();
-			MechanicalCrafterBlockEntity last = pair.getValue();
-
-			if (visited.contains(current))
-				return null;
-			if (!(test.test(current)))
-				empty = true;
-			else
-				allEmpty = false;
-
-			crafters.add(current);
-			visited.add(current);
-
-			MechanicalCrafterBlockEntity target = getTargetingCrafter(current);
-			if (target != last && target != null)
-				frontier.add(Pair.of(target, current));
-			for (MechanicalCrafterBlockEntity preceding : getPrecedingCrafters(current))
-				if (preceding != last)
-					frontier.add(Pair.of(preceding, current));
-		}
-
-		return empty && !poweredStart || allEmpty ? null : crafters;
-	}
-
-	public static MechanicalCrafterBlockEntity getTargetingCrafter(MechanicalCrafterBlockEntity crafter) {
-		BlockState state = crafter.getBlockState();
-		if (!isCrafter(state))
-			return null;
-
-		BlockPos targetPos = crafter.getBlockPos()
-			.relative(MechanicalCrafterBlock.getTargetDirection(state));
-		MechanicalCrafterBlockEntity targetBE = CrafterHelper.getCrafter(crafter.getLevel(), targetPos);
-		if (targetBE == null)
-			return null;
-
-		BlockState targetState = targetBE.getBlockState();
-		if (!isCrafter(targetState))
-			return null;
-		if (state.getValue(HORIZONTAL_FACING) != targetState.getValue(HORIZONTAL_FACING))
-			return null;
-		return targetBE;
-	}
-
-	public static List<MechanicalCrafterBlockEntity> getPrecedingCrafters(MechanicalCrafterBlockEntity crafter) {
-		BlockPos pos = crafter.getBlockPos();
-		Level world = crafter.getLevel();
-		List<MechanicalCrafterBlockEntity> crafters = new ArrayList<>();
-		BlockState blockState = crafter.getBlockState();
-		if (!isCrafter(blockState))
-			return crafters;
-
-		Direction blockFacing = blockState.getValue(HORIZONTAL_FACING);
-		Direction blockPointing = MechanicalCrafterBlock.getTargetDirection(blockState);
-		for (Direction facing : Iterate.directions) {
-			if (blockFacing.getAxis() == facing.getAxis())
-				continue;
-			if (blockPointing == facing)
-				continue;
-
-			BlockPos neighbourPos = pos.relative(facing);
-			BlockState neighbourState = world.getBlockState(neighbourPos);
-			if (!isCrafter(neighbourState))
-				continue;
-			if (MechanicalCrafterBlock.getTargetDirection(neighbourState) != facing.getOpposite())
-				continue;
-			if (blockFacing != neighbourState.getValue(HORIZONTAL_FACING))
-				continue;
-			MechanicalCrafterBlockEntity be = CrafterHelper.getCrafter(world, neighbourPos);
-			if (be == null)
-				continue;
-
-			crafters.add(be);
-		}
-
-		return crafters;
-	}
-
-	private static boolean isCrafter(BlockState state) {
-		return AllBlocks.MECHANICAL_CRAFTER.has(state);
-	}
-
-	public static ItemStack tryToApplyRecipe(Level world, GroupedItems items) {
-		items.calcStats();
-		CraftingInput craftingInput = MechanicalCraftingInput.of(items);
-		ItemStack result = null;
-		RegistryAccess registryAccess = world.registryAccess();
-		if (AllConfigs.server().recipes.allowRegularCraftingInCrafter.get())
-			result = world.getRecipeManager()
-				.getRecipeFor(RecipeType.CRAFTING, craftingInput, world)
-				.filter(r -> isRecipeAllowed(r, craftingInput))
-				.map(r -> r.value().assemble(craftingInput, registryAccess))
-				.orElse(null);
-		if (result == null)
-			result = AllRecipeTypes.MECHANICAL_CRAFTING.find(craftingInput, world)
-				.map(r -> r.value().assemble(craftingInput, registryAccess))
-				.orElse(null);
-		return result;
-	}
-
-	public static boolean isRecipeAllowed(RecipeHolder<CraftingRecipe> recipe, CraftingInput craftingInput) {
-		if (recipe.value() instanceof FireworkRocketRecipe) {
-			int numItems = 0;
-			for (int i = 0; i < craftingInput.size(); i++) {
-				if (!craftingInput.getItem(i).isEmpty()) {
-					numItems++;
-				}
-			}
-			if (numItems > AllConfigs.server().recipes.maxFireworkIngredientsInCrafter.get()) {
-				return false;
-			}
-		}
-		if (AllRecipeTypes.shouldIgnoreInAutomation(recipe))
-			return false;
-		return true;
-	}
-
-	public static class GroupedItems {
-		Map<Pair<Integer, Integer>, ItemStack> grid = new HashMap<>();
-		int minX, minY, maxX, maxY, width, height;
-		boolean statsReady;
-
-		public GroupedItems() {}
-
-		public GroupedItems(ItemStack stack) {
-			grid.put(Pair.of(0, 0), stack);
-		}
-
-		public void mergeOnto(GroupedItems other, Pointing pointing) {
-			int xOffset = pointing == Pointing.LEFT ? 1 : pointing == Pointing.RIGHT ? -1 : 0;
-			int yOffset = pointing == Pointing.DOWN ? 1 : pointing == Pointing.UP ? -1 : 0;
-			grid.forEach(
-				(pair, stack) -> other.grid.put(Pair.of(pair.getKey() + xOffset, pair.getValue() + yOffset), stack));
-			other.statsReady = false;
-		}
-
-		public void write(CompoundTag nbt, HolderLookup.Provider registries) {
-			ListTag gridNBT = new ListTag();
-			grid.forEach((pair, stack) -> {
-				CompoundTag entry = new CompoundTag();
-				entry.putInt("x", pair.getKey());
-				entry.putInt("y", pair.getValue());
-				entry.put("item", stack.saveOptional(registries));
-				gridNBT.add(entry);
-			});
-			nbt.put("Grid", gridNBT);
-		}
-
-		public static GroupedItems read(CompoundTag nbt, HolderLookup.Provider registries) {
-			GroupedItems items = new GroupedItems();
-			ListTag gridNBT = nbt.getList("Grid", Tag.TAG_COMPOUND);
-			gridNBT.forEach(inbt -> {
-				CompoundTag entry = (CompoundTag) inbt;
-				int x = entry.getInt("x");
-				int y = entry.getInt("y");
-				ItemStack stack = ItemStack.parseOptional(registries, entry.getCompound("item"));
-				items.grid.put(Pair.of(x, y), stack);
-			});
-			return items;
-		}
-
-		public void calcStats() {
-			if (statsReady)
-				return;
-			statsReady = true;
-
-			minX = 0;
-			minY = 0;
-			maxX = 0;
-			maxY = 0;
-
-			for (Pair<Integer, Integer> pair : grid.keySet()) {
-				int x = pair.getKey();
-				int y = pair.getValue();
-				minX = Math.min(minX, x);
-				minY = Math.min(minY, y);
-				maxX = Math.max(maxX, x);
-				maxY = Math.max(maxY, y);
-			}
-
-			width = maxX - minX + 1;
-			height = maxY - minY + 1;
-		}
-
-		public boolean onlyEmptyItems() {
-			for (ItemStack stack : grid.values())
-				if (!stack.isEmpty())
-					return false;
-			return true;
-		}
-
-	}
-
+public final class RecipeGridHandler {
+    public record Cell(int x, int y) {}
+    public record Entry(int x, int y, ItemStack stack) {
+        static final Codec<Entry> CODEC = RecordCodecBuilder.create(i -> i.group(Codec.INT.fieldOf("x").forGetter(Entry::x), Codec.INT.fieldOf("y").forGetter(Entry::y), ItemStack.OPTIONAL_CODEC.fieldOf("item").forGetter(Entry::stack)).apply(i, Entry::new));
+    }
+    public static final class GroupedItems {
+        public final Map<Cell, ItemStack> grid = new LinkedHashMap<>();
+        public GroupedItems() {}
+        public GroupedItems(ItemStack stack) { grid.put(new Cell(0, 0), stack.copy()); }
+        public boolean onlyEmptyItems() { return grid.values().stream().allMatch(ItemStack::isEmpty); }
+        public GroupedItems copy() { var copy = new GroupedItems(); grid.forEach((cell, stack) -> copy.grid.put(cell, stack.copy())); return copy; }
+        public void mergeOnto(GroupedItems other, Pointing pointing) {
+            int dx = pointing == Pointing.LEFT ? 1 : pointing == Pointing.RIGHT ? -1 : 0;
+            int dy = pointing == Pointing.DOWN ? 1 : pointing == Pointing.UP ? -1 : 0;
+            grid.forEach((cell, stack) -> {
+                var target = new Cell(cell.x + dx, cell.y + dy);
+                if (other.grid.containsKey(target)) throw new IllegalStateException("Overlapping mechanical crafting grid");
+                other.grid.put(target, stack);
+            });
+        }
+        public List<Entry> entries() { return grid.entrySet().stream().map(e -> new Entry(e.getKey().x, e.getKey().y, e.getValue())).toList(); }
+        public void load(List<Entry> entries) { grid.clear(); entries.forEach(e -> grid.put(new Cell(e.x, e.y), e.stack)); }
+        public CraftingInput input() {
+            var occupied = grid.entrySet().stream().filter(e -> !e.getValue().isEmpty()).toList();
+            if (occupied.isEmpty()) return CraftingInput.EMPTY;
+            int minX = occupied.stream().mapToInt(e -> e.getKey().x).min().orElse(0), maxX = occupied.stream().mapToInt(e -> e.getKey().x).max().orElse(0);
+            int minY = occupied.stream().mapToInt(e -> e.getKey().y).min().orElse(0), maxY = occupied.stream().mapToInt(e -> e.getKey().y).max().orElse(0);
+            if (maxX - minX >= 9 || maxY - minY >= 9) return CraftingInput.EMPTY;
+            var stacks = new ArrayList<ItemStack>();
+            for (int y = maxY; y >= minY; y--) for (int x = minX; x <= maxX; x++) stacks.add(grid.getOrDefault(new Cell(x, y), ItemStack.EMPTY).copy());
+            return CraftingInput.of(maxX - minX + 1, maxY - minY + 1, stacks);
+        }
+    }
+    public static MechanicalCrafterBlockEntity getTargetingCrafter(MechanicalCrafterBlockEntity crafter) {
+        var next = CrafterHelper.getCrafter(crafter.getLevel(), crafter.getBlockPos().relative(crafter.getTargetDirection()));
+        return next != null && next.getBlockState().getValue(MechanicalCrafterBlock.HORIZONTAL_FACING) == crafter.getBlockState().getValue(MechanicalCrafterBlock.HORIZONTAL_FACING) ? next : null;
+    }
+    public static List<MechanicalCrafterBlockEntity> getPrecedingCrafters(MechanicalCrafterBlockEntity crafter) {
+        var preceding = new ArrayList<MechanicalCrafterBlockEntity>();
+        for (var side : Direction.values()) {
+            if (side.getAxis() == crafter.getBlockState().getValue(MechanicalCrafterBlock.HORIZONTAL_FACING).getAxis()) continue;
+            var other = CrafterHelper.getCrafter(crafter.getLevel(), crafter.getBlockPos().relative(side));
+            if (other != null && getTargetingCrafter(other) == crafter) preceding.add(other);
+        }
+        return preceding;
+    }
+    public static List<MechanicalCrafterBlockEntity> getAllCraftersOfChain(MechanicalCrafterBlockEntity start) {
+        var visited = new LinkedHashSet<MechanicalCrafterBlockEntity>(); var queue = new ArrayDeque<MechanicalCrafterBlockEntity>(); queue.add(start);
+        while (!queue.isEmpty()) {
+            var current = queue.removeFirst(); if (!visited.add(current)) continue;
+            if (visited.size() > 4096) return null;
+            for (var side : Direction.values()) if (side.getAxis() != current.getBlockState().getValue(MechanicalCrafterBlock.HORIZONTAL_FACING).getAxis()
+                    && !current.getLevel().isLoaded(current.getBlockPos().relative(side))) return null;
+            var target = getTargetingCrafter(current); if (target != null) queue.add(target); queue.addAll(getPrecedingCrafters(current));
+        }
+        for (var current : visited) {
+            var path = new HashSet<MechanicalCrafterBlockEntity>();
+            for (var next = current; next != null; next = getTargetingCrafter(next)) if (!path.add(next)) return null;
+        }
+        return List.copyOf(visited);
+    }
+    private static final TagKey<RecipeSerializer<?>> AUTOMATION_IGNORE = TagKey.create(Registries.RECIPE_SERIALIZER, Create.asResource("automation_ignore"));
+    public static ItemStack tryToApplyRecipe(ServerLevel level, GroupedItems items) {
+        var input = items.input(); if (input.isEmpty()) return null;
+        var manager = level.getServer().getRecipeManager();
+        var config=com.simibubi.create.infrastructure.config.AllConfigs.server().recipes;
+        var regular = config.allowRegularCraftingInCrafter.get()?manager.getRecipeFor(RecipeType.CRAFTING, input, level).filter(holder -> {
+            var recipe = holder.value();
+            return !(recipe instanceof FireworkRocketRecipe && input.ingredientCount() > config.maxFireworkIngredientsInCrafter.get())
+                    && !holder.id().identifier().getPath().endsWith("_manual_only")
+                    && !BuiltInRegistries.RECIPE_SERIALIZER.wrapAsHolder(recipe.getSerializer()).is(AUTOMATION_IGNORE);
+        }):Optional.<RecipeHolder<CraftingRecipe>>empty();
+        if (regular.isPresent()) return regular.get().value().assemble(input);
+        return manager.getRecipeFor(AllRecipeTypes.MECHANICAL_CRAFTING, input, level).map(holder -> holder.value().assemble(input)).orElse(null);
+    }
+    private RecipeGridHandler() {}
 }

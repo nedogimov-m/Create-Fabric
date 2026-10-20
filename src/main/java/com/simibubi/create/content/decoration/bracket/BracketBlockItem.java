@@ -1,78 +1,34 @@
 package com.simibubi.create.content.decoration.bracket;
 
-import java.util.Optional;
-
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.minecraft.core.BlockPos;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 import net.minecraft.core.Direction;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.Prediction;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
 
 public class BracketBlockItem extends BlockItem {
-
-	public BracketBlockItem(Block p_i48527_1_, Properties p_i48527_2_) {
-		super(p_i48527_1_, p_i48527_2_);
-	}
-
-	@Override
-	public InteractionResult useOn(UseOnContext context) {
-		Level world = context.getLevel();
-		BlockPos pos = context.getClickedPos();
-		BlockState state = world.getBlockState(pos);
-		BracketBlock bracketBlock = getBracketBlock();
-		Player player = context.getPlayer();
-
-		BracketedBlockEntityBehaviour behaviour = BlockEntityBehaviour.get(world, pos, BracketedBlockEntityBehaviour.TYPE);
-
-		if (behaviour == null)
-			return InteractionResult.FAIL;
-		if (!behaviour.canHaveBracket())
-			return InteractionResult.FAIL;
-		if (world.isClientSide)
-			return InteractionResult.SUCCESS;
-
-		Optional<BlockState> suitableBracket = bracketBlock.getSuitableBracket(state, context.getClickedFace());
-		if (!suitableBracket.isPresent() && player != null)
-			suitableBracket =
-				bracketBlock.getSuitableBracket(state, Direction.orderedByNearest(player)[0].getOpposite());
-		if (!suitableBracket.isPresent())
-			return InteractionResult.SUCCESS;
-
-		BlockState bracket = behaviour.getBracket();
-		BlockState newBracket = suitableBracket.get();
-		
-		if (bracket == newBracket)
-			return InteractionResult.SUCCESS;
-		
-		world.playSound(null, pos, newBracket
-			.getSoundType()
-			.getPlaceSound(), SoundSource.BLOCKS, 0.75f, 1);
-		behaviour.applyBracket(newBracket);
-		
-		if (player == null || !player.isCreative()) {
-			context.getItemInHand()
-				.shrink(1);
-			if (bracket != null) {
-				ItemStack returnedStack = new ItemStack(bracket.getBlock());
-				if (player == null)
-					Block.popResource(world, pos, returnedStack);
-				else
-					player.getInventory().placeItemBackInInventory(returnedStack);
-			}
-		}
-		return InteractionResult.SUCCESS;
-	}
-
-	private BracketBlock getBracketBlock() {
-		return (BracketBlock) getBlock();
-	}
-
+    public BracketBlockItem(Block block,Properties properties){super(block,properties);}
+    @Override public InteractionResult useOn(UseOnContext context){
+        var level=context.getLevel();var pos=context.getClickedPos();var player=context.getPlayer();
+        if(!LoadedLevelAccess.isLoaded(level,pos)||player!=null&&(!player.mayBuild()||!level.mayInteract(player,pos)))return InteractionResult.FAIL;
+        var behaviour=BlockEntityBehaviour.get(level,pos,BracketedBlockEntityBehaviour.TYPE);
+        if(behaviour==null||!behaviour.canHaveBracket()||context.getItemInHand().isEmpty())return InteractionResult.FAIL;
+        if(level.isClientSide())return InteractionResult.SUCCESS;
+        var block=(BracketBlock)getBlock();var state=level.getBlockState(pos);
+        var suitable=block.getSuitableBracket(state,context.getClickedFace());
+        if(suitable.isEmpty()&&player!=null)suitable=block.getSuitableBracket(state,Direction.orderedByNearest(player)[0].getOpposite());
+        if(suitable.isEmpty())return InteractionResult.SUCCESS;
+        var previous=behaviour.getBracket();var next=suitable.get();if(previous==next)return InteractionResult.SUCCESS;
+        level.playSound(null,pos,next.getSoundType().getPlaceSound(),SoundSource.BLOCKS,.75f,1);
+        behaviour.applyBracket(next);
+        if(player==null||!player.isCreative()){
+            context.getItemInHand().shrink(1);
+            if(previous!=null){var returned=new ItemStack(previous.getBlock());if(player==null)Block.popResource(level,pos,returned);else player.getInventory().placeItemBackInInventory(returned,Prediction.SERVER_ONLY);}
+        }
+        return InteractionResult.SUCCESS;
+    }
 }

@@ -1,66 +1,26 @@
 package com.simibubi.create.content.kinetics.base;
 
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.Direction;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Mirror;
-import net.minecraft.world.level.block.Rotation;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
 
 public abstract class HorizontalKineticBlock extends KineticBlock {
-
-	public static final Property<Direction> HORIZONTAL_FACING = BlockStateProperties.HORIZONTAL_FACING;
-
-	public HorizontalKineticBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		builder.add(HORIZONTAL_FACING);
-		super.createBlockStateDefinition(builder);
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		return this.defaultBlockState()
-			.setValue(HORIZONTAL_FACING, context.getHorizontalDirection()
-				.getOpposite());
-	}
-
-	public Direction getPreferredHorizontalFacing(BlockPlaceContext context) {
-		Direction prefferedSide = null;
-		for (Direction side : Iterate.horizontalDirections) {
-			BlockState blockState = context.getLevel()
-				.getBlockState(context.getClickedPos()
-					.relative(side));
-			if (blockState.getBlock() instanceof IRotate) {
-				if (((IRotate) blockState.getBlock()).hasShaftTowards(context.getLevel(), context.getClickedPos()
-					.relative(side), blockState, side.getOpposite()))
-					if (prefferedSide != null && prefferedSide.getAxis() != side.getAxis()) {
-						prefferedSide = null;
-						break;
-					} else {
-						prefferedSide = side;
-					}
-			}
-		}
-		return prefferedSide;
-	}
-
-	@Override
-	public BlockState rotate(BlockState state, Rotation rot) {
-		return state.setValue(HORIZONTAL_FACING, rot.rotate(state.getValue(HORIZONTAL_FACING)));
-	}
-
-	@Override
-	@SuppressWarnings("deprecation")
-	public BlockState mirror(BlockState state, Mirror mirrorIn) {
-		return state.rotate(mirrorIn.getRotation(state.getValue(HORIZONTAL_FACING)));
-	}
-
+    public static final EnumProperty<Direction> HORIZONTAL_FACING=BlockStateProperties.HORIZONTAL_FACING;
+    protected HorizontalKineticBlock(Properties properties){super(properties);}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(HORIZONTAL_FACING);}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){return defaultBlockState().setValue(HORIZONTAL_FACING,context.getHorizontalDirection().getOpposite());}
+    public Direction getPreferredHorizontalFacing(BlockPlaceContext context){
+        Direction preferred=null;
+        for(var side:Direction.Plane.HORIZONTAL){
+            var pos=context.getClickedPos().relative(side);var state=LoadedLevelAccess.blockState(context.getLevel(),pos);
+            if(state.getBlock() instanceof IRotate rotate&&rotate.hasShaftTowards(context.getLevel(),pos,state,side.getOpposite())){
+                if(preferred!=null&&preferred.getAxis()!=side.getAxis())return null;preferred=side;
+            }
+        }return preferred;
+    }
+    @Override protected BlockState rotate(BlockState state,Rotation rotation){return state.setValue(HORIZONTAL_FACING,rotation.rotate(state.getValue(HORIZONTAL_FACING)));}
+    @Override protected BlockState mirror(BlockState state,Mirror mirror){return state.rotate(mirror.getRotation(state.getValue(HORIZONTAL_FACING)));}
 }

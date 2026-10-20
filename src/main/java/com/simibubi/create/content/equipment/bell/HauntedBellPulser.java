@@ -1,64 +1,32 @@
 package com.simibubi.create.content.equipment.bell;
 
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 import com.simibubi.create.AllBlocks;
-import net.createmod.catnip.platform.CatnipServices;
-import net.createmod.catnip.data.IntAttached;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.fabricmc.fabric.api.event.lifecycle.v1.*;
+import net.fabricmc.fabric.api.networking.v1.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.ChunkPos;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 
-import java.util.UUID;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-
-@EventBusSubscriber
-public class HauntedBellPulser {
-
-	public static final int DISTANCE = 3;
-	public static final int RECHARGE_TICKS = 8;
-	public static final int WARMUP_TICKS = 10;
-
-	public static final Cache<UUID, IntAttached<Entity>> WARMUP = CacheBuilder.newBuilder()
-		.expireAfterAccess(250, TimeUnit.MILLISECONDS)
-		.build();
-
-	@SubscribeEvent
-	public static void hauntedBellCreatesPulse(PlayerTickEvent.Post event) {
-		Player player = event.getEntity();
-
-		if (player.level().isClientSide())
-			return;
-
-		if (player.isSpectator())
-			return;
-		if (!player.isHolding(AllBlocks.HAUNTED_BELL::isIn))
-			return;
-
-		boolean firstPulse = false;
-
-		try {
-			IntAttached<Entity> ticker = WARMUP.get(player.getUUID(), () -> IntAttached.with(WARMUP_TICKS, player));
-			firstPulse = ticker.getFirst() == 1;
-			ticker.decrement();
-			if (!ticker.isOrBelowZero())
-				return;
-		} catch (ExecutionException ignored) {}
-
-		long gameTime = player.level().getGameTime();
-		if ((firstPulse || gameTime % RECHARGE_TICKS != 0) && player.level() instanceof ServerLevel serverLevel)
-			sendPulse(serverLevel, player.blockPosition(), DISTANCE, false);
-	}
-
-	public static void sendPulse(ServerLevel world, BlockPos pos, int distance, boolean canOverlap) {
-		ChunkPos chunk = world.getChunkAt(pos).getPos();
-		CatnipServices.NETWORK.sendToClientsTrackingChunk(world, chunk, new SoulPulseEffectPacket(pos, distance, canOverlap));
-	}
-
+/** Source held-item cadence, with no retained player/level references. */
+public final class HauntedBellPulser {
+    public static final int DISTANCE=3,RECHARGE_TICKS=8,WARMUP_TICKS=10;
+    private static final Map<UUID,Warmup> warmups=new HashMap<>();
+    public static final class Warmup {
+        private int remaining=WARMUP_TICKS;
+        private long lastSeen;
+        public boolean tick(long now,long gameTime) { if(lastSeen!=0&&now-lastSeen>=250_000_000L)remaining=WARMUP_TICKS;lastSeen=now;boolean first=remaining==1;if(remaining>Integer.MIN_VALUE)remaining--;return remaining<=0&&(first||gameTime%RECHARGE_TICKS!=0); }
+        boolean expired(long now) { return now-lastSeen>=250_000_000L; }
+    }
+    public static void register() {
+        PayloadTypeRegistry.clientboundPlay().register(SoulPulseEffectPacket.TYPE,SoulPulseEffectPacket.CODEC);
+        ServerTickEvents.END_LEVEL_TICK.register(level->{long now=System.nanoTime();warmups.values().removeIf(value->value.expired(now));for(var player:level.players())if(!player.isSpectator()&&player.isHolding(stack->stack.is(AllBlocks.HAUNTED_BELL.asItem())))if(warmups.computeIfAbsent(player.getUUID(),key->new Warmup()).tick(now,level.getGameTime()))sendPulse(level,player.blockPosition(),DISTANCE,false);});
+        ServerLifecycleEvents.SERVER_STOPPED.register(server->warmups.clear());
+    }
+    public static void sendPulse(ServerLevel level,BlockPos pos,int distance,boolean overlap) {
+        if(!LoadedLevelAccess.isLoaded(level,pos))return;
+        var packet=new SoulPulseEffectPacket(pos,distance,overlap);
+        for(var player:PlayerLookup.tracking(level,pos))ServerPlayNetworking.send(player,packet);
+    }
+    private HauntedBellPulser() {}
 }

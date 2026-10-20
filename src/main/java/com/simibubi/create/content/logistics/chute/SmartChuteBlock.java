@@ -1,72 +1,21 @@
 package com.simibubi.create.content.logistics.chute;
 
-import com.simibubi.create.AllBlockEntityTypes;
-
-import net.minecraft.core.BlockPos;
+import net.minecraft.core.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
 
-public class SmartChuteBlock extends AbstractChuteBlock {
-
-	public SmartChuteBlock(Properties p_i48440_1_) {
-		super(p_i48440_1_);
-		registerDefaultState(defaultBlockState().setValue(POWERED, true));
-	}
-
-	public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
-
-	@Override
-	public void neighborChanged(BlockState state, Level level, BlockPos pos, Block block, BlockPos fromPos,
-		boolean isMoving) {
-		super.neighborChanged(state, level, pos, block, fromPos, isMoving);
-		if (level.isClientSide)
-			return;
-		if (!level.getBlockTicks()
-			.willTickThisTick(pos, this))
-			level.scheduleTick(pos, this, 1);
-	}
-
-	@Override
-	public void tick(BlockState state, ServerLevel worldIn, BlockPos pos, RandomSource r) {
-		boolean previouslyPowered = state.getValue(POWERED);
-		if (previouslyPowered != worldIn.hasNeighborSignal(pos))
-			worldIn.setBlock(pos, state.cycle(POWERED), Block.UPDATE_CLIENTS);
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext p_196258_1_) {
-		return super.getStateForPlacement(p_196258_1_).setValue(POWERED, p_196258_1_.getLevel()
-			.hasNeighborSignal(p_196258_1_.getClickedPos()));
-	}
-
-	@Override
-	public boolean canSurvive(BlockState state, LevelReader world, BlockPos pos) {
-		return true;
-	}
-
-	@Override
-	public BlockEntityType<? extends ChuteBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.SMART_CHUTE.get();
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> p_206840_1_) {
-		super.createBlockStateDefinition(p_206840_1_.add(POWERED));
-	}
-
-	@Override
-	public BlockState updateChuteState(BlockState state, BlockState above, BlockGetter world, BlockPos pos) {
-		return state;
-	}
-
+public final class SmartChuteBlock extends AbstractChuteBlock {
+    public static final BooleanProperty POWERED=BlockStateProperties.POWERED;
+    public SmartChuteBlock(Properties properties){super(properties);registerDefaultState(defaultBlockState().setValue(POWERED,true));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(POWERED);}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){return defaultBlockState().setValue(POWERED,context.getLevel().hasNeighborSignal(context.getClickedPos()));}
+    @Override protected void tick(BlockState state,ServerLevel level,BlockPos pos,RandomSource random){super.tick(state,level,pos,random);boolean power=level.hasNeighborSignal(pos);if(power!=state.getValue(POWERED))level.setBlock(pos,state.setValue(POWERED,power),Block.UPDATE_CLIENTS);}
+    @Override public BlockState updateChuteState(BlockState state,BlockState above,BlockGetter level,BlockPos pos){return state;}
+    public static boolean activeSide(Direction side){return side.getAxis().isHorizontal();}
+    public static net.minecraft.world.phys.Vec3 filterPosition(Direction side){return new net.minecraft.world.phys.Vec3(.5+side.getStepX()*7.5/16,11f/16,.5+side.getStepZ()*7.5/16);}
 }

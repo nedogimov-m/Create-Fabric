@@ -1,116 +1,45 @@
 package com.simibubi.create.content.kinetics.speedController;
 
-import java.util.function.Predicate;
-
-import javax.annotation.ParametersAreNonnullByDefault;
-
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
+import com.simibubi.create.*;
 import com.simibubi.create.content.kinetics.base.HorizontalAxisKineticBlock;
-import com.simibubi.create.content.kinetics.simpleRelays.CogWheelBlock;
-import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.createmod.catnip.placement.IPlacementHelper;
-import net.createmod.catnip.placement.PlacementHelpers;
-import net.createmod.catnip.placement.PlacementOffset;
-import net.minecraft.MethodsReturnNonnullByDefault;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
+import com.simibubi.create.content.kinetics.simpleRelays.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.*;
 
-@ParametersAreNonnullByDefault
-@MethodsReturnNonnullByDefault
-public class SpeedControllerBlock extends HorizontalAxisKineticBlock implements IBE<SpeedControllerBlockEntity> {
-
-	private static final int placementHelperId = PlacementHelpers.register(new PlacementHelper());
-
-	public SpeedControllerBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		BlockState above = context.getLevel()
-			.getBlockState(context.getClickedPos()
-				.above());
-		if (ICogWheel.isLargeCog(above) && above.getValue(CogWheelBlock.AXIS)
-			.isHorizontal())
-			return defaultBlockState().setValue(HORIZONTAL_AXIS, above.getValue(CogWheelBlock.AXIS) == Axis.X ? Axis.Z : Axis.X);
-		return super.getStateForPlacement(context);
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level world, BlockPos pos, Block p_220069_4_, BlockPos neighbourPos,
-		boolean p_220069_6_) {
-		if (neighbourPos.equals(pos.above()))
-			withBlockEntityDo(world, pos, SpeedControllerBlockEntity::updateBracket);
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		IPlacementHelper helper = PlacementHelpers.get(placementHelperId);
-		if (helper.matchesItem(stack))
-			return helper.getOffset(player, level, state, pos, hitResult).placeInWorld(level, (BlockItem) stack.getItem(), player, hand, hitResult);
-
-		return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		return AllShapes.SPEED_CONTROLLER;
-	}
-
-	@MethodsReturnNonnullByDefault
-	private static class PlacementHelper implements IPlacementHelper {
-		@Override
-		public Predicate<ItemStack> getItemPredicate() {
-			return ((Predicate<ItemStack>) ICogWheel::isLargeCogItem).and(ICogWheel::isDedicatedCogItem);
-		}
-
-		@Override
-		public Predicate<BlockState> getStatePredicate() {
-			return AllBlocks.ROTATION_SPEED_CONTROLLER::has;
-		}
-
-		@Override
-		public PlacementOffset getOffset(Player player, Level world, BlockState state, BlockPos pos, BlockHitResult ray) {
-			BlockPos newPos = pos.above();
-			if (!world.getBlockState(newPos)
-				.canBeReplaced())
-				return PlacementOffset.fail();
-
-			Axis newAxis = state.getValue(HORIZONTAL_AXIS) == Axis.X ? Axis.Z : Axis.X;
-
-			if (!CogWheelBlock.isValidCogwheelPosition(true, world, newPos, newAxis))
-				return PlacementOffset.fail();
-
-			return PlacementOffset.success(newPos, s -> s.setValue(CogWheelBlock.AXIS, newAxis));
-		}
-	}
-
-	@Override
-	public Class<SpeedControllerBlockEntity> getBlockEntityClass() {
-		return SpeedControllerBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends SpeedControllerBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.ROTATION_SPEED_CONTROLLER.get();
-	}
+public final class SpeedControllerBlock extends HorizontalAxisKineticBlock {
+    private static final VoxelShape SHAPE=Shapes.or(box(0,0,0,16,4,16),box(1,1,1,15,13,15),box(0,8,0,16,14,16));
+    public SpeedControllerBlock(Properties properties){super(properties);}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){
+        var above=LoadedLevelAccess.blockState(context.getLevel(),context.getClickedPos().above());
+        if(above.getBlock() instanceof CogWheelBlock cog&&cog.isLargeCog()&&cog.getRotationAxis(above).isHorizontal())return defaultBlockState().setValue(HORIZONTAL_AXIS,cog.getRotationAxis(above)==Direction.Axis.X?Direction.Axis.Z:Direction.Axis.X);
+        return super.getStateForPlacement(context);
+    }
+    public static boolean connectsToCog(BlockState controller,BlockState cog){return controller.is(AllBlocks.ROTATION_SPEED_CONTROLLER)&&cog.getBlock() instanceof CogWheelBlock wheel&&wheel.isLargeCog()&&wheel.getRotationAxis(cog).isHorizontal()&&wheel.getRotationAxis(cog)!=controller.getValue(HORIZONTAL_AXIS);}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new SpeedControllerBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.ROTATION_SPEED_CONTROLLER,com.simibubi.create.content.kinetics.base.KineticBlockEntity::tick);}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return SHAPE;}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){
+        if(!player.mayBuild()||!level.mayInteract(player,pos))return InteractionResult.PASS;
+        if(!stack.is(AllBlocks.LARGE_COGWHEEL.asItem()))return InteractionResult.TRY_WITH_EMPTY_HAND;
+        var above=pos.above();if(!LoadedLevelAccess.blockState(level,above).canBeReplaced())return InteractionResult.PASS;
+        var axis=getRotationAxis(state)==Direction.Axis.X?Direction.Axis.Z:Direction.Axis.X;
+        var context=new BlockPlaceContext(new UseOnContext(player,hand,hit)){
+            @Override public BlockPos getClickedPos(){return above;}
+            @Override public Direction getClickedFace(){return Direction.get(Direction.AxisDirection.POSITIVE,axis);}
+            @Override public boolean replacingClickedOnBlock(){return true;}
+        };
+        return ((BlockItem)stack.getItem()).place(context);
+    }
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){return com.simibubi.create.content.kinetics.motor.KineticSpeedSettings.testHit(state,hit)?com.simibubi.create.content.kinetics.motor.KineticSpeedSettings.interact(level,pos,player,hit.getDirection()):InteractionResult.PASS;}
 }

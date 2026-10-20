@@ -1,0 +1,20 @@
+{
+  "type": "create:splashing",
+  "ingredients": [
+    "create:crushed_raw_lead"
+  ],
+  "results": [
+    {
+      "count": 9,
+      "id": "mekanism:nugget_lead"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "mekanism"
+      ]
+    }
+  ]
+}

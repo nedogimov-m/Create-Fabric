@@ -1,62 +1,41 @@
 package com.simibubi.create.content.equipment.extendoGrip;
 
-import com.simibubi.create.AllPackets;
-import net.createmod.catnip.net.base.ServerboundPacketPayload;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecs;
-import io.netty.buffer.ByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
+import com.simibubi.create.Create;
+import net.fabricmc.fabric.api.networking.v1.*;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.Nullable;
 
-public record ExtendoGripInteractionPacket(InteractionHand hand, int target, Vec3 point) implements ServerboundPacketPayload {
-	public static final StreamCodec<ByteBuf, ExtendoGripInteractionPacket> STREAM_CODEC = StreamCodec.composite(
-			CatnipStreamCodecBuilders.nullable(CatnipStreamCodecs.HAND), ExtendoGripInteractionPacket::hand,
-			ByteBufCodecs.INT, ExtendoGripInteractionPacket::target,
-			CatnipStreamCodecBuilders.nullable(CatnipStreamCodecs.VEC3), ExtendoGripInteractionPacket::point,
-	        ExtendoGripInteractionPacket::new
-	);
-
-	public ExtendoGripInteractionPacket(Entity target) {
-		this(target, null);
-	}
-
-	public ExtendoGripInteractionPacket(Entity target, InteractionHand hand) {
-		this(target, hand, null);
-	}
-
-	public ExtendoGripInteractionPacket(Entity target, InteractionHand hand, Vec3 specificPoint) {
-		this(hand, target.getId(), specificPoint);
-	}
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.EXTENDO_INTERACT;
-	}
-
-	@Override
-	public void handle(ServerPlayer sender) {
-		if (sender == null)
-			return;
-		Entity entityByID = sender.level()
-				.getEntity(this.target);
-		if (entityByID != null && ExtendoGripItem.isHoldingExtendoGrip(sender)) {
-			double d = sender.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);
-			if (!sender.hasLineOfSight(entityByID))
-				d -= 3;
-			d *= d;
-			if (sender.distanceToSqr(entityByID) > d)
-				return;
-			if (this.hand == null)
-				sender.attack(entityByID);
-			else if (this.point == null)
-				sender.interactOn(entityByID, this.hand);
-			else
-				entityByID.interactAt(sender, this.point, this.hand);
-		}
-	}
+/** Original bounded long-range action; the native entity API merges specific/general interaction. */
+public record ExtendoGripInteractionPacket(@Nullable InteractionHand hand,int target,@Nullable Vec3 point) implements CustomPacketPayload {
+    public static final Type<ExtendoGripInteractionPacket> TYPE=new Type<>(Create.asResource("extendo_interact"));
+    public static final StreamCodec<RegistryFriendlyByteBuf,ExtendoGripInteractionPacket> STREAM_CODEC=StreamCodec.of((buffer,value)->{buffer.writeBoolean(value.hand!=null);if(value.hand!=null)buffer.writeEnum(value.hand);buffer.writeInt(value.target);buffer.writeBoolean(value.point!=null);if(value.point!=null)Vec3.STREAM_CODEC.encode(buffer,value.point);},buffer->{var hand=buffer.readBoolean()?buffer.readEnum(InteractionHand.class):null;int target=buffer.readInt();var point=buffer.readBoolean()?Vec3.STREAM_CODEC.decode(buffer):null;return new ExtendoGripInteractionPacket(hand,target,point);});
+    public ExtendoGripInteractionPacket(Entity target){this(target,null);}
+    public ExtendoGripInteractionPacket(Entity target,InteractionHand hand){this(target,hand,null);}
+    public ExtendoGripInteractionPacket(Entity target,InteractionHand hand,Vec3 point){this(hand,target.getId(),point);}
+    @Override public Type<ExtendoGripInteractionPacket> type(){return TYPE;}
+    public boolean handle(ServerPlayer sender){
+        if(sender==null||sender.isSpectator()||!sender.isAlive()||!ExtendoGripItem.isHoldingExtendoGrip(sender))return false;
+        // Derive the actual held state now; no packet can retain an old range after a hand change.
+        ExtendoGripItem.holdingExtendoGripIncreasesRange(sender);
+        Entity entity=sender.level().getEntity(target);if(entity==null||entity==sender||!entity.isAlive()||entity.isRemoved()||entity.level()!=sender.level()||!sender.level().hasChunkAt(entity.blockPosition()))return false;
+        double range=sender.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE),distance=sender.distanceToSqr(entity);
+        if(!Double.isFinite(range)||range<0||distance>range*range)return false;
+        // Native LOS reads blocks. Check the bounded intervening chunks without creating load tickets.
+        var from=sender.blockPosition();var to=entity.blockPosition();
+        for(int x=Math.min(from.getX(),to.getX())>>4;x<=(Math.max(from.getX(),to.getX())>>4);x++)for(int z=Math.min(from.getZ(),to.getZ())>>4;z<=(Math.max(from.getZ(),to.getZ())>>4);z++)if(sender.level().getChunkSource().getChunkNow(x,z)==null)return false;
+        if(!sender.hasLineOfSight(entity))range-=3;
+        if(range<0||distance>range*range)return false;
+        if(point!=null&&(!Double.isFinite(point.x)||!Double.isFinite(point.y)||!Double.isFinite(point.z)||!entity.getBoundingBox().inflate(.01).contains(point.add(entity.position()))))return false;
+        if(hand==null){if(point!=null||!entity.isAttackable()||entity instanceof net.minecraft.world.entity.player.Player other&&!sender.canHarmPlayer(other))return false;sender.attack(entity);}
+        else sender.interactOn(entity,hand,point==null?Vec3.ZERO:point);
+        return true;
+    }
+    public static void register(){PayloadTypeRegistry.serverboundPlay().register(TYPE,STREAM_CODEC);ServerPlayNetworking.registerGlobalReceiver(TYPE,(packet,context)->packet.handle(context.player()));}
 }

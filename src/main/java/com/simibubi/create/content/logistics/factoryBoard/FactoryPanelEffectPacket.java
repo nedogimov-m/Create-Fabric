@@ -1,47 +1,17 @@
 package com.simibubi.create.content.logistics.factoryBoard;
 
-import com.simibubi.create.AllBlocks;
-
-import com.simibubi.create.AllPackets;
-
-import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.net.base.ClientboundPacketPayload;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.network.codec.ByteBufCodecs;
+import com.simibubi.create.Create;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-
-public record FactoryPanelEffectPacket(FactoryPanelPosition fromPos, FactoryPanelPosition toPos, boolean success) implements ClientboundPacketPayload {
-	public static final StreamCodec<ByteBuf, FactoryPanelEffectPacket> STREAM_CODEC = StreamCodec.composite(
-		FactoryPanelPosition.STREAM_CODEC, FactoryPanelEffectPacket::fromPos,
-		FactoryPanelPosition.STREAM_CODEC, FactoryPanelEffectPacket::toPos,
-		ByteBufCodecs.BOOL, FactoryPanelEffectPacket::success,
-	    FactoryPanelEffectPacket::new
-	);
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.FACTORY_PANEL_EFFECT;
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void handle(LocalPlayer player) {
-		ClientLevel level = Minecraft.getInstance().level;
-		BlockState blockState = level.getBlockState(fromPos.pos());
-		if (!AllBlocks.FACTORY_GAUGE.has(blockState))
-			return;
-		FactoryPanelBehaviour panelBehaviour = FactoryPanelBehaviour.at(level, toPos);
-		if (panelBehaviour != null) {
-			panelBehaviour.bulb.setValue(1);
-			FactoryPanelConnection connection = panelBehaviour.targetedBy.get(fromPos);
-			if (connection != null)
-				connection.success = success;
-		}
-	}
+/** Each ingredient keeps its own success pulse when several results arrive in one tick. */
+public record FactoryPanelEffectPacket(FactoryPanelPosition from,FactoryPanelPosition to,boolean success) implements CustomPacketPayload {
+    public static final Type<FactoryPanelEffectPacket> TYPE=new Type<>(Create.asResource("factory_panel_effect"));
+    public static final StreamCodec<RegistryFriendlyByteBuf,FactoryPanelEffectPacket> CODEC=CustomPacketPayload.codec((packet,buf)->{
+        FactoryPanelPosition.STREAM_CODEC.encode(buf,packet.from);
+        FactoryPanelPosition.STREAM_CODEC.encode(buf,packet.to);
+        buf.writeBoolean(packet.success);
+    },buf->new FactoryPanelEffectPacket(FactoryPanelPosition.STREAM_CODEC.decode(buf),FactoryPanelPosition.STREAM_CODEC.decode(buf),buf.readBoolean()));
+    @Override public Type<FactoryPanelEffectPacket> type() { return TYPE; }
 }

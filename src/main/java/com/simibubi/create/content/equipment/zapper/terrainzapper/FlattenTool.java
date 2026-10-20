@@ -53,7 +53,8 @@ public class FlattenTool {
 		return result;
 	}
 
-	public static void apply(Level world, List<BlockPos> targetPositions, Direction facing) {
+	public static void apply(Level world,List<BlockPos> targetPositions,Direction facing){apply(world,targetPositions,facing,null);}
+	public static void apply(Level world, List<BlockPos> targetPositions, Direction facing,net.minecraft.world.entity.player.Player player) {
 		List<BlockPos> surfaces = new ArrayList<>();
 		Map<Pair<Integer, Integer>, Integer> heightMap = new HashMap<>();
 		int offset = facing.getAxisDirection().getStep();
@@ -67,7 +68,7 @@ public class FlattenTool {
 
 		for (BlockPos p : targetPositions) {
 			Pair<Integer, Integer> coords = getCoords(p, facing);
-			BlockState belowSurface = world.getBlockState(p);
+			BlockState belowSurface = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,p);
 
 			minCoord1 = Math.min(minCoord1, coords.getKey());
 			minCoord2 = Math.min(minCoord2, coords.getValue());
@@ -81,7 +82,7 @@ public class FlattenTool {
 			}
 
 			p = p.relative(facing);
-			BlockState surface = world.getBlockState(p);
+			BlockState surface = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,p);
 
 			if (!TerrainTools.isReplaceable(surface)) {
 				if (!heightMap.containsKey(coords) || heightMap.get(coords).equals(Integer.MIN_VALUE))
@@ -138,12 +139,12 @@ public class FlattenTool {
 				continue;
 
 			// Lower surface
-			BlockState blockState = world.getBlockState(p);
+			BlockState blockState = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,p);
 			int timeOut = 1000;
 			while (surfaceCoord > targetCoord) {
 				BlockPos below = p.relative(facing.getOpposite());
-				world.setBlockAndUpdate(below, blockState);
-				world.setBlockAndUpdate(p, blockState.getFluidState().createLegacyBlock());
+				if (!com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.writePair(world,player,below,blockState,p,blockState.getFluidState().createLegacyBlock()))
+					break;
 				p = p.relative(facing.getOpposite());
 				surfaceCoord--;
 				if (timeOut-- <= 0)
@@ -153,9 +154,16 @@ public class FlattenTool {
 			// Raise surface
 			while (surfaceCoord < targetCoord) {
 				BlockPos above = p.relative(facing);
-				if (!(blockState.getBlock() instanceof LiquidBlock))
-					world.setBlockAndUpdate(above, blockState);
-				world.setBlockAndUpdate(p, world.getBlockState(p.relative(facing.getOpposite())));
+				BlockPos support = p.relative(facing.getOpposite());
+				if (!com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.loaded(world,support))
+					break;
+				BlockState moved = com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,support);
+				if (blockState.getBlock() instanceof LiquidBlock) {
+					if (moved != com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.read(world,p)
+						&& !com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.write(world,player,p,moved))
+						break;
+				} else if (!com.simibubi.create.content.equipment.zapper.ZapperWorldAccess.writePair(world,player,above,blockState,p,moved))
+					break;
 				p = p.relative(facing);
 				surfaceCoord++;
 				if (timeOut-- <= 0)

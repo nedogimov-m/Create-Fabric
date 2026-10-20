@@ -1,261 +1,94 @@
 package com.simibubi.create.content.logistics.packagerLink;
 
-import java.lang.ref.WeakReference;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.UUID;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
-
-import org.jetbrains.annotations.Nullable;
-
-import org.apache.commons.lang3.mutable.MutableBoolean;
-
-import com.google.common.cache.Cache;
-import com.simibubi.create.Create;
-import com.simibubi.create.content.logistics.packager.IdentifiedInventory;
-import com.simibubi.create.content.logistics.packager.InventorySummary;
-import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
-import com.simibubi.create.content.logistics.packager.PackagingRequest;
+import com.simibubi.create.content.logistics.packager.*;
 import com.simibubi.create.content.logistics.stockTicker.PackageOrderWithCrafts;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.foundation.utility.TickBasedCache;
-
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.lang.ref.WeakReference;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import net.createmod.catnip.data.Pair;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.GlobalPos;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.*;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.neoforge.items.ItemStackHandler;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.storage.*;
+import org.apache.commons.lang3.mutable.MutableBoolean;
 
-public class LogisticallyLinkedBehaviour extends BlockEntityBehaviour {
-
-	public static final BehaviourType<LogisticallyLinkedBehaviour> TYPE = new BehaviourType<>();
-
-	public static final AtomicInteger LINK_ID_GENERATOR = new AtomicInteger();
-	public int linkId; // Runtime context, not saved to disk
-
-	public int redstonePower;
-	public UUID freqId;
-
-	private boolean addedGlobally = false;
-	private boolean loadedGlobally = false;
-	private boolean global = false;
-
-	public static enum RequestType {
-		RESTOCK, REDSTONE, PLAYER
-	}
-
-	private static final Cache<UUID, Cache<Integer, WeakReference<LogisticallyLinkedBehaviour>>> LINKS =
-		new TickBasedCache<>(20, true);
-
-	private static final Cache<UUID, Cache<Integer, WeakReference<LogisticallyLinkedBehaviour>>> CLIENT_LINKS =
-		new TickBasedCache<>(20, true, true);
-
-	public LogisticallyLinkedBehaviour(SmartBlockEntity be, boolean global) {
-		super(be);
-		this.global = global;
-		linkId = LINK_ID_GENERATOR.getAndIncrement();
-		freqId = UUID.randomUUID();
-	}
-
-	public static Collection<LogisticallyLinkedBehaviour> getAllPresent(UUID freq, boolean sortByPriority) {
-		return getAllPresent(freq, sortByPriority, false);
-	}
-
-	public static Collection<LogisticallyLinkedBehaviour> getAllPresent(UUID freq, boolean sortByPriority,
-																		boolean clientSide) {
-		Cache<Integer, WeakReference<LogisticallyLinkedBehaviour>> cache =
-			(clientSide ? CLIENT_LINKS : LINKS).getIfPresent(freq);
-		if (cache == null)
-			return Collections.emptyList();
-		Stream<LogisticallyLinkedBehaviour> stream = new LinkedList<>(cache.asMap()
-			.values()).stream()
-			.map(WeakReference::get)
-			.filter(LogisticallyLinkedBehaviour::isValidLink);
-
-		if (sortByPriority)
-			stream = stream.sorted((e1, e2) -> Integer.compare(e1.redstonePower, e2.redstonePower));
-
-		return stream.toList();
-	}
-
-	public static void keepAlive(LogisticallyLinkedBehaviour behaviour) {
-		boolean onClient = behaviour.blockEntity.getLevel().isClientSide;
-		if (behaviour.redstonePower == 15)
-			return;
-		try {
-			Cache<Integer, WeakReference<LogisticallyLinkedBehaviour>> cache =
-				(onClient ? CLIENT_LINKS : LINKS).get(behaviour.freqId, () -> new TickBasedCache<>(400, false));
-
-			if (cache == null)
-				return;
-
-			WeakReference<LogisticallyLinkedBehaviour> reference =
-				cache.get(behaviour.linkId, () -> new WeakReference<>(behaviour));
-			cache.put(behaviour.linkId, reference.get() != behaviour ? new WeakReference<>(behaviour) : reference);
-
-		} catch (ExecutionException e) {
-			e.printStackTrace();
-		}
-	}
-
-	public static void remove(LogisticallyLinkedBehaviour behaviour) {
-		Cache<Integer, WeakReference<LogisticallyLinkedBehaviour>> cache = LINKS.getIfPresent(behaviour.freqId);
-		if (cache != null)
-			cache.invalidate(behaviour.linkId);
-	}
-
-	//
-
-	@Override
-	public void unload() {
-		if (loadedGlobally && global && getWorld() != null)
-			Create.LOGISTICS.linkInvalidated(freqId, getGlobalPos());
-		super.unload();
-		remove(this);
-	}
-
-	@Override
-	public void lazyTick() {
-		keepAlive(this);
-	}
-
-	@Override
-	public void initialize() {
-		super.initialize();
-		if (getWorld().isClientSide)
-			return;
-
-		if (!loadedGlobally && global) {
-			loadedGlobally = true;
-			Create.LOGISTICS.linkLoaded(freqId, getGlobalPos());
-			// Call keepAlive regardless of redstone power.
-			// Otherwise, when no redstone power is present
-			// keepAlive won't be called until next lazy tick.
-			keepAlive(this);
-		}
-
-		if (!addedGlobally && global) {
-			addedGlobally = true;
-			blockEntity.setChanged();
-			if (blockEntity instanceof PackagerLinkBlockEntity plbe)
-				Create.LOGISTICS.linkAdded(freqId, getGlobalPos(), plbe.placedBy);
-		}
-
-	}
-
-	private GlobalPos getGlobalPos() {
-		return GlobalPos.of(getWorld().dimension(), getPos());
-	}
-
-	@Override
-	public void destroy() {
-		super.destroy();
-		if (addedGlobally && global && getWorld() != null)
-			Create.LOGISTICS.linkRemoved(freqId, getGlobalPos());
-	}
-
-	public void redstonePowerChanged(int power) {
-		if (power == redstonePower)
-			return;
-		redstonePower = power;
-		blockEntity.setChanged();
-
-		if (power == 15)
-			remove(this);
-		else
-			keepAlive(this);
-	}
-
-	public Pair<PackagerBlockEntity, PackagingRequest> processRequest(ItemStack stack, int amount, String address,
-		int linkIndex, MutableBoolean finalLink, int orderId, @Nullable PackageOrderWithCrafts context,
-		@Nullable IdentifiedInventory ignoredHandler) {
-
-		if (blockEntity instanceof PackagerLinkBlockEntity plbe)
-			return plbe.processRequest(stack, amount, address, linkIndex, finalLink, orderId, context, ignoredHandler);
-
-		return null;
-	}
-
-	public InventorySummary getSummary(@Nullable IdentifiedInventory ignoredHandler) {
-		if (blockEntity instanceof PackagerLinkBlockEntity plbe)
-			return plbe.fetchSummaryFromPackager(ignoredHandler);
-		return InventorySummary.EMPTY;
-	}
-
-	public void deductFromAccurateSummary(ItemStackHandler packageContents) {
-		InventorySummary summary = LogisticsManager.ACCURATE_SUMMARIES.getIfPresent(freqId);
-		if (summary == null)
-			return;
-		for (int i = 0; i < packageContents.getSlots(); i++) {
-			ItemStack orderedStack = packageContents.getStackInSlot(i);
-			if (orderedStack.isEmpty())
-				continue;
-			summary.add(orderedStack, -Math.min(summary.getCountOf(orderedStack), orderedStack.getCount()));
-		}
-	}
-
-	//
-
-	public boolean mayInteract(Player player) {
-		return Create.LOGISTICS.mayInteract(freqId, player);
-	}
-
-	public boolean mayInteractMessage(Player player) {
-		boolean mayInteract = Create.LOGISTICS.mayInteract(freqId, player);
-		if (!mayInteract)
-			player.displayClientMessage(CreateLang.translate("logistically_linked.protected")
-				.style(ChatFormatting.RED)
-				.component(), true);
-		return mayInteract;
-	}
-
-	public boolean mayAdministrate(Player player) {
-		return Create.LOGISTICS.mayAdministrate(freqId, player);
-	}
-
-	public static boolean isValidLink(LogisticallyLinkedBehaviour link) {
-		return link != null && !link.blockEntity.isRemoved() && !link.blockEntity.isChunkUnloaded();
-	}
-
-	@Override
-	public boolean isSafeNBT() {
-		return true;
-	}
-
-	@Override
-	public void writeSafe(CompoundTag tag, HolderLookup.Provider registries) {
-		tag.putUUID("Freq", freqId);
-	}
-
-	@Override
-	public void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-		tag.putUUID("Freq", freqId);
-		tag.putInt("Power", redstonePower);
-		tag.putBoolean("Added", addedGlobally);
-	}
-
-	@Override
-	public void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(tag, registries, clientPacket);
-		if (tag.hasUUID("Freq"))
-			freqId = tag.getUUID("Freq");
-		redstonePower = tag.getInt("Power");
-		addedGlobally = tag.getBoolean("Added");
-	}
-
-	@Override
-	public BehaviourType<?> getType() {
-		return TYPE;
-	}
-
+public final class LogisticallyLinkedBehaviour extends BlockEntityBehaviour {
+    public static final BehaviourType<LogisticallyLinkedBehaviour> TYPE = new BehaviourType<>();
+    public static final AtomicInteger LINK_ID_GENERATOR = new AtomicInteger();
+    private static final Map<Level,Map<UUID,Map<Integer,WeakReference<LogisticallyLinkedBehaviour>>>> CLIENT_LINKS = Collections.synchronizedMap(new WeakHashMap<>());
+    public enum RequestType { RESTOCK, REDSTONE, PLAYER }
+    public final int linkId = LINK_ID_GENERATOR.getAndIncrement();
+    public int redstonePower;
+    public UUID freqId = UUID.randomUUID();
+    private final boolean global;
+    private UUID registeredFreq;
+    private boolean addedGlobally;
+    public LogisticallyLinkedBehaviour(BlockEntity owner,boolean global) { super(owner);this.global=global; }
+    private GlobalPos globalPos() { return GlobalPos.of(getWorld().dimension(),getPos()); }
+    private Map<UUID,Map<Integer,WeakReference<LogisticallyLinkedBehaviour>>> liveLinks() {
+        return getWorld().isClientSide()?CLIENT_LINKS.computeIfAbsent(getWorld(),ignored->new HashMap<>()):GlobalLogisticsManager.get(getWorld()).links;
+    }
+    @Override public void initialize() { keepAlive(); }
+    @Override public void lazyTick() { keepAlive(); }
+    public void keepAlive() {
+        if(getWorld()==null||!isValidLink(this))return;
+        if(registeredFreq!=null&&!registeredFreq.equals(freqId))detach(true);
+        if(registeredFreq==null){
+            registeredFreq=freqId;
+            if(global&&!getWorld().isClientSide()){
+                var manager=GlobalLogisticsManager.get(getWorld());
+                var owner=blockEntity instanceof PackagerLinkBlockEntity link?link.placedBy:null;
+                manager.linkAdded(freqId,globalPos(),owner);manager.linkLoaded(freqId,globalPos());addedGlobally=true;blockEntity.setChanged();
+            }
+        }
+        if(redstonePower==15){removeLive();return;}
+        liveLinks().computeIfAbsent(freqId,ignored->new HashMap<>()).put(linkId,new WeakReference<>(this));
+    }
+    private void removeLive() { var map=liveLinks().get(registeredFreq==null?freqId:registeredFreq);if(map!=null){map.remove(linkId);if(map.isEmpty())liveLinks().remove(registeredFreq==null?freqId:registeredFreq);} }
+    private void detach(boolean removed) {
+        if(getWorld()==null||registeredFreq==null)return;
+        removeLive();
+        if(global&&!getWorld().isClientSide()){
+            var manager=GlobalLogisticsManager.get(getWorld());
+            if(removed)manager.linkRemoved(registeredFreq,globalPos());else manager.linkInvalidated(registeredFreq,globalPos());
+        }
+        registeredFreq=null;
+    }
+    @Override public void unload() { detach(false); }
+    @Override public void destroy() {
+        if(registeredFreq==null&&global&&getWorld()!=null&&!getWorld().isClientSide())GlobalLogisticsManager.get(getWorld()).linkRemoved(freqId,globalPos());
+        detach(true);
+    }
+    public void setFrequency(UUID id) { if(freqId.equals(id))return;detach(true);freqId=Objects.requireNonNull(id);addedGlobally=false;keepAlive();changed(); }
+    public void redstonePowerChanged(int power) {
+        power=Math.clamp(power,0,15);if(power==redstonePower)return;redstonePower=power;keepAlive();
+        if(getWorld()!=null&&!getWorld().isClientSide())GlobalLogisticsManager.get(getWorld()).invalidate(freqId);changed();
+    }
+    public static boolean isValidLink(LogisticallyLinkedBehaviour link) {
+        return link!=null&&link.getWorld()!=null&&!link.blockEntity.isRemoved()&&link.getWorld().isLoaded(link.getPos())&&LoadedLevelAccess.blockEntity(link.getWorld(),link.getPos())==link.blockEntity;
+    }
+    public static List<LogisticallyLinkedBehaviour> getAllPresent(Level level,UUID freq,boolean sorted) {
+        var networks=level.isClientSide()?CLIENT_LINKS.get(level):GlobalLogisticsManager.get(level).links;
+        if(networks==null)return List.of();var entries=networks.get(freq);if(entries==null)return List.of();
+        var result=new ArrayList<LogisticallyLinkedBehaviour>();
+        for(var reference:List.copyOf(entries.values())){var link=reference.get();if(isValidLink(link)&&link.freqId.equals(freq)&&link.redstonePower<15)result.add(link);}
+        if(sorted)result.sort(Comparator.comparingInt(link->link.redstonePower));return result;
+    }
+    public Pair<PackagerBlockEntity,PackagingRequest> processRequest(ItemStack stack,int amount,String address,int index,MutableBoolean last,int order,PackageOrderWithCrafts context,IdentifiedInventory ignored) {
+        return blockEntity instanceof PackagerLinkBlockEntity link?link.processRequest(stack,amount,address,index,last,order,context,ignored):null;
+    }
+    public InventorySummary getSummary(IdentifiedInventory ignored) { return blockEntity instanceof PackagerLinkBlockEntity link?link.fetchSummaryFromPackager(ignored):InventorySummary.EMPTY; }
+    public boolean mayInteract(Player player) { return getWorld().isClientSide()||GlobalLogisticsManager.get(getWorld()).mayInteract(freqId,player); }
+    public boolean mayInteractMessage(Player player) { boolean allowed=mayInteract(player);if(!allowed)player.sendOverlayMessage(Component.translatable("create.logistically_linked.protected").withStyle(ChatFormatting.RED));return allowed; }
+    public boolean mayAdministrate(Player player) { return !getWorld().isClientSide()&&GlobalLogisticsManager.get(getWorld()).mayAdministrate(freqId,player); }
+    @Override public boolean isSafeNBT() { return true; }
+    @Override public void write(ValueOutput out) { out.store("Freq",UUIDUtil.CODEC,freqId);out.putInt("Power",redstonePower);out.putBoolean("Added",addedGlobally); }
+    @Override public void read(ValueInput in) { freqId=in.read("Freq",UUIDUtil.CODEC).orElse(freqId);redstonePower=Math.clamp(in.getIntOr("Power",0),0,15);addedGlobally=in.getBooleanOr("Added",false); }
+    @Override public BehaviourType<?> getType() { return TYPE; }
 }

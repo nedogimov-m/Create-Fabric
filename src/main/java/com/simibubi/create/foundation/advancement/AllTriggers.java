@@ -1,32 +1,46 @@
 package com.simibubi.create.foundation.advancement;
 
-import java.util.LinkedList;
-import java.util.List;
-
+import java.util.LinkedHashMap;
+import java.util.Map;
 import com.simibubi.create.Create;
-
-import net.minecraft.advancements.CriterionTrigger;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.neoforged.neoforge.registries.DeferredRegister;
+import net.minecraft.resources.Identifier;
 
-public class AllTriggers {
+/** One registered source trigger identity is shared by source and native device award hooks. */
+public final class AllTriggers {
+    private static final Map<Identifier, CriterionTriggerBase<?>> triggers = new LinkedHashMap<>();
 
-	private static final List<CriterionTriggerBase<?>> triggers = new LinkedList<>();
+    public static SimpleCreateTrigger addSimple(String id) {
+        return simple(Create.asResource(id));
+    }
 
-	public static SimpleCreateTrigger addSimple(String id) {
-		return add(new SimpleCreateTrigger(id));
-	}
+    private static SimpleCreateTrigger simple(Identifier id) {
+        var trigger = triggers.computeIfAbsent(id, SimpleCreateTrigger::new);
+        if (!(trigger instanceof SimpleCreateTrigger simple))
+            throw new IllegalStateException("Create trigger has another actual type: " + id);
+        return simple;
+    }
 
-	private static <T extends CriterionTriggerBase<?>> T add(T instance) {
-		triggers.add(instance);
-		return instance;
-	}
+    public static SimpleCreateTrigger registerSimple(Identifier id) {
+        var trigger = simple(id);
+        register(trigger);
+        return trigger;
+    }
 
-	public static void register() {
-		triggers.forEach(trigger -> {
-			Registry.register(BuiltInRegistries.TRIGGER_TYPES, trigger.getId(), trigger);
-		});
-	}
+    private static void register(CriterionTriggerBase<?> trigger) {
+        var actual = BuiltInRegistries.TRIGGER_TYPES.getValue(trigger.getId());
+        if (actual == trigger)
+            return;
+        if (BuiltInRegistries.TRIGGER_TYPES.containsKey(trigger.getId()))
+            throw new IllegalStateException("A different trigger already owns " + trigger.getId());
+        Registry.register(BuiltInRegistries.TRIGGER_TYPES, trigger.getId(), trigger);
+    }
 
+    public static void register() {
+        for (var trigger : triggers.values())
+            register(trigger);
+    }
+
+    private AllTriggers() {}
 }

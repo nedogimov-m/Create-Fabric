@@ -1,6 +1,7 @@
 {
-	"parent": "create:block/packager/block_vertical",
-	"textures": {
-		"5": "create:block/packager_vertical_linked"
-	}
+  "parent": "create:block/packager/block_vertical",
+  "textures": {
+    "5": "create:block/packager_vertical_linked",
+    "particle": "create:block/packager_vertical_linked"
+  }
 }

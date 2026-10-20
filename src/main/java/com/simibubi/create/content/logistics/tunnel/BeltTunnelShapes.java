@@ -1,53 +1,25 @@
 package com.simibubi.create.content.logistics.tunnel;
 
+import java.util.*;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.shapes.*;
 import static net.minecraft.world.level.block.Block.box;
 
-import net.createmod.catnip.math.VoxelShaper;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.shapes.BooleanOp;
-import net.minecraft.world.phys.shapes.Shapes;
-import net.minecraft.world.phys.shapes.VoxelShape;
-
-public class BeltTunnelShapes {
-
-	private static VoxelShape block = box(0, -5, 0, 16, 16, 16);
-
-	private static VoxelShaper opening = VoxelShaper.forHorizontal(box(2, -5, 14, 14, 10, 16),
-			Direction.SOUTH);
-
-	private static final VoxelShaper STRAIGHT = VoxelShaper.forHorizontalAxis(Shapes.join(block,
-			Shapes.or(opening.get(Direction.SOUTH), opening.get(Direction.NORTH)), BooleanOp.NOT_SAME),
-			Axis.Z),
-
-			TEE = VoxelShaper.forHorizontal(
-					Shapes.join(block, Shapes.or(opening.get(Direction.NORTH),
-							opening.get(Direction.WEST), opening.get(Direction.EAST)), BooleanOp.NOT_SAME),
-					Direction.SOUTH);
-
-	private static final VoxelShape CROSS = Shapes.join(block,
-			Shapes.or(opening.get(Direction.SOUTH), opening.get(Direction.NORTH), opening.get(Direction.WEST),
-					opening.get(Direction.EAST)),
-			BooleanOp.NOT_SAME);
-
-	public static VoxelShape getShape(BlockState state) {
-		BeltTunnelBlock.Shape shape = state.getValue(BeltTunnelBlock.SHAPE);
-		Direction.Axis axis = state.getValue(BeltTunnelBlock.HORIZONTAL_AXIS);
-
-		if (shape == BeltTunnelBlock.Shape.CROSS)
-			return CROSS;
-
-		if (BeltTunnelBlock.isStraight(state))
-			return STRAIGHT.get(axis);
-
-		if (shape == BeltTunnelBlock.Shape.T_LEFT)
-			return TEE.get(axis == Direction.Axis.Z ? Direction.EAST : Direction.NORTH);
-
-		if (shape == BeltTunnelBlock.Shape.T_RIGHT)
-			return TEE.get(axis == Direction.Axis.Z ? Direction.WEST : Direction.SOUTH);
-
-		// something went wrong
-		return Shapes.block();
-	}
+public final class BeltTunnelShapes {
+    private static final Map<Direction.Axis,Map<BeltTunnelBlock.Shape,VoxelShape>> CACHE=new EnumMap<>(Direction.Axis.class);
+    static {
+        var solid=box(0,-5,0,16,16,16);var openings=new EnumMap<Direction,VoxelShape>(Direction.class);
+        openings.put(Direction.NORTH,box(2,-5,0,14,10,2));openings.put(Direction.SOUTH,box(2,-5,14,14,10,16));openings.put(Direction.EAST,box(14,-5,2,16,10,14));openings.put(Direction.WEST,box(0,-5,2,2,10,14));
+        for(var axis:new Direction.Axis[]{Direction.Axis.X,Direction.Axis.Z}){
+            var shapes=new EnumMap<BeltTunnelBlock.Shape,VoxelShape>(BeltTunnelBlock.Shape.class);
+            for(var shape:BeltTunnelBlock.Shape.values()){
+                var holes=Shapes.empty();var left=Direction.get(Direction.AxisDirection.POSITIVE,axis).getClockWise();
+                for(var side:Direction.Plane.HORIZONTAL)if(side.getAxis()==axis||shape==BeltTunnelBlock.Shape.CROSS||shape==BeltTunnelBlock.Shape.T_LEFT&&side==left||shape==BeltTunnelBlock.Shape.T_RIGHT&&side==left.getOpposite())holes=Shapes.or(holes,openings.get(side));
+                shapes.put(shape,Shapes.join(solid,holes,BooleanOp.ONLY_FIRST));
+            }CACHE.put(axis,shapes);
+        }
+    }
+    public static VoxelShape getShape(BlockState state){return CACHE.get(state.getValue(BeltTunnelBlock.HORIZONTAL_AXIS)).get(state.getValue(BeltTunnelBlock.SHAPE));}
+    private BeltTunnelShapes(){}
 }

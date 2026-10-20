@@ -1,0 +1,27 @@
+{
+  "type": "create:crushing",
+  "ingredients": [
+    "#c:storage_blocks/raw_osmium"
+  ],
+  "processing_time": 400,
+  "results": [
+    {
+      "count": 9,
+      "id": "create:crushed_raw_osmium"
+    },
+    {
+      "chance": 0.75,
+      "count": 9,
+      "id": "create:experience_nugget"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:not",
+      "value": {
+        "condition": "create:item_tag_empty",
+        "tag": "c:storage_blocks/raw_osmium"
+      }
+    }
+  ]
+}

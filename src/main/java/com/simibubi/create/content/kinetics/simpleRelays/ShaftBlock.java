@@ -1,136 +1,129 @@
 package com.simibubi.create.content.kinetics.simpleRelays;
 
-import java.util.function.Predicate;
-
-import com.google.common.base.Predicates;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.decoration.encasing.EncasableBlock;
-import com.simibubi.create.content.decoration.girder.GirderEncasedShaftBlock;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.content.kinetics.steamEngine.PoweredShaftBlock;
-import com.simibubi.create.foundation.placement.PoleHelper;
-
-import net.createmod.catnip.placement.IPlacementHelper;
-import net.createmod.catnip.placement.PlacementHelpers;
-import net.createmod.catnip.placement.PlacementOffset;
-import net.minecraft.MethodsReturnNonnullByDefault;
+import com.simibubi.create.content.kinetics.base.KineticBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.ScheduledTickAccess;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.SimpleWaterloggedBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.EnumProperty;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-public class ShaftBlock extends AbstractSimpleShaftBlock implements EncasableBlock {
+public class ShaftBlock extends KineticBlock implements SimpleWaterloggedBlock, com.simibubi.create.content.decoration.encasing.EncasableBlock {
+    public static final EnumProperty<Direction.Axis> AXIS = BlockStateProperties.AXIS;
+    public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
+    private static final VoxelShape X_SHAPE = box(0, 5, 5, 16, 11, 11);
+    private static final VoxelShape Y_SHAPE = box(5, 0, 5, 11, 16, 11);
+    private static final VoxelShape Z_SHAPE = box(5, 5, 0, 11, 11, 16);
 
-	public static final int placementHelperId = PlacementHelpers.register(new PlacementHelper());
+    public ShaftBlock(Properties properties) {
+        super(properties);
+        registerDefaultState(stateDefinition.any().setValue(AXIS, Direction.Axis.Y).setValue(WATERLOGGED, false));
+    }
 
-	public ShaftBlock(Properties properties) {
-		super(properties);
-	}
+    @Override protected net.minecraft.world.InteractionResult useItemOn(net.minecraft.world.item.ItemStack stack,
+            BlockState state, net.minecraft.world.level.Level level, BlockPos pos,
+            net.minecraft.world.entity.player.Player player, net.minecraft.world.InteractionHand hand,
+            net.minecraft.world.phys.BlockHitResult hit) {
+        if(player.isShiftKeyDown()||!player.mayBuild()||player.isSpectator()||!level.mayInteract(player,pos))return net.minecraft.world.InteractionResult.TRY_WITH_EMPTY_HAND;
+        var encased=tryEncase(state,level,pos,stack,player,hand,hit);
+        if(encased.consumesAction())return encased;
+        if(state.is(com.simibubi.create.AllBlocks.SHAFT)&&stack.is(com.simibubi.create.AllBlocks.METAL_GIRDER.asItem())&&state.getValue(AXIS)!=Direction.Axis.Y){
+            if(!level.isClientSide()){
+                var next=com.simibubi.create.AllBlocks.METAL_GIRDER_ENCASED_SHAFT.defaultBlockState()
+                        .setValue(WATERLOGGED,state.getValue(WATERLOGGED))
+                        .setValue(com.simibubi.create.content.decoration.girder.GirderEncasedShaftBlock.HORIZONTAL_AXIS,state.getValue(AXIS));
+                if(!level.setBlock(pos,next,Block.UPDATE_ALL))return net.minecraft.world.InteractionResult.FAIL;
+                if(!player.isCreative()){stack.shrink(1);if(stack.isEmpty())player.setItemInHand(hand,net.minecraft.world.item.ItemStack.EMPTY);}
+            }return net.minecraft.world.InteractionResult.SUCCESS;
+        }
+        if(state.is(com.simibubi.create.AllBlocks.SHAFT)||state.is(com.simibubi.create.AllBlocks.POWERED_SHAFT))
+            return CogwheelBlockItem.extendShaft(stack,state,level,pos,player,hand,hit);
+        return net.minecraft.world.InteractionResult.TRY_WITH_EMPTY_HAND;
+    }
 
-	public static boolean isShaft(BlockState state) {
-		return AllBlocks.SHAFT.has(state);
-	}
+    @Override protected void tick(BlockState state,net.minecraft.server.level.ServerLevel level,BlockPos pos,RandomSource random) {
+        if(com.simibubi.create.content.kinetics.steamEngine.PoweredShaftBlock.stillValid(state,level,pos))level.setBlockAndUpdate(pos,com.simibubi.create.content.kinetics.steamEngine.PoweredShaftBlock.getEquivalent(state));
+    }
 
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		BlockState stateForPlacement = super.getStateForPlacement(context);
-		return pickCorrectShaftType(stateForPlacement, context.getLevel(), context.getClickedPos());
-	}
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        builder.add(AXIS, WATERLOGGED);
+    }
 
-	public static BlockState pickCorrectShaftType(BlockState stateForPlacement, Level level, BlockPos pos) {
-		if (PoweredShaftBlock.stillValid(stateForPlacement, level, pos))
-			return PoweredShaftBlock.getEquivalent(stateForPlacement);
-		return stateForPlacement;
-	}
+    @Override
+    public BlockState getStateForPlacement(BlockPlaceContext context) {
+        var preferred=com.simibubi.create.content.kinetics.base.RotatedPillarKineticBlock.getPreferredAxis(context);
+        boolean shift=context.getPlayer()!=null&&context.getPlayer().isShiftKeyDown();
+        var assisted=CogwheelBlockItem.assistedAxis(context);
+        var axis=assisted!=null?assisted:preferred!=null
+                ?shift?context.getClickedFace().getAxis():preferred:context.getNearestLookingDirection().getAxis();
+        var placed=defaultBlockState().setValue(AXIS,axis)
+                .setValue(WATERLOGGED,context.getLevel().getFluidState(context.getClickedPos()).getType()==Fluids.WATER);
+        return com.simibubi.create.content.kinetics.steamEngine.PoweredShaftBlock.stillValid(placed,context.getLevel(),context.getClickedPos())
+                ?com.simibubi.create.content.kinetics.steamEngine.PoweredShaftBlock.getEquivalent(placed):placed;
+    }
 
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		return AllShapes.SIX_VOXEL_POLE.get(state.getValue(AXIS));
-	}
+    @Override
+    protected FluidState getFluidState(BlockState state) {
+        return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : super.getFluidState(state);
+    }
 
-	@Override
-	public float getParticleTargetRadius() {
-		return .35f;
-	}
+    @Override
+    protected BlockState updateShape(BlockState state, LevelReader level, ScheduledTickAccess ticks, BlockPos pos,
+                                     Direction direction, BlockPos neighborPos, BlockState neighborState, RandomSource random) {
+        if (state.getValue(WATERLOGGED)) {
+            ticks.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(level));
+        }
+        return super.updateShape(state, level, ticks, pos, direction, neighborPos, neighborState, random);
+    }
 
-	@Override
-	public float getParticleInitialRadius() {
-		return .125f;
-	}
+    @Override
+    protected BlockState rotate(BlockState state, Rotation rotation) {
+        if (rotation == Rotation.CLOCKWISE_90 || rotation == Rotation.COUNTERCLOCKWISE_90) {
+            return switch (state.getValue(AXIS)) {
+                case X -> state.setValue(AXIS, Direction.Axis.Z);
+                case Z -> state.setValue(AXIS, Direction.Axis.X);
+                case Y -> state;
+            };
+        }
+        return state;
+    }
 
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (player.isShiftKeyDown() || !player.mayBuild())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+    @Override
+    protected RenderShape getRenderShape(BlockState state) {
+        return RenderShape.INVISIBLE;
+    }
 
-		ItemInteractionResult result = tryEncase(state, level, pos, stack, player, hand, hitResult);
-		if (result.consumesAction())
-			return result;
+    @Override
+    protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        return switch (getRotationAxis(state)) {
+            case X -> X_SHAPE;
+            case Y -> Y_SHAPE;
+            case Z -> Z_SHAPE;
+        };
+    }
 
-		if (AllBlocks.METAL_GIRDER.isIn(stack) && state.getValue(AXIS) != Axis.Y) {
-			KineticBlockEntity.switchToBlockState(level, pos, AllBlocks.METAL_GIRDER_ENCASED_SHAFT.getDefaultState()
-				.setValue(WATERLOGGED, state.getValue(WATERLOGGED))
-				.setValue(GirderEncasedShaftBlock.HORIZONTAL_AXIS, state.getValue(AXIS) == Axis.Z ? Axis.Z : Axis.X));
-			if (!level.isClientSide && !player.isCreative()) {
-				stack.shrink(1);
-				if (stack.isEmpty())
-					player.setItemInHand(hand, ItemStack.EMPTY);
-			}
-			return ItemInteractionResult.SUCCESS;
-		}
+    @Override
+    public Direction.Axis getRotationAxis(BlockState state) {
+        return state.getValue(AXIS);
+    }
 
-		IPlacementHelper helper = PlacementHelpers.get(placementHelperId);
-		if (helper.matchesItem(stack))
-			return helper.getOffset(player, level, state, pos, hitResult)
-				.placeInWorld(level, (BlockItem) stack.getItem(), player, hand, hitResult);
-
-		return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-	}
-
-	@MethodsReturnNonnullByDefault
-	private static class PlacementHelper extends PoleHelper<Direction.Axis> {
-		// used for extending a shaft in its axis, like the piston poles. works with
-		// shafts and cogs
-
-		private PlacementHelper() {
-			super(state -> state.getBlock() instanceof AbstractSimpleShaftBlock
-				|| state.getBlock() instanceof PoweredShaftBlock, state -> state.getValue(AXIS), AXIS);
-		}
-
-		@Override
-		public Predicate<ItemStack> getItemPredicate() {
-			return i -> i.getItem() instanceof BlockItem
-				&& ((BlockItem) i.getItem()).getBlock() instanceof AbstractSimpleShaftBlock;
-		}
-
-		@Override
-		public Predicate<BlockState> getStatePredicate() {
-			return Predicates.or(AllBlocks.SHAFT::has, AllBlocks.POWERED_SHAFT::has);
-		}
-
-		@Override
-		public PlacementOffset getOffset(Player player, Level world, BlockState state, BlockPos pos,
-										 BlockHitResult ray) {
-			PlacementOffset offset = super.getOffset(player, world, state, pos, ray);
-			if (offset.isSuccessful())
-				offset.withTransform(offset.getTransform()
-					.andThen(s -> world.isClientSide() ? s
-						: ShaftBlock.pickCorrectShaftType(s, world, offset.getBlockPos())));
-			return offset;
-		}
-
-	}
+    @Override
+    public boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face) {
+        return face.getAxis() == getRotationAxis(state);
+    }
 }

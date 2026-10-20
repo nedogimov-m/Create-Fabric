@@ -1,56 +1,59 @@
 package com.simibubi.create.content.trains.signal;
 
+import com.simibubi.create.Create;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-
-import com.google.common.collect.ImmutableList;
-import com.simibubi.create.AllPackets;
-import com.simibubi.create.CreateClient;
-
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
-import net.createmod.catnip.net.base.ClientboundPacketPayload;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+/** Source group identities/colors/add-remove payload on the native Fabric play transport. */
+public record SignalEdgeGroupPacket(List<UUID> ids, List<EdgeGroupColor> colors, boolean add)
+    implements CustomPacketPayload {
+  private static final int MAX_WIRE_ENTRIES = 32768;
+  public static final Type<SignalEdgeGroupPacket> TYPE =
+      new Type<>(Create.asResource("signal_edge_group"));
+  public static final StreamCodec<FriendlyByteBuf, SignalEdgeGroupPacket> STREAM_CODEC =
+      StreamCodec.of(
+          (buffer, packet) -> {
+            buffer.writeVarInt(packet.ids.size());
+            for (var id : packet.ids) buffer.writeUUID(id);
+            buffer.writeVarInt(packet.colors.size());
+            for (var color : packet.colors) EdgeGroupColor.STREAM_CODEC.encode(buffer, color);
+            buffer.writeBoolean(packet.add);
+          },
+          buffer -> {
+            int size = count(buffer);
+            var ids = new ArrayList<UUID>(size);
+            for (int i = 0; i < size; i++) ids.add(buffer.readUUID());
+            size = count(buffer);
+            var colors = new ArrayList<EdgeGroupColor>(size);
+            for (int i = 0; i < size; i++) colors.add(EdgeGroupColor.STREAM_CODEC.decode(buffer));
+            return new SignalEdgeGroupPacket(ids, colors, buffer.readBoolean());
+          });
+  public static final StreamCodec<FriendlyByteBuf, SignalEdgeGroupPacket> CODEC = STREAM_CODEC;
 
-public record SignalEdgeGroupPacket(List<UUID> ids, List<EdgeGroupColor> colors, boolean add) implements ClientboundPacketPayload {
-	public static final StreamCodec<FriendlyByteBuf, SignalEdgeGroupPacket> STREAM_CODEC = StreamCodec.composite(
-			CatnipStreamCodecBuilders.list(UUIDUtil.STREAM_CODEC), p -> p.ids,
-			CatnipStreamCodecBuilders.list(EdgeGroupColor.STREAM_CODEC), p -> p.colors,
-			ByteBufCodecs.BOOL, p -> p.add,
-	        SignalEdgeGroupPacket::new
-	);
+  public SignalEdgeGroupPacket {
+    ids = List.copyOf(ids);
+    colors = List.copyOf(colors);
+    if (ids.size() > MAX_WIRE_ENTRIES || colors.size() > MAX_WIRE_ENTRIES)
+      throw new IllegalArgumentException("Signal group packet exceeds native payload batch size");
+  }
 
-	public SignalEdgeGroupPacket(UUID id, EdgeGroupColor color) {
-		this(ImmutableList.of(id), ImmutableList.of(color), true);
-	}
+  public SignalEdgeGroupPacket(UUID id, EdgeGroupColor color) {
+    this(List.of(id), List.of(color), true);
+  }
 
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void handle(LocalPlayer player) {
-		Map<UUID, SignalEdgeGroup> signalEdgeGroups = CreateClient.RAILWAYS.signalEdgeGroups;
-		for (int i = 0; i < ids.size(); i++) {
-			UUID id = ids.get(i);
-			if (!add) {
-				signalEdgeGroups.remove(id);
-				continue;
-			}
+  private static int count(FriendlyByteBuf buffer) {
+    int size = buffer.readVarInt();
+    if (size < 0 || size > MAX_WIRE_ENTRIES)
+      throw new IllegalArgumentException("Invalid signal group packet list size");
+    return size;
+  }
 
-			SignalEdgeGroup group = new SignalEdgeGroup(id);
-			signalEdgeGroups.put(id, group);
-			if (i < colors.size())
-				group.color = colors.get(i);
-		}
-	}
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.SYNC_EDGE_GROUP;
-	}
+  @Override
+  public Type<SignalEdgeGroupPacket> type() {
+    return TYPE;
+  }
 }

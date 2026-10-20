@@ -1,0 +1,9 @@
+{
+  "values": [
+    "create:oriented_contraption",
+    "create:controlled_contraption",
+    "create:linear_contraption",
+    "create:gantry_contraption",
+    "create:carriage_contraption"
+  ]
+}

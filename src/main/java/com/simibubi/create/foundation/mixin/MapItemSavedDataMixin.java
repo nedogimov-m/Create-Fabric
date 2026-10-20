@@ -1,194 +1,66 @@
 package com.simibubi.create.foundation.mixin;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-
-import org.spongepowered.asm.mixin.Final;
-import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.asm.mixin.Unique;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-
-import com.google.common.collect.Maps;
-import com.simibubi.create.content.trains.station.StationBlockEntity;
-import com.simibubi.create.content.trains.station.StationMapData;
-import com.simibubi.create.content.trains.station.StationMarker;
-
+import com.mojang.datafixers.util.Pair;
+import com.mojang.serialization.Codec;
+import com.simibubi.create.content.trains.station.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.saveddata.maps.MapDecoration;
 import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
+import org.spongepowered.asm.mixin.*;
+import org.spongepowered.asm.mixin.injection.*;
+import org.spongepowered.asm.mixin.injection.callback.*;
 
+/** Real MapItemSavedData owns persistence, tracked count, native packet dirtiness and source updates. */
 @Mixin(MapItemSavedData.class)
-public class MapItemSavedDataMixin implements StationMapData {
-	@Unique
-	private static final String STATION_MARKERS_KEY = "create:stations";
-
-	@Shadow
-	@Final
-	public int centerX;
-
-	@Shadow
-	@Final
-	public int centerZ;
-
-	@Shadow
-	@Final
-	public byte scale;
-
-	@Shadow
-	@Final
-	Map<String, MapDecoration> decorations;
-
-	@Shadow
-	private int trackedDecorationCount;
-
-	@Unique
-	private final Map<String, StationMarker> create$stationMarkers = Maps.newHashMap();
-
-	@Inject(
-			method = "load",
-			at = @At("RETURN")
-	)
-	private static void create$onLoad(CompoundTag tag, HolderLookup.Provider levelRegistry, CallbackInfoReturnable<MapItemSavedData> cir) {
-		MapItemSavedData mapData = cir.getReturnValue();
-		StationMapData stationMapData = (StationMapData) mapData;
-
-		ListTag listTag = tag.getList(STATION_MARKERS_KEY, Tag.TAG_COMPOUND);
-		for (int i = 0; i < listTag.size(); ++i) {
-			StationMarker stationMarker = StationMarker.load(listTag.getCompound(i), levelRegistry);
-			stationMapData.addStationMarker(stationMarker);
-		}
-	}
-
-	@Inject(
-			method = "save",
-			at = @At("RETURN")
-	)
-	private void create$onSave(CompoundTag tag, HolderLookup.Provider registries, CallbackInfoReturnable<CompoundTag> cir) {
-		ListTag listTag = new ListTag();
-		for (StationMarker stationMarker : create$stationMarkers.values()) {
-			listTag.add(stationMarker.save(registries));
-		}
-		tag.put(STATION_MARKERS_KEY, listTag);
-	}
-
-	@Override
-	public void addStationMarker(StationMarker marker) {
-		create$stationMarkers.put(marker.getId(), marker);
-
-		int scaleMultiplier = 1 << scale;
-		float localX = (marker.getTarget().getX() - centerX) / (float) scaleMultiplier;
-		float localZ = (marker.getTarget().getZ() - centerZ) / (float) scaleMultiplier;
-
-		if (localX < -63.0F || localX > 63.0F || localZ < -63.0F || localZ > 63.0F) {
-			removeDecoration(marker.getId());
-			return;
-		}
-
-		byte localXByte = (byte) (int) (localX * 2.0F + 0.5F);
-		byte localZByte = (byte) (int) (localZ * 2.0F + 0.5F);
-
-		MapDecoration decoration = StationMarker.createStationDecoration(localXByte, localZByte, Optional.of(marker.getName()));
-		MapDecoration oldDecoration = decorations.put(marker.getId(), decoration);
-		if (!decoration.equals(oldDecoration)) {
-			if (oldDecoration != null && oldDecoration.type().value().trackCount()) {
-				--trackedDecorationCount;
-			}
-
-			if (decoration.type().value().trackCount()) {
-				++trackedDecorationCount;
-			}
-
-			setDecorationsDirty();
-		}
-	}
-
-	@Shadow
-	public void removeDecoration(String identifier) {
-		throw new AssertionError();
-	}
-
-	@Shadow
-	private void setDecorationsDirty() {
-		throw new AssertionError();
-	}
-
-	@Shadow
-	public boolean isTrackedCountOverLimit(int trackedCount) {
-		throw new AssertionError();
-	}
-
-	@Override
-	public boolean toggleStation(LevelAccessor level, BlockPos pos, StationBlockEntity stationBlockEntity) {
-		double xCenter = pos.getX() + 0.5D;
-		double zCenter = pos.getZ() + 0.5D;
-		int scaleMultiplier = 1 << scale;
-
-		double localX = (xCenter - (double) centerX) / (double) scaleMultiplier;
-		double localZ = (zCenter - (double) centerZ) / (double) scaleMultiplier;
-
-		if (localX < -63.0D || localX > 63.0D || localZ < -63.0D || localZ > 63.0D)
-			return false;
-
-		StationMarker marker = StationMarker.fromWorld(level, pos);
-		if (marker == null)
-			return false;
-
-		if (create$stationMarkers.remove(marker.getId(), marker)) {
-			removeDecoration(marker.getId());
-			return true;
-		}
-
-		if (!isTrackedCountOverLimit(256)) {
-			addStationMarker(marker);
-			return true;
-		}
-
-		return false;
-	}
-
-	@Inject(
-			method = "checkBanners(Lnet/minecraft/world/level/BlockGetter;II)V",
-			at = @At("RETURN")
-	)
-	public void create$onCheckBanners(BlockGetter blockGetter, int x, int z, CallbackInfo ci) {
-		create$checkStations(blockGetter, x, z);
-	}
-
-	@Unique
-	private void create$checkStations(BlockGetter blockGetter, int x, int z) {
-		Iterator<StationMarker> iterator = create$stationMarkers.values().iterator();
-		List<StationMarker> newMarkers = new ArrayList<>();
-
-		while (iterator.hasNext()) {
-			StationMarker marker = iterator.next();
-			if (marker.getTarget().getX() == x && marker.getTarget().getZ() == z) {
-				StationMarker other = StationMarker.fromWorld(blockGetter, marker.getSource());
-				if (!marker.equals(other)) {
-					iterator.remove();
-					removeDecoration(marker.getId());
-
-					if (other != null && marker.getTarget().equals(other.getTarget())) {
-						newMarkers.add(other);
-					}
-				}
-			}
-		}
-
-		for (StationMarker marker : newMarkers) {
-			addStationMarker(marker);
-		}
-	}
+public abstract class MapItemSavedDataMixin implements StationMapData {
+    @Unique private static final String CREATE_STATIONS="create:stations";
+    @Shadow @Final @Mutable public static Codec<MapItemSavedData> CODEC;
+    @Shadow @Final public int centerX,centerZ;
+    @Shadow @Final public byte scale;
+    @Shadow @Final private Map<String,MapDecoration> decorations;
+    @Shadow private int trackedDecorationCount;
+    @Shadow private void removeDecoration(String id){throw new AssertionError();}
+    @Shadow private void setDecorationsDirty(){throw new AssertionError();}
+    @Shadow public abstract boolean isTrackedCountOverLimit(int count);
+    @Unique private final Map<String,StationMarker> create$stations=new LinkedHashMap<>();
+    @Inject(method="<clinit>",at=@At("RETURN"))
+    private static void create$nativeCodec(CallbackInfo ci){
+        var nativeCodec=CODEC;
+        CODEC=Codec.pair(nativeCodec,StationMarker.CODEC.listOf().optionalFieldOf(CREATE_STATIONS,List.of()).codec()).xmap(pair->{var owner=(StationMapData)pair.getFirst();for(var marker:pair.getSecond())owner.addStationMarker(marker);return pair.getFirst();},owner->Pair.of(owner,((StationMapData)owner).create$stationMarkers()));
+    }
+    @Override public List<StationMarker> create$stationMarkers(){return List.copyOf(create$stations.values());}
+    @Override public void addStationMarker(StationMarker marker){
+        create$stations.put(marker.getId(),marker);((MapItemSavedData)(Object)this).setDirty();
+        int multiplier=1<<scale;float localX=(marker.getTarget().getX()-centerX)/(float)multiplier,localZ=(marker.getTarget().getZ()-centerZ)/(float)multiplier;
+        if(localX < -63||localX>63||localZ < -63||localZ>63){removeDecoration(marker.getId());return;}
+        var next=StationMarker.createStationDecoration((byte)(int)(localX*2+.5f),(byte)(int)(localZ*2+.5f),Optional.of(marker.getName()));
+        var previous=decorations.put(marker.getId(),next);
+        if(!next.equals(previous)){if(previous!=null&&previous.type().value().trackCount())trackedDecorationCount--;if(next.type().value().trackCount())trackedDecorationCount++;setDecorationsDirty();}
+    }
+    @Override public boolean toggleStation(LevelAccessor level,BlockPos pos,StationBlockEntity station){
+        double multiplier=1<<scale,x=(pos.getX()+.5-centerX)/multiplier,z=(pos.getZ()+.5-centerZ)/multiplier;
+        if(x < -63||x>63||z < -63||z>63)return false;var marker=StationMarker.fromWorld(level,pos);if(marker==null)return false;
+        if(create$stations.remove(marker.getId(),marker)){removeDecoration(marker.getId());((MapItemSavedData)(Object)this).setDirty();return true;}
+        // Source1.21.1 rejects at >=256; native26.3's same-named method now tests strict >.
+        if(trackedDecorationCount>=256)return false;addStationMarker(marker);return true;
+    }
+    @Inject(method="locked",at=@At("RETURN"))
+    private void create$copyLockedMarkers(CallbackInfoReturnable<MapItemSavedData> ci){for(var marker:create$stations.values())((StationMapData)ci.getReturnValue()).addStationMarker(marker);}
+    @Inject(method="checkBanners",at=@At("RETURN"))
+    private void create$checkStations(BlockGetter level,int x,int z,CallbackInfo ci){
+        if(!(level instanceof Level actualLevel))return;
+        var refreshed=new ArrayList<StationMarker>();var iterator=create$stations.values().iterator();
+        while(iterator.hasNext()){
+            var marker=iterator.next();if(marker.getTarget().getX()!=x||marker.getTarget().getZ()!=z||!LoadedLevelAccess.isLoaded(actualLevel,marker.getSource()))continue;
+            var actual=StationMarker.fromWorld(level,marker.getSource());if(marker.equals(actual))continue;
+            iterator.remove();removeDecoration(marker.getId());((MapItemSavedData)(Object)this).setDirty();
+            if(actual!=null&&marker.getTarget().equals(actual.getTarget()))refreshed.add(actual);
+        }
+        refreshed.forEach(this::addStationMarker);
+    }
 }

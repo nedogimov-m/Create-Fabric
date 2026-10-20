@@ -1,0 +1,26 @@
+{
+  "type": "create:mixing",
+  "ingredients": [
+    "#c:dusts/redstone",
+    "ae2:charged_certus_quartz_crystal",
+    "#c:gems/quartz",
+    {
+      "fluid": "minecraft:water",
+      "amount": 20250
+    }
+  ],
+  "results": [
+    {
+      "count": 2,
+      "id": "ae2:fluix_crystal"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "ae2"
+      ]
+    }
+  ]
+}

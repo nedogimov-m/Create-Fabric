@@ -5,19 +5,12 @@ import java.util.List;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.simibubi.create.AllPartialModels;
-import com.simibubi.create.foundation.utility.CreateLang;
 
-import dev.engine_room.flywheel.lib.model.baked.PartialModel;
-import dev.engine_room.flywheel.lib.transform.TransformStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.StringRepresentable;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 public class PlaneMirror extends SymmetryMirror {
 
@@ -85,23 +78,18 @@ public class PlaneMirror extends SymmetryMirror {
 	}
 
 	@Override
-	@OnlyIn(Dist.CLIENT)
-	public PartialModel getModel() {
-		return AllPartialModels.SYMMETRY_PLANE;
+
+	public net.minecraft.resources.Identifier getModel() {
+		return com.simibubi.create.Create.asResource("block/symmetry_effect/plane");
 	}
 
-	@Override
-	public void applyModelTransform(PoseStack ms) {
-		super.applyModelTransform(ms);
-		TransformStack.of(ms)
-			.center()
-			.rotateYDegrees(((Align) orientation) == Align.XY ? 0 : 90)
-			.uncenter();
-	}
+
+
+    @Override public float modelRotation() { return orientation == Align.XY ? 0 : 90; }
 
 	@Override
 	public List<Component> getAlignToolTips() {
-		return ImmutableList.of(CreateLang.translateDirect("orientation.alongZ"), CreateLang.translateDirect("orientation.alongX"));
+		return ImmutableList.of(Component.translatable("create." + "orientation.alongZ"), Component.translatable("create." + "orientation.alongX"));
 	}
 
 }

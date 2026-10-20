@@ -7,8 +7,7 @@ import com.simibubi.create.AllBlocks;
 import com.simibubi.create.Create;
 import com.simibubi.create.content.redstone.link.RedstoneLinkNetworkHandler.Frequency;
 import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.foundation.gui.ModularGuiLineBuilder;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.trains.schedule.ScheduleText;
 
 import net.createmod.catnip.data.Couple;
 import net.createmod.catnip.data.Pair;
@@ -16,13 +15,13 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.nbt.ListTag;
+import com.simibubi.create.content.trains.schedule.ScheduleSerialization;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 public class RedstoneLinkCondition extends ScheduleWaitCondition {
 
@@ -39,21 +38,21 @@ public class RedstoneLinkCondition extends ScheduleWaitCondition {
 
 	@Override
 	public Pair<ItemStack, Component> getSummary() {
-		return Pair.of(AllBlocks.REDSTONE_LINK.asStack(),
-			lowActivation() ? CreateLang.translateDirect("schedule.condition.redstone_link_off")
-				: CreateLang.translateDirect("schedule.condition.redstone_link_on"));
+		return Pair.of(new ItemStack(AllBlocks.REDSTONE_LINK),
+			lowActivation() ? ScheduleText.translate("schedule.condition.redstone_link_off")
+				: ScheduleText.translate("schedule.condition.redstone_link_on"));
 	}
 
 	@Override
 	public List<Component> getSecondLineTooltip(int slot) {
-		return ImmutableList.of(CreateLang.translateDirect(slot == 0 ? "logistics.firstFrequency" : "logistics.secondFrequency")
+		return ImmutableList.of(ScheduleText.translate(slot == 0 ? "logistics.firstFrequency" : "logistics.secondFrequency")
 			.withStyle(ChatFormatting.RED));
 	}
 
 	@Override
 	public List<Component> getTitleAs(String type) {
 		return ImmutableList.of(
-			CreateLang.translateDirect("schedule.condition.redstone_link.frequency_" + (lowActivation() ? "unpowered" : "powered")),
+			ScheduleText.translate("schedule.condition.redstone_link.frequency_" + (lowActivation() ? "unpowered" : "powered")),
 			Component.literal(" #1 ").withStyle(ChatFormatting.GRAY)
 				.append(freq.getFirst()
 					.getStack()
@@ -70,12 +69,12 @@ public class RedstoneLinkCondition extends ScheduleWaitCondition {
 
 	@Override
 	public boolean tickCompletion(Level level, Train train, CompoundTag context) {
-		int lastChecked = context.contains("LastChecked") ? context.getInt("LastChecked") : -1;
+		int lastChecked = context.contains("LastChecked") ? context.getIntOr("LastChecked", 0) : -1;
 		int status = Create.REDSTONE_LINK_NETWORK_HANDLER.globalPowerVersion.get();
 		if (status == lastChecked)
 			return false;
 		context.putInt("LastChecked", status);
-		return Create.REDSTONE_LINK_NETWORK_HANDLER.hasAnyLoadedPower(freq) != lowActivation();
+		return Create.REDSTONE_LINK_NETWORK_HANDLER.hasAnyLoadedPower(level.getServer(), freq) != lowActivation();
 	}
 
 	@Override
@@ -91,13 +90,15 @@ public class RedstoneLinkCondition extends ScheduleWaitCondition {
 	}
 
 	@Override
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return Create.asResource("redstone_link");
 	}
 
 	@Override
 	protected void writeAdditional(HolderLookup.Provider registries, CompoundTag tag) {
-		tag.put("Frequency", freq.serializeEach(f -> (CompoundTag) f.getStack().saveOptional(registries)));
+		var list = new ListTag();
+        for (Frequency frequency : freq) list.add(ScheduleSerialization.writeItem(registries, frequency.getStack()));
+        tag.put("Frequency", list);
 	}
 
 	public boolean lowActivation() {
@@ -107,21 +108,19 @@ public class RedstoneLinkCondition extends ScheduleWaitCondition {
 	@Override
 	protected void readAdditional(HolderLookup.Provider registries, CompoundTag tag) {
 		if (tag.contains("Frequency"))
-			freq = Couple.deserializeEach(tag.getList("Frequency", Tag.TAG_COMPOUND), c -> Frequency.of(ItemStack.parseOptional(registries, c)));
+			{
+            ListTag list = tag.getListOrEmpty("Frequency");
+            if (list.size() != 2) throw new IllegalArgumentException("Schedule link requires two real frequencies");
+            freq = Couple.create(Frequency.of(ScheduleSerialization.readItem(registries, list.getCompoundOrEmpty(0))),
+                    Frequency.of(ScheduleSerialization.readItem(registries, list.getCompoundOrEmpty(1))));
+        }
 	}
 
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void initConfigurationWidgets(ModularGuiLineBuilder builder) {
-		builder.addSelectionScrollInput(20, 101,
-			(i, l) -> i.forOptions(CreateLang.translatedOptions("schedule.condition.redstone_link", "powered", "unpowered"))
-				.titled(CreateLang.translateDirect("schedule.condition.redstone_link.frequency_state")),
-			"Inverted");
-	}
+	
 
 	@Override
 	public MutableComponent getWaitingStatus(Level level, Train train, CompoundTag tag) {
-		return CreateLang.translateDirect("schedule.condition.redstone_link.status");
+		return ScheduleText.translate("schedule.condition.redstone_link.status");
 	}
 
 }

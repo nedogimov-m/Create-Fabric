@@ -1,0 +1,37 @@
+{
+  "createCommit": "ac0c444d9828da3453ae8cc65338e8de063286fb",
+  "compile": "UNCOMPILED",
+  "runtime": "UNRUN",
+  "previousInstalledSceneFamilies": 8,
+  "newCompleteFamilies": [
+    "FluidTankScenes",
+    "PipeScenes",
+    "PumpScenes",
+    "HosePulleyScenes",
+    "DrainScenes",
+    "SpoutScenes",
+    "FluidMovementActorScenes",
+    "FanScenes",
+    "BeltScenes",
+    "ProcessingScenes"
+  ],
+  "newExactBindings": 36,
+  "newDistinctPrograms": 31,
+  "cumulativeFamilies": 18,
+  "cumulativeExactBindings": 79,
+  "cumulativeDistinctPrograms": 70,
+  "remainingRegistrationRecords": 100,
+  "sourceEvidence": "full-family-fidelity.json in handoff review preserves every original method, builder-call sequence, timing, narrative text and camera calls after documented native owner mapping",
+  "fluidUnits": "Every original scene millibucket literal becomes actual Fabric units once, at FluidSceneTransactions boundary; native variants preserve components",
+  "particlePath": "Exact original fluid/basin particle motion, UVs, tint, light, potion evaporation and basin trajectory; native SingleQuadParticle/QuadParticleRenderState extraction, Fabric type/provider and native material sprites",
+  "owners": "Actual native Pump callback/virtual distribution, FluidTransport virtual execution, ItemDrain virtual item completion/export, Hose scene clock, Basin output snapshots and native extraction, canonical Mixer virtual null-recipe animation and actual item/fluid particles, Millstone real-input no-recipe local display/particles",
+  "paidRecipes": "Native server transactions are retained; no host recipe manager or fabricated virtual paid result exists. Original explicit source output callbacks remain in programs",
+  "dependencies": "Installed main Create/engine/first8families, real motor+icons source, genuine native PressingBehaviour source seal (external); frontend owned separately",
+  "frontend": "No frontend/button/render-pass enabling in this packet; source entrypoints are already active in installed first-scenes report",
+  "limitations": [
+    "Java type/overload/linkage validation requires root compilation",
+    "Runtime scene restoration, nonzero anchors and native owner execution are unrun",
+    "Native viewport/fluid/crack/selection/outline/particle composition and actual Vulkan pixel/shader parity remain unverified",
+    "Remaining100registration records are explicitly omitted, not invented callbacks"
+  ]
+}

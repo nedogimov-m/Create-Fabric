@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "net.createmod.ponder.mixin.client",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "PonderGuiTargetMixin",
+    "PonderNativePipTargetAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

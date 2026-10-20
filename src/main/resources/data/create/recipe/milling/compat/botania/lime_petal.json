@@ -1,0 +1,20 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "#botania:petals/lime"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "id": "minecraft:lime_dye"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "botania"
+      ]
+    }
+  ]
+}

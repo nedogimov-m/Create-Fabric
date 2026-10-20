@@ -1,0 +1,11 @@
+{
+  "type": "create:haunting",
+  "ingredients": [
+    "minecraft:stone"
+  ],
+  "results": [
+    {
+      "id": "minecraft:infested_stone"
+    }
+  ]
+}

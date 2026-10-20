@@ -1,0 +1,7 @@
+{
+  "parent": "create:item/package/custom_12x10",
+  "textures": {
+    "2": "create:block/package/rare_darcy",
+    "particle": "create:block/package/rare_darcy"
+  }
+}

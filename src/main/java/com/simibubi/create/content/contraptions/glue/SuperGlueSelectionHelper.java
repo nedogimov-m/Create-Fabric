@@ -1,93 +1,46 @@
 package com.simibubi.create.content.contraptions.glue;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
 import com.simibubi.create.api.contraption.BlockMovementChecks;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.NonNullList;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.minecraft.core.*;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
-public class SuperGlueSelectionHelper {
-
-	public static Set<BlockPos> searchGlueGroup(Level level, BlockPos startPos, BlockPos endPos, boolean includeOther) {
-		if (endPos == null || startPos == null)
-			return null;
-
-		AABB bb = SuperGlueEntity.span(startPos, endPos);
-
-		List<BlockPos> frontier = new ArrayList<>();
-		Set<BlockPos> visited = new HashSet<>();
-		Set<BlockPos> attached = new HashSet<>();
-		Set<SuperGlueEntity> cachedOther = new HashSet<>();
-
-		visited.add(startPos);
-		frontier.add(startPos);
-
-		while (!frontier.isEmpty()) {
-			BlockPos currentPos = frontier.remove(0);
-			attached.add(currentPos);
-
-			for (Direction d : Iterate.directions) {
-				BlockPos offset = currentPos.relative(d);
-				boolean gluePresent = includeOther && SuperGlueEntity.isGlued(level, currentPos, d, cachedOther);
-				boolean alreadySticky = includeOther && SuperGlueEntity.isSideSticky(level, currentPos, d)
-					|| SuperGlueEntity.isSideSticky(level, offset, d.getOpposite());
-
-				if (!alreadySticky && !gluePresent && !bb.contains(Vec3.atCenterOf(offset)))
-					continue;
-				if (!BlockMovementChecks.isMovementNecessary(level.getBlockState(offset), level, offset))
-					continue;
-				if (!SuperGlueEntity.isValidFace(level, currentPos, d)
-					|| !SuperGlueEntity.isValidFace(level, offset, d.getOpposite()))
-					continue;
-
-				if (visited.add(offset))
-					frontier.add(offset);
-			}
-		}
-
-		if (attached.size() < 2 && attached.contains(endPos))
-			return null;
-
-		return attached;
-	}
-
-	public static boolean collectGlueFromInventory(Player player, int requiredAmount, boolean simulate) {
-		if (player.getAbilities().instabuild)
-			return true;
-		if (requiredAmount == 0)
-			return true;
-
-		NonNullList<ItemStack> items = player.getInventory().items;
-		for (int i = -1; i < items.size(); i++) {
-			int slot = i == -1 ? player.getInventory().selected : i;
-			ItemStack stack = items.get(slot);
-			if (stack.isEmpty())
-				continue;
-			if (!(stack.getItem() instanceof SuperGlueItem))
-				continue;
-
-			int charges = Math.min(requiredAmount, stack.getMaxDamage() - stack.getDamageValue());
-
-			stack.hurtAndBreak(charges, player, EquipmentSlot.MAINHAND);
-
-			requiredAmount -= charges;
-			if (requiredAmount <= 0)
-				return true;
-		}
-
-		return false;
-	}
-
+public final class SuperGlueSelectionHelper {
+    public static Set<BlockPos> searchGlueGroup(Level level,BlockPos from,BlockPos to,boolean includeOther){
+        if(from==null||to==null)return null;
+        var bounds=SuperGlueEntity.span(from,to);var frontier=new ArrayDeque<BlockPos>();var visited=new HashSet<BlockPos>();var attached=new HashSet<BlockPos>();var cache=new HashSet<SuperGlueEntity>();
+        if(level.getChunkSource().getChunkNow(from.getX()>>4,from.getZ()>>4)==null)return null;
+        frontier.add(from);visited.add(from);
+        while(!frontier.isEmpty()){
+            var current=frontier.removeFirst();attached.add(current);
+            for(var direction:Direction.values()){
+                var next=current.relative(direction);
+                if(visited.contains(next))continue;
+                if(level.getChunkSource().getChunkNow(next.getX()>>4,next.getZ()>>4)==null)continue;
+                boolean glued=includeOther&&SuperGlueEntity.isGlued(level,current,direction,cache);
+                boolean sticky=includeOther&&SuperGlueEntity.isSideSticky(level,current,direction)||SuperGlueEntity.isSideSticky(level,next,direction.getOpposite());
+                if(!sticky&&!glued&&!bounds.contains(Vec3.atCenterOf(next)))continue;
+                if(!BlockMovementChecks.isMovementNecessary(LoadedLevelAccess.blockState(level,next),level,next))continue;
+                if(!SuperGlueEntity.isValidFace(level,current,direction)||!SuperGlueEntity.isValidFace(level,next,direction.getOpposite()))continue;
+                visited.add(next);frontier.addLast(next);
+            }
+        }
+        return attached.size()<2&&attached.contains(to)?null:attached;
+    }
+    public static boolean collectGlueFromInventory(Player player,int required,boolean simulate){
+        if(required<0)return false;if(player.getAbilities().instabuild||required==0)return true;
+        // Preview must not damage items; first prove the entire charge budget can be paid.
+        int capacity=0,slots=player.getInventory().getNonEquipmentItems().size(),selected=player.getInventory().getSelectedSlot();
+        var order=new ArrayList<Integer>();order.add(selected);for(int i=0;i<slots;i++)if(i!=selected)order.add(i);
+        for(int slot:order){var stack=player.getInventory().getItem(slot);if(stack.getItem() instanceof SuperGlueItem)capacity+=Math.max(0,stack.getMaxDamage()-stack.getDamageValue());if(capacity>=required)break;}
+        if(capacity<required)return false;if(simulate)return true;
+        for(int slot:order){var stack=player.getInventory().getItem(slot);if(!(stack.getItem() instanceof SuperGlueItem))continue;int charge=Math.min(required,stack.getMaxDamage()-stack.getDamageValue());stack.hurtAndBreak(charge,player,EquipmentSlot.MAINHAND);required-=charge;if(required==0)return true;}
+        return false;
+    }
+    private SuperGlueSelectionHelper(){}
 }

@@ -1,0 +1,27 @@
+{
+  "sources": [
+    {
+      "type": "minecraft:paletted_permutations",
+      "textures": [
+        "create:trims/items/card_helmet_trim",
+        "create:trims/items/card_chestplate_trim",
+        "create:trims/items/card_leggings_trim",
+        "create:trims/items/card_boots_trim"
+      ],
+      "palette_key": "minecraft:trim_base",
+      "permutations": {
+        "quartz": "minecraft:trim/quartz",
+        "iron": "minecraft:trim/iron",
+        "netherite": "minecraft:trim/netherite",
+        "redstone": "minecraft:trim/redstone",
+        "copper": "minecraft:trim/copper",
+        "gold": "minecraft:trim/gold",
+        "emerald": "minecraft:trim/emerald",
+        "diamond": "minecraft:trim/diamond",
+        "lapis": "minecraft:trim/lapis",
+        "amethyst": "minecraft:trim/amethyst",
+        "resin": "minecraft:trim/resin"
+      }
+    }
+  ]
+}

@@ -1,35 +1,23 @@
 package com.simibubi.create.content.trains.entity;
 
-import com.simibubi.create.AllPackets;
-import com.simibubi.create.content.trains.TrainHUD;
-import net.createmod.catnip.net.base.ClientboundPacketPayload;
-
-import net.minecraft.client.player.LocalPlayer;
+import com.simibubi.create.Create;
 import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.ComponentSerialization;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.network.codec.StreamCodec;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+import net.minecraft.network.chat.*;
+import net.minecraft.network.codec.*;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
-public record TrainPromptPacket(Component text, boolean shadow) implements ClientboundPacketPayload {
-	public static final StreamCodec<RegistryFriendlyByteBuf, TrainPromptPacket> STREAM_CODEC = StreamCodec.composite(
-			ComponentSerialization.STREAM_CODEC, TrainPromptPacket::text,
-			ByteBufCodecs.BOOL, TrainPromptPacket::shadow,
-	        TrainPromptPacket::new
-	);
+public record TrainPromptPacket(Component text, boolean shadow) implements CustomPacketPayload {
+  public static final Type<TrainPromptPacket> TYPE = new Type<>(Create.asResource("train_prompt"));
+  public static final StreamCodec<RegistryFriendlyByteBuf, TrainPromptPacket> CODEC =
+      StreamCodec.composite(
+          ComponentSerialization.STREAM_CODEC,
+          TrainPromptPacket::text,
+          ByteBufCodecs.BOOL,
+          TrainPromptPacket::shadow,
+          TrainPromptPacket::new);
 
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void handle(LocalPlayer player) {
-		TrainHUD.currentPrompt = text;
-		TrainHUD.currentPromptShadow = shadow;
-		TrainHUD.promptKeepAlive = 30;
-	}
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.S_TRAIN_PROMPT;
-	}
+  @Override
+  public Type<TrainPromptPacket> type() {
+    return TYPE;
+  }
 }

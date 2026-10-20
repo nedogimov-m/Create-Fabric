@@ -1,0 +1,1209 @@
+{
+  "kind": "Pinned source title expectations only. Never creates callbacks, scenes, compilers or execution receipts.",
+  "createCommit": "ac0c444d9828da3453ae8cc65338e8de063286fb",
+  "sourceRegistrationRecords": 179,
+  "distinctSourcePrograms": 167,
+  "runtimeExpandedBindings": "UNMEASURED; test enumerates actual registry; never asserts179 native bindings",
+  "definition": "167 distinct pinned source methods have167 unique title identifiers, including six explicitly evidenced boolean delegates. Actual compiled scene.getId is checked against these source expectations.",
+  "programs": [
+    {
+      "sourceProgram": "ArmScenes::filtering",
+      "titleId": "create:mechanical_arm_filtering",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ArmScenes.java",
+      "sourceSHA256": "c379de5a6c7c3e5f1558481999ce0f10f3d1409d3719a308ff740dd62cdb51fe",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ArmScenes::modes",
+      "titleId": "create:mechanical_arm_modes",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ArmScenes.java",
+      "sourceSHA256": "c379de5a6c7c3e5f1558481999ce0f10f3d1409d3719a308ff740dd62cdb51fe",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ArmScenes::redstone",
+      "titleId": "create:mechanical_arm_redstone",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ArmScenes.java",
+      "sourceSHA256": "c379de5a6c7c3e5f1558481999ce0f10f3d1409d3719a308ff740dd62cdb51fe",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ArmScenes::setup",
+      "titleId": "create:mechanical_arm",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ArmScenes.java",
+      "sourceSHA256": "c379de5a6c7c3e5f1558481999ce0f10f3d1409d3719a308ff740dd62cdb51fe",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BearingScenes::bearingModes",
+      "titleId": "create:bearing_modes",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BearingScenes.java",
+      "sourceSHA256": "6265f294aa595b11fb1cd5524db653cc802f89b85a5daa4409eef99dff84a578",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BearingScenes::clockwork",
+      "titleId": "create:clockwork_bearing",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BearingScenes.java",
+      "sourceSHA256": "6265f294aa595b11fb1cd5524db653cc802f89b85a5daa4409eef99dff84a578",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BearingScenes::mechanicalBearing",
+      "titleId": "create:mechanical_bearing",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BearingScenes.java",
+      "sourceSHA256": "6265f294aa595b11fb1cd5524db653cc802f89b85a5daa4409eef99dff84a578",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BearingScenes::sail",
+      "titleId": "create:sail",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BearingScenes.java",
+      "sourceSHA256": "6265f294aa595b11fb1cd5524db653cc802f89b85a5daa4409eef99dff84a578",
+      "sourceTitleBranchEvidence": {
+        "delegate": "public static void sail(SceneBuilder scene, SceneBuildingUtil util) {\n\t\tsails(scene, util, false);\n\t}",
+        "helperMethod": "sails",
+        "helperBody": "private static void sails(SceneBuilder builder, SceneBuildingUtil util, boolean frame) {\n\t\tCreateSceneBuilder scene = new CreateSceneBuilder(builder);\n\t\tString plural = frame ? \"Sail Frames\" : \"Sails\";\n\t\tscene.title(frame ? \"sail_frame\" : \"sail\", \"Assembling Windmills using \" + plural);\n\t\tscene.configureBasePlate(0, 0, 5);\n\t\tscene.scaleSceneView(0.9f);\n\t\tscene.world().showSection(util.select().layer(0), Direction.UP);\n\t\tscene.idle(5);\n\n\t\tBlockPos bearingPos = util.grid().at(2, 1, 2);\n\t\tscene.world().showSection(util.select().position(bearingPos), Direction.DOWN);\n\t\tscene.idle(5);\n\t\tElementLink<WorldSectionElement> plank =\n\t\t\tscene.world().showIndependentSection(util.select().position(bearingPos.above()), Direction.DOWN);\n\t\tscene.idle(10);\n\n\t\tfor (int i = 0; i < 3; i++) {\n\t\t\tfor (Direction d : Iterate.horizontalDirections) {\n\t\t\t\tBlockPos location = bearingPos.above(i + 1)\n\t\t\t\t\t.relative(d);\n\t\t\t\tif (frame)\n\t\t\t\t\tscene.world().modifyBlock(location, s -> AllBlocks.SAIL_FRAME.getDefaultState()\n\t\t\t\t\t\t.setValue(SailBlock.FACING, s.getValue(SailBlock.FACING)), false);\n\t\t\t\tscene.world().showSectionAndMerge(util.select().position(location), d.getOpposite(), plank);\n\t\t\t\tscene.idle(2);\n\t\t\t}\n\t\t}\n\n\t\tscene.overlay().showText(70)\n\t\t\t.text(plural + \" are handy blocks to create Windmills with\")\n\t\t\t.pointAt(util.vector().blockSurface(util.grid().at(1, 3, 2), Direction.WEST))\n\t\t\t.placeNearTarget()\n\t\t\t.attachKeyFrame();\n\t\tscene.idle(80);\n\n\t\tscene.overlay().showOutlineWithText(util.select().position(bearingPos.above()), 80)\n\t\t\t.colored(PonderPalette.GREEN)\n\t\t\t.text(\"They will attach to blocks and each other without the need of Super Glue or Chassis Blocks\")\n\t\t\t.attachKeyFrame()\n\t\t\t.placeNearTarget();\n\t\tscene.idle(40);\n\t\tscene.world().configureCenterOfRotation(plank, util.vector().centerOf(bearingPos));\n\n\t\tif (!frame) {\n\t\t\tscene.world().rotateBearing(bearingPos, 180, 75);\n\t\t\tscene.world().rotateSection(plank, 0, 180, 0, 75);\n\t\t\tscene.idle(76);\n\t\t\tscene.world().rotateBearing(bearingPos, 180, 0);\n\t\t\tscene.world().rotateSection(plank, 0, 180, 0, 0);\n\t\t\tscene.rotateCameraY(-30);\n\t\t\tscene.idle(10);\n\t\t\tscene.overlay().showControls(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.NORTH), Pointing.RIGHT, 30)\n\t\t\t\t.withItem(new ItemStack(Items.BLUE_DYE));\n\t\t\tscene.idle(7);\n\t\t\tscene.world().setBlock(util.grid().at(2, 3, 1), AllBlocks.DYED_SAILS.get(DyeColor.BLUE)\n\t\t\t\t.getDefaultState()\n\t\t\t\t.setValue(SailBlock.FACING, Direction.WEST), false);\n\t\t\tscene.idle(10);\n\t\t\tscene.overlay().showText(40)\n\t\t\t\t.colored(PonderPalette.BLUE)\n\t\t\t\t.text(\"Right-Click with Dye to paint them\")\n\t\t\t\t.attachKeyFrame()\n\t\t\t\t.pointAt(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.WEST))\n\t\t\t\t.placeNearTarget();\n\t\t\tscene.idle(20);\n\t\t\tscene.overlay().showControls(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.NORTH), Pointing.RIGHT, 30)\n\t\t\t\t.withItem(new ItemStack(Items.BLUE_DYE));\n\t\t\tscene.idle(7);\n\t\t\tscene.world().replaceBlocks(util.select().fromTo(2, 2, 1, 2, 4, 1), AllBlocks.DYED_SAILS.get(DyeColor.BLUE)\n\t\t\t\t.getDefaultState()\n\t\t\t\t.setValue(SailBlock.FACING, Direction.WEST), false);\n\n\t\t\tscene.idle(20);\n\t\t\tscene.world().rotateBearing(bearingPos, 90, 33);\n\t\t\tscene.world().rotateSection(plank, 0, 90, 0, 33);\n\t\t\tscene.idle(40);\n\n\t\t\tscene.overlay().showControls(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.NORTH), Pointing.RIGHT, 30)\n\t\t\t\t.withItem(new ItemStack(Items.SHEARS));\n\t\t\tscene.idle(7);\n\t\t\tscene.world().setBlock(util.grid().at(3, 3, 2), AllBlocks.SAIL_FRAME.getDefaultState()\n\t\t\t\t.setValue(SailBlock.FACING, Direction.NORTH), false);\n\t\t\tscene.idle(10);\n\t\t\tscene.overlay().showText(40)\n\t\t\t\t.text(\"Right-Click with Shears to turn them back into frames\")\n\t\t\t\t.attachKeyFrame()\n\t\t\t\t.pointAt(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.WEST))\n\t\t\t\t.placeNearTarget();\n\t\t\tscene.idle(20);\n\t\t\tscene.overlay().showControls(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.NORTH), Pointing.RIGHT, 30)\n\t\t\t\t.withItem(new ItemStack(Items.SHEARS));\n\t\t\tscene.idle(7);\n\t\t\tscene.world().replaceBlocks(util.select().fromTo(3, 2, 2, 3, 4, 2), AllBlocks.SAIL_FRAME.getDefaultState()\n\t\t\t\t.setValue(SailBlock.FACING, Direction.NORTH), false);\n\t\t\tscene.idle(20);\n\t\t}\n\n\t\tscene.world().rotateBearing(bearingPos, 720, 300);\n\t\tscene.world().rotateSection(plank, 0, 720, 0, 300);\n\n\t}",
+        "booleanArgument": "false"
+      }
+    },
+    {
+      "sourceProgram": "BearingScenes::sailFrame",
+      "titleId": "create:sail_frame",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BearingScenes.java",
+      "sourceSHA256": "6265f294aa595b11fb1cd5524db653cc802f89b85a5daa4409eef99dff84a578",
+      "sourceTitleBranchEvidence": {
+        "delegate": "public static void sailFrame(SceneBuilder scene, SceneBuildingUtil util) {\n\t\tsails(scene, util, true);\n\t}",
+        "helperMethod": "sails",
+        "helperBody": "private static void sails(SceneBuilder builder, SceneBuildingUtil util, boolean frame) {\n\t\tCreateSceneBuilder scene = new CreateSceneBuilder(builder);\n\t\tString plural = frame ? \"Sail Frames\" : \"Sails\";\n\t\tscene.title(frame ? \"sail_frame\" : \"sail\", \"Assembling Windmills using \" + plural);\n\t\tscene.configureBasePlate(0, 0, 5);\n\t\tscene.scaleSceneView(0.9f);\n\t\tscene.world().showSection(util.select().layer(0), Direction.UP);\n\t\tscene.idle(5);\n\n\t\tBlockPos bearingPos = util.grid().at(2, 1, 2);\n\t\tscene.world().showSection(util.select().position(bearingPos), Direction.DOWN);\n\t\tscene.idle(5);\n\t\tElementLink<WorldSectionElement> plank =\n\t\t\tscene.world().showIndependentSection(util.select().position(bearingPos.above()), Direction.DOWN);\n\t\tscene.idle(10);\n\n\t\tfor (int i = 0; i < 3; i++) {\n\t\t\tfor (Direction d : Iterate.horizontalDirections) {\n\t\t\t\tBlockPos location = bearingPos.above(i + 1)\n\t\t\t\t\t.relative(d);\n\t\t\t\tif (frame)\n\t\t\t\t\tscene.world().modifyBlock(location, s -> AllBlocks.SAIL_FRAME.getDefaultState()\n\t\t\t\t\t\t.setValue(SailBlock.FACING, s.getValue(SailBlock.FACING)), false);\n\t\t\t\tscene.world().showSectionAndMerge(util.select().position(location), d.getOpposite(), plank);\n\t\t\t\tscene.idle(2);\n\t\t\t}\n\t\t}\n\n\t\tscene.overlay().showText(70)\n\t\t\t.text(plural + \" are handy blocks to create Windmills with\")\n\t\t\t.pointAt(util.vector().blockSurface(util.grid().at(1, 3, 2), Direction.WEST))\n\t\t\t.placeNearTarget()\n\t\t\t.attachKeyFrame();\n\t\tscene.idle(80);\n\n\t\tscene.overlay().showOutlineWithText(util.select().position(bearingPos.above()), 80)\n\t\t\t.colored(PonderPalette.GREEN)\n\t\t\t.text(\"They will attach to blocks and each other without the need of Super Glue or Chassis Blocks\")\n\t\t\t.attachKeyFrame()\n\t\t\t.placeNearTarget();\n\t\tscene.idle(40);\n\t\tscene.world().configureCenterOfRotation(plank, util.vector().centerOf(bearingPos));\n\n\t\tif (!frame) {\n\t\t\tscene.world().rotateBearing(bearingPos, 180, 75);\n\t\t\tscene.world().rotateSection(plank, 0, 180, 0, 75);\n\t\t\tscene.idle(76);\n\t\t\tscene.world().rotateBearing(bearingPos, 180, 0);\n\t\t\tscene.world().rotateSection(plank, 0, 180, 0, 0);\n\t\t\tscene.rotateCameraY(-30);\n\t\t\tscene.idle(10);\n\t\t\tscene.overlay().showControls(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.NORTH), Pointing.RIGHT, 30)\n\t\t\t\t.withItem(new ItemStack(Items.BLUE_DYE));\n\t\t\tscene.idle(7);\n\t\t\tscene.world().setBlock(util.grid().at(2, 3, 1), AllBlocks.DYED_SAILS.get(DyeColor.BLUE)\n\t\t\t\t.getDefaultState()\n\t\t\t\t.setValue(SailBlock.FACING, Direction.WEST), false);\n\t\t\tscene.idle(10);\n\t\t\tscene.overlay().showText(40)\n\t\t\t\t.colored(PonderPalette.BLUE)\n\t\t\t\t.text(\"Right-Click with Dye to paint them\")\n\t\t\t\t.attachKeyFrame()\n\t\t\t\t.pointAt(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.WEST))\n\t\t\t\t.placeNearTarget();\n\t\t\tscene.idle(20);\n\t\t\tscene.overlay().showControls(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.NORTH), Pointing.RIGHT, 30)\n\t\t\t\t.withItem(new ItemStack(Items.BLUE_DYE));\n\t\t\tscene.idle(7);\n\t\t\tscene.world().replaceBlocks(util.select().fromTo(2, 2, 1, 2, 4, 1), AllBlocks.DYED_SAILS.get(DyeColor.BLUE)\n\t\t\t\t.getDefaultState()\n\t\t\t\t.setValue(SailBlock.FACING, Direction.WEST), false);\n\n\t\t\tscene.idle(20);\n\t\t\tscene.world().rotateBearing(bearingPos, 90, 33);\n\t\t\tscene.world().rotateSection(plank, 0, 90, 0, 33);\n\t\t\tscene.idle(40);\n\n\t\t\tscene.overlay().showControls(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.NORTH), Pointing.RIGHT, 30)\n\t\t\t\t.withItem(new ItemStack(Items.SHEARS));\n\t\t\tscene.idle(7);\n\t\t\tscene.world().setBlock(util.grid().at(3, 3, 2), AllBlocks.SAIL_FRAME.getDefaultState()\n\t\t\t\t.setValue(SailBlock.FACING, Direction.NORTH), false);\n\t\t\tscene.idle(10);\n\t\t\tscene.overlay().showText(40)\n\t\t\t\t.text(\"Right-Click with Shears to turn them back into frames\")\n\t\t\t\t.attachKeyFrame()\n\t\t\t\t.pointAt(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.WEST))\n\t\t\t\t.placeNearTarget();\n\t\t\tscene.idle(20);\n\t\t\tscene.overlay().showControls(util.vector().blockSurface(util.grid().at(2, 3, 1), Direction.NORTH), Pointing.RIGHT, 30)\n\t\t\t\t.withItem(new ItemStack(Items.SHEARS));\n\t\t\tscene.idle(7);\n\t\t\tscene.world().replaceBlocks(util.select().fromTo(3, 2, 2, 3, 4, 2), AllBlocks.SAIL_FRAME.getDefaultState()\n\t\t\t\t.setValue(SailBlock.FACING, Direction.NORTH), false);\n\t\t\tscene.idle(20);\n\t\t}\n\n\t\tscene.world().rotateBearing(bearingPos, 720, 300);\n\t\tscene.world().rotateSection(plank, 0, 720, 0, 300);\n\n\t}",
+        "booleanArgument": "true"
+      }
+    },
+    {
+      "sourceProgram": "BearingScenes::stabilizedBearings",
+      "titleId": "create:stabilized_bearings",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BearingScenes.java",
+      "sourceSHA256": "6265f294aa595b11fb1cd5524db653cc802f89b85a5daa4409eef99dff84a578",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BearingScenes::windmillsAnyStructure",
+      "titleId": "create:windmill_structure",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BearingScenes.java",
+      "sourceSHA256": "6265f294aa595b11fb1cd5524db653cc802f89b85a5daa4409eef99dff84a578",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BearingScenes::windmillsAsSource",
+      "titleId": "create:windmill_source",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BearingScenes.java",
+      "sourceSHA256": "6265f294aa595b11fb1cd5524db653cc802f89b85a5daa4409eef99dff84a578",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BeltScenes::beltConnector",
+      "titleId": "create:belt_connector",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BeltScenes.java",
+      "sourceSHA256": "72cb4da3f6551b0427dd16d3d2c6589d02430221feb0e6c0bc91b70736e87bad",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BeltScenes::beltsCanBeEncased",
+      "titleId": "create:belt_casing",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BeltScenes.java",
+      "sourceSHA256": "72cb4da3f6551b0427dd16d3d2c6589d02430221feb0e6c0bc91b70736e87bad",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BeltScenes::depot",
+      "titleId": "create:depot",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BeltScenes.java",
+      "sourceSHA256": "72cb4da3f6551b0427dd16d3d2c6589d02430221feb0e6c0bc91b70736e87bad",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BeltScenes::directions",
+      "titleId": "create:belt_directions",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BeltScenes.java",
+      "sourceSHA256": "72cb4da3f6551b0427dd16d3d2c6589d02430221feb0e6c0bc91b70736e87bad",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "BeltScenes::transport",
+      "titleId": "create:belt_transport",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/BeltScenes.java",
+      "sourceSHA256": "72cb4da3f6551b0427dd16d3d2c6589d02430221feb0e6c0bc91b70736e87bad",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "CartAssemblerScenes::anchor",
+      "titleId": "create:cart_assembler",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/CartAssemblerScenes.java",
+      "sourceSHA256": "37dc734c4779d8c8867268ff17f3bf714c8057d6e126df3662680dc0edab7328",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "CartAssemblerScenes::dual",
+      "titleId": "create:cart_assembler_dual",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/CartAssemblerScenes.java",
+      "sourceSHA256": "37dc734c4779d8c8867268ff17f3bf714c8057d6e126df3662680dc0edab7328",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "CartAssemblerScenes::modes",
+      "titleId": "create:cart_assembler_modes",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/CartAssemblerScenes.java",
+      "sourceSHA256": "37dc734c4779d8c8867268ff17f3bf714c8057d6e126df3662680dc0edab7328",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "CartAssemblerScenes::rails",
+      "titleId": "create:cart_assembler_rails",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/CartAssemblerScenes.java",
+      "sourceSHA256": "37dc734c4779d8c8867268ff17f3bf714c8057d6e126df3662680dc0edab7328",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ChainDriveScenes::adjustableChainGearshift",
+      "titleId": "create:chain_gearshift",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ChainDriveScenes.java",
+      "sourceSHA256": "2b345fa0dc17bba449695d80ae11d1788ad2bca0836795523aa5642c8afb40b6",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ChainDriveScenes::chainDriveAsRelay",
+      "titleId": "create:chain_drive",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ChainDriveScenes.java",
+      "sourceSHA256": "2b345fa0dc17bba449695d80ae11d1788ad2bca0836795523aa5642c8afb40b6",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ChassisScenes::linearAttachement",
+      "titleId": "create:linear_chassis_attachment",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ChassisScenes.java",
+      "sourceSHA256": "070f62b4cc27d3fb5672c39eaf459c39e194d4ec203e7de10969ae9a9bb3d8ec",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ChassisScenes::linearGroup",
+      "titleId": "create:linear_chassis_group",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ChassisScenes.java",
+      "sourceSHA256": "070f62b4cc27d3fb5672c39eaf459c39e194d4ec203e7de10969ae9a9bb3d8ec",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ChassisScenes::radial",
+      "titleId": "create:radial_chassis",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ChassisScenes.java",
+      "sourceSHA256": "070f62b4cc27d3fb5672c39eaf459c39e194d4ec203e7de10969ae9a9bb3d8ec",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ChassisScenes::superGlue",
+      "titleId": "create:super_glue",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ChassisScenes.java",
+      "sourceSHA256": "070f62b4cc27d3fb5672c39eaf459c39e194d4ec203e7de10969ae9a9bb3d8ec",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ChuteScenes::downward",
+      "titleId": "create:chute",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ChuteScenes.java",
+      "sourceSHA256": "d716d52c825994a3f0139c0c68ab07788d9accf3642de99d11b6e0e706e7db03",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ChuteScenes::smart",
+      "titleId": "create:smart_chute",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ChuteScenes.java",
+      "sourceSHA256": "d716d52c825994a3f0139c0c68ab07788d9accf3642de99d11b6e0e706e7db03",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ChuteScenes::upward",
+      "titleId": "create:chute_upward",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ChuteScenes.java",
+      "sourceSHA256": "d716d52c825994a3f0139c0c68ab07788d9accf3642de99d11b6e0e706e7db03",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "CrafterScenes::connect",
+      "titleId": "create:mechanical_crafter_connect",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/CrafterScenes.java",
+      "sourceSHA256": "59a294483077f4c7abe2582b592b0d4af7fad3c828ff5dd9d4ebafbd212ac55c",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "CrafterScenes::covers",
+      "titleId": "create:mechanical_crafter_covers",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/CrafterScenes.java",
+      "sourceSHA256": "59a294483077f4c7abe2582b592b0d4af7fad3c828ff5dd9d4ebafbd212ac55c",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "CrafterScenes::setup",
+      "titleId": "create:mechanical_crafter",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/CrafterScenes.java",
+      "sourceSHA256": "59a294483077f4c7abe2582b592b0d4af7fad3c828ff5dd9d4ebafbd212ac55c",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DeployerScenes::contraption",
+      "titleId": "create:deployer_contraption",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DeployerScenes.java",
+      "sourceSHA256": "d3032383956fb3abb5132420f1daf2b81d3465b416223c4e465e7c74af6a7e23",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DeployerScenes::filter",
+      "titleId": "create:deployer",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DeployerScenes.java",
+      "sourceSHA256": "d3032383956fb3abb5132420f1daf2b81d3465b416223c4e465e7c74af6a7e23",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DeployerScenes::modes",
+      "titleId": "create:deployer_modes",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DeployerScenes.java",
+      "sourceSHA256": "d3032383956fb3abb5132420f1daf2b81d3465b416223c4e465e7c74af6a7e23",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DeployerScenes::processing",
+      "titleId": "create:deployer_processing",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DeployerScenes.java",
+      "sourceSHA256": "d3032383956fb3abb5132420f1daf2b81d3465b416223c4e465e7c74af6a7e23",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DeployerScenes::redstone",
+      "titleId": "create:deployer_redstone",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DeployerScenes.java",
+      "sourceSHA256": "d3032383956fb3abb5132420f1daf2b81d3465b416223c4e465e7c74af6a7e23",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DetectorScenes::smartObserver",
+      "titleId": "create:smart_observer",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DetectorScenes.java",
+      "sourceSHA256": "dedd306fc03e5df1a9555ed1e6f787f40e7be1feef79802bae032ee0d9316bfb",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DetectorScenes::thresholdSwitch",
+      "titleId": "create:threshold_switch",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DetectorScenes.java",
+      "sourceSHA256": "dedd306fc03e5df1a9555ed1e6f787f40e7be1feef79802bae032ee0d9316bfb",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DisplayScenes::board",
+      "titleId": "create:display_board",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DisplayScenes.java",
+      "sourceSHA256": "e1d4cf414b071af21883f8f08f1d074203339e4e9f79d5b6b8538b67f7f7b7bb",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DisplayScenes::link",
+      "titleId": "create:display_link",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DisplayScenes.java",
+      "sourceSHA256": "e1d4cf414b071af21883f8f08f1d074203339e4e9f79d5b6b8538b67f7f7b7bb",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DisplayScenes::redstone",
+      "titleId": "create:display_link_redstone",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/DisplayScenes.java",
+      "sourceSHA256": "e1d4cf414b071af21883f8f08f1d074203339e4e9f79d5b6b8538b67f7f7b7bb",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "DrainScenes::emptying",
+      "titleId": "create:item_drain",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/DrainScenes.java",
+      "sourceSHA256": "e956cb2f6bd819e482e5c585a9f1dbcdaf1af2e59794082376a7b99c6b416bf1",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "EjectorScenes::ejector",
+      "titleId": "create:weighted_ejector",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/EjectorScenes.java",
+      "sourceSHA256": "a06b996980665ba579e27178d573fe5b669e8fafe9745ef5d5275721c4daecf8",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "EjectorScenes::redstone",
+      "titleId": "create:weighted_ejector_redstone",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/EjectorScenes.java",
+      "sourceSHA256": "a06b996980665ba579e27178d573fe5b669e8fafe9745ef5d5275721c4daecf8",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "EjectorScenes::splitY",
+      "titleId": "create:weighted_ejector_tunnel",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/EjectorScenes.java",
+      "sourceSHA256": "a06b996980665ba579e27178d573fe5b669e8fafe9745ef5d5275721c4daecf8",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ElevatorScenes::elevator",
+      "titleId": "create:elevator_pulley",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ElevatorScenes.java",
+      "sourceSHA256": "19bf45edcdaaecdc41b298a59c6643932952476820f6024bf931e7cfb007f7e7",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ElevatorScenes::multiRope",
+      "titleId": "create:elevator_pulley_multi_rope",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ElevatorScenes.java",
+      "sourceSHA256": "19bf45edcdaaecdc41b298a59c6643932952476820f6024bf931e7cfb007f7e7",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FactoryGaugeScenes::crafting",
+      "titleId": "create:factory_gauge_crafting",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/FactoryGaugeScenes.java",
+      "sourceSHA256": "629441c2bacec222bc9b3a4d3a83babf2d63b66dfa6c28c901d9c163050394e2",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FactoryGaugeScenes::links",
+      "titleId": "create:factory_gauge_links",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/FactoryGaugeScenes.java",
+      "sourceSHA256": "629441c2bacec222bc9b3a4d3a83babf2d63b66dfa6c28c901d9c163050394e2",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FactoryGaugeScenes::recipe",
+      "titleId": "create:factory_gauge_recipe",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/FactoryGaugeScenes.java",
+      "sourceSHA256": "629441c2bacec222bc9b3a4d3a83babf2d63b66dfa6c28c901d9c163050394e2",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FactoryGaugeScenes::restocker",
+      "titleId": "create:factory_gauge_restocker",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/FactoryGaugeScenes.java",
+      "sourceSHA256": "629441c2bacec222bc9b3a4d3a83babf2d63b66dfa6c28c901d9c163050394e2",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FanScenes::direction",
+      "titleId": "create:fan_direction",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/FanScenes.java",
+      "sourceSHA256": "cd48118a9e0a6e9a7979281544cdee2f6fc9393ea897842bc76c88a17d0093be",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FanScenes::processing",
+      "titleId": "create:fan_processing",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/FanScenes.java",
+      "sourceSHA256": "cd48118a9e0a6e9a7979281544cdee2f6fc9393ea897842bc76c88a17d0093be",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FluidMovementActorScenes::transfer",
+      "titleId": "create:portable_fluid_interface",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/FluidMovementActorScenes.java",
+      "sourceSHA256": "a1261587d442e9c5ea038e171970a789daba61f4efc9d539f59dbbd60017b039",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FluidTankScenes::creative",
+      "titleId": "create:creative_fluid_tank",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/FluidTankScenes.java",
+      "sourceSHA256": "52c6570de0a7b9d7d2ea0dfb10ae033dae2a7ec3a0c8a29443e10d8e4470a588",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FluidTankScenes::sizes",
+      "titleId": "create:fluid_tank_sizes",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/FluidTankScenes.java",
+      "sourceSHA256": "52c6570de0a7b9d7d2ea0dfb10ae033dae2a7ec3a0c8a29443e10d8e4470a588",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FluidTankScenes::storage",
+      "titleId": "create:fluid_tank_storage",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/FluidTankScenes.java",
+      "sourceSHA256": "52c6570de0a7b9d7d2ea0dfb10ae033dae2a7ec3a0c8a29443e10d8e4470a588",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FrogAndConveyorScenes::conveyor",
+      "titleId": "create:chain_conveyor",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/FrogAndConveyorScenes.java",
+      "sourceSHA256": "7d637f2876e15e269a294d21f31ae78bf73efa98d9717a53d211d3432ef7da2a",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FrogAndConveyorScenes::frogPort",
+      "titleId": "create:package_frogport",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/FrogAndConveyorScenes.java",
+      "sourceSHA256": "7d637f2876e15e269a294d21f31ae78bf73efa98d9717a53d211d3432ef7da2a",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FunnelScenes::brass",
+      "titleId": "create:brass_funnel",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/FunnelScenes.java",
+      "sourceSHA256": "20a76396dc1601e7cd197cfac5b4777629aaf7ea55fb4adcb56164ebd304ff40",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FunnelScenes::compat",
+      "titleId": "create:funnel_compat",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/FunnelScenes.java",
+      "sourceSHA256": "20a76396dc1601e7cd197cfac5b4777629aaf7ea55fb4adcb56164ebd304ff40",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FunnelScenes::directionality",
+      "titleId": "create:funnel_direction",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/FunnelScenes.java",
+      "sourceSHA256": "20a76396dc1601e7cd197cfac5b4777629aaf7ea55fb4adcb56164ebd304ff40",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FunnelScenes::intro",
+      "titleId": "create:funnel_intro",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/FunnelScenes.java",
+      "sourceSHA256": "20a76396dc1601e7cd197cfac5b4777629aaf7ea55fb4adcb56164ebd304ff40",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FunnelScenes::redstone",
+      "titleId": "create:funnel_redstone",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/FunnelScenes.java",
+      "sourceSHA256": "20a76396dc1601e7cd197cfac5b4777629aaf7ea55fb4adcb56164ebd304ff40",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "FunnelScenes::transposer",
+      "titleId": "create:funnel_transfer",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/FunnelScenes.java",
+      "sourceSHA256": "20a76396dc1601e7cd197cfac5b4777629aaf7ea55fb4adcb56164ebd304ff40",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "GantryScenes::direction",
+      "titleId": "create:gantry_direction",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/GantryScenes.java",
+      "sourceSHA256": "c934db844938795e287fca66564796cb82f69b256970ad4d7dfd424390357548",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "GantryScenes::introForPinion",
+      "titleId": "create:gantry_carriage",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/GantryScenes.java",
+      "sourceSHA256": "c934db844938795e287fca66564796cb82f69b256970ad4d7dfd424390357548",
+      "sourceTitleBranchEvidence": {
+        "delegate": "public static void introForPinion(SceneBuilder scene, SceneBuildingUtil util) {\n\t\tintro(scene, util, true);\n\t}",
+        "helperMethod": "intro",
+        "helperBody": "private static void intro(SceneBuilder builder, SceneBuildingUtil util, boolean pinion) {\n\t\tCreateSceneBuilder scene = new CreateSceneBuilder(builder);\n\t\tString id = \"gantry_\" + (pinion ? \"carriage\" : \"shaft\");\n\t\tString title = \"Using Gantry \" + (pinion ? \"Carriages\" : \"Shafts\");\n\t\tscene.title(id, title);\n\n\t\tscene.world().modifyKineticSpeed(util.select().everywhere(), f -> -2 * f);\n\t\tscene.configureBasePlate(0, 0, 5);\n\t\tscene.world().showSection(util.select().layer(0), Direction.UP);\n\t\tscene.idle(10);\n\t\tscene.world().showSection(util.select().layer(1), Direction.DOWN);\n\t\tscene.idle(10);\n\t\tElementLink<WorldSectionElement> gantry =\n\t\t\tscene.world().showIndependentSection(util.select().layer(2), Direction.DOWN);\n\t\tscene.idle(10);\n\n\t\tBlockPos centralShaft = util.grid().at(2, 1, 2);\n\n\t\tscene.world().moveSection(gantry, util.vector().of(-4, 0, 0), 60);\n\n\t\tString text = pinion ? \"Gantry Carriages can mount to and slide along a Gantry Shaft.\"\n\t\t\t: \"Gantry Shafts form the basis of a gantry setup. Attached Carriages will move along them.\";\n\n\t\tscene.overlay().showText(80)\n\t\t\t.attachKeyFrame()\n\t\t\t.text(text)\n\t\t\t.pointAt(util.vector().centerOf(centralShaft));\n\t\tscene.idle(80);\n\n\t\tscene.world().hideIndependentSection(gantry, Direction.UP);\n\t\tscene.idle(10);\n\t\tgantry = scene.world().showIndependentSection(util.select().layer(2), Direction.DOWN);\n\t\tVec3 gantryTop = util.vector().topOf(4, 2, 2);\n\t\tscene.world().modifyKineticSpeed(util.select().everywhere(), f -> 0f);\n\t\tscene.overlay().showText(40)\n\t\t\t.attachKeyFrame()\n\t\t\t.text(\"Gantry setups can move attached Blocks.\")\n\t\t\t.pointAt(gantryTop)\n\t\t\t.placeNearTarget();\n\t\tscene.idle(30);\n\n\t\tSelection planks = util.select().position(5, 3, 1);\n\n\t\tscene.world().showSectionAndMerge(util.select().layersFrom(3)\n\t\t\t.substract(planks), Direction.DOWN, gantry);\n\t\tscene.world().replaceBlocks(util.select().fromTo(5, 3, 2, 3, 4, 2), Blocks.OAK_PLANKS.defaultBlockState(), false);\n\t\tscene.idle(10);\n\t\tscene.world().showSectionAndMerge(planks, Direction.SOUTH, gantry);\n\n\t\tscene.idle(10);\n\t\tscene.overlay().showOutline(PonderPalette.GREEN, \"glue\", util.select().position(3, 4, 2)\n\t\t\t.add(util.select().fromTo(3, 3, 2, 5, 3, 2))\n\t\t\t.add(util.select().position(5, 3, 1)), 40);\n\t\tscene.overlay().showControls(util.vector().centerOf(util.grid().at(3, 3, 2)), Pointing.UP, 40)\n\t\t\t.withItem(AllItems.SUPER_GLUE.asStack());\n\t\tscene.effects().superGlue(util.grid().at(5, 3, 1), Direction.SOUTH, true);\n\t\tscene.idle(20);\n\t\tscene.overlay().showText(80)\n\t\t\t.attachKeyFrame()\n\t\t\t.sharedText(\"movement_anchors\")\n\t\t\t.pointAt(util.vector().blockSurface(util.grid().at(3, 3, 2), Direction.WEST))\n\t\t\t.placeNearTarget();\n\t\tscene.idle(80);\n\n\t\tscene.world().modifyKineticSpeed(util.select().layer(0), f -> 32f);\n\t\tscene.world().modifyKineticSpeed(util.select().layer(1), f -> -64f);\n\n\t\tscene.world().moveSection(gantry, util.vector().of(-4, 0, 0), 60);\n\t\tscene.idle(20);\n\t\tscene.markAsFinished();\n\t}",
+        "booleanArgument": "true"
+      }
+    },
+    {
+      "sourceProgram": "GantryScenes::introForShaft",
+      "titleId": "create:gantry_shaft",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/GantryScenes.java",
+      "sourceSHA256": "c934db844938795e287fca66564796cb82f69b256970ad4d7dfd424390357548",
+      "sourceTitleBranchEvidence": {
+        "delegate": "public static void introForShaft(SceneBuilder scene, SceneBuildingUtil util) {\n\t\tintro(scene, util, false);\n\t}",
+        "helperMethod": "intro",
+        "helperBody": "private static void intro(SceneBuilder builder, SceneBuildingUtil util, boolean pinion) {\n\t\tCreateSceneBuilder scene = new CreateSceneBuilder(builder);\n\t\tString id = \"gantry_\" + (pinion ? \"carriage\" : \"shaft\");\n\t\tString title = \"Using Gantry \" + (pinion ? \"Carriages\" : \"Shafts\");\n\t\tscene.title(id, title);\n\n\t\tscene.world().modifyKineticSpeed(util.select().everywhere(), f -> -2 * f);\n\t\tscene.configureBasePlate(0, 0, 5);\n\t\tscene.world().showSection(util.select().layer(0), Direction.UP);\n\t\tscene.idle(10);\n\t\tscene.world().showSection(util.select().layer(1), Direction.DOWN);\n\t\tscene.idle(10);\n\t\tElementLink<WorldSectionElement> gantry =\n\t\t\tscene.world().showIndependentSection(util.select().layer(2), Direction.DOWN);\n\t\tscene.idle(10);\n\n\t\tBlockPos centralShaft = util.grid().at(2, 1, 2);\n\n\t\tscene.world().moveSection(gantry, util.vector().of(-4, 0, 0), 60);\n\n\t\tString text = pinion ? \"Gantry Carriages can mount to and slide along a Gantry Shaft.\"\n\t\t\t: \"Gantry Shafts form the basis of a gantry setup. Attached Carriages will move along them.\";\n\n\t\tscene.overlay().showText(80)\n\t\t\t.attachKeyFrame()\n\t\t\t.text(text)\n\t\t\t.pointAt(util.vector().centerOf(centralShaft));\n\t\tscene.idle(80);\n\n\t\tscene.world().hideIndependentSection(gantry, Direction.UP);\n\t\tscene.idle(10);\n\t\tgantry = scene.world().showIndependentSection(util.select().layer(2), Direction.DOWN);\n\t\tVec3 gantryTop = util.vector().topOf(4, 2, 2);\n\t\tscene.world().modifyKineticSpeed(util.select().everywhere(), f -> 0f);\n\t\tscene.overlay().showText(40)\n\t\t\t.attachKeyFrame()\n\t\t\t.text(\"Gantry setups can move attached Blocks.\")\n\t\t\t.pointAt(gantryTop)\n\t\t\t.placeNearTarget();\n\t\tscene.idle(30);\n\n\t\tSelection planks = util.select().position(5, 3, 1);\n\n\t\tscene.world().showSectionAndMerge(util.select().layersFrom(3)\n\t\t\t.substract(planks), Direction.DOWN, gantry);\n\t\tscene.world().replaceBlocks(util.select().fromTo(5, 3, 2, 3, 4, 2), Blocks.OAK_PLANKS.defaultBlockState(), false);\n\t\tscene.idle(10);\n\t\tscene.world().showSectionAndMerge(planks, Direction.SOUTH, gantry);\n\n\t\tscene.idle(10);\n\t\tscene.overlay().showOutline(PonderPalette.GREEN, \"glue\", util.select().position(3, 4, 2)\n\t\t\t.add(util.select().fromTo(3, 3, 2, 5, 3, 2))\n\t\t\t.add(util.select().position(5, 3, 1)), 40);\n\t\tscene.overlay().showControls(util.vector().centerOf(util.grid().at(3, 3, 2)), Pointing.UP, 40)\n\t\t\t.withItem(AllItems.SUPER_GLUE.asStack());\n\t\tscene.effects().superGlue(util.grid().at(5, 3, 1), Direction.SOUTH, true);\n\t\tscene.idle(20);\n\t\tscene.overlay().showText(80)\n\t\t\t.attachKeyFrame()\n\t\t\t.sharedText(\"movement_anchors\")\n\t\t\t.pointAt(util.vector().blockSurface(util.grid().at(3, 3, 2), Direction.WEST))\n\t\t\t.placeNearTarget();\n\t\tscene.idle(80);\n\n\t\tscene.world().modifyKineticSpeed(util.select().layer(0), f -> 32f);\n\t\tscene.world().modifyKineticSpeed(util.select().layer(1), f -> -64f);\n\n\t\tscene.world().moveSection(gantry, util.vector().of(-4, 0, 0), 60);\n\t\tscene.idle(20);\n\t\tscene.markAsFinished();\n\t}",
+        "booleanArgument": "false"
+      }
+    },
+    {
+      "sourceProgram": "GantryScenes::redstone",
+      "titleId": "create:gantry_redstone",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/GantryScenes.java",
+      "sourceSHA256": "c934db844938795e287fca66564796cb82f69b256970ad4d7dfd424390357548",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "GantryScenes::subgantry",
+      "titleId": "create:gantry_cascaded",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/GantryScenes.java",
+      "sourceSHA256": "c934db844938795e287fca66564796cb82f69b256970ad4d7dfd424390357548",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "HosePulleyScenes::infinite",
+      "titleId": "create:hose_pulley_infinite",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/HosePulleyScenes.java",
+      "sourceSHA256": "3097568f6d29c4756aa45f8fd6f103a349ea62bbaf5ddf9bf16f7bf6aaae9f7a",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "HosePulleyScenes::intro",
+      "titleId": "create:hose_pulley",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/HosePulleyScenes.java",
+      "sourceSHA256": "3097568f6d29c4756aa45f8fd6f103a349ea62bbaf5ddf9bf16f7bf6aaae9f7a",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "HosePulleyScenes::level",
+      "titleId": "create:hose_pulley_level",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/HosePulleyScenes.java",
+      "sourceSHA256": "3097568f6d29c4756aa45f8fd6f103a349ea62bbaf5ddf9bf16f7bf6aaae9f7a",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ItemVaultScenes::sizes",
+      "titleId": "create:item_vault_sizes",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ItemVaultScenes.java",
+      "sourceSHA256": "a0366461551eb76753652b98815b3365462efe78d8f566a6f1db106fbe4e9c17",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ItemVaultScenes::storage",
+      "titleId": "create:item_vault_storage",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ItemVaultScenes.java",
+      "sourceSHA256": "a0366461551eb76753652b98815b3365462efe78d8f566a6f1db106fbe4e9c17",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::clutch",
+      "titleId": "create:clutch",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::cogAsRelay",
+      "titleId": "create:cogwheel",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::cogsSpeedUp",
+      "titleId": "create:cog_speedup",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::cogwheelsCanBeEncased",
+      "titleId": "create:cogwheel_casing",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::creativeMotor",
+      "titleId": "create:creative_motor",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::creativeMotorMojang",
+      "titleId": "create:creative_motor_mojang",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::gearbox",
+      "titleId": "create:gearbox",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::gearshift",
+      "titleId": "create:gearshift",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::handCrank",
+      "titleId": "create:hand_crank",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::largeCogAsRelay",
+      "titleId": "create:large_cogwheel",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::largeWaterWheel",
+      "titleId": "create:large_water_wheel",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::sequencedGearshift",
+      "titleId": "create:sequenced_gearshift",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::shaftAsRelay",
+      "titleId": "create:shaft",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::shaftsCanBeEncased",
+      "titleId": "create:shaft_casing",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::speedController",
+      "titleId": "create:rotation_speed_controller",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::speedometer",
+      "titleId": "create:speedometer",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": {
+        "delegate": "public static void speedometer(SceneBuilder scene, SceneBuildingUtil util) {\n\t\tgauge(scene, util, true);\n\t}",
+        "helperMethod": "gauge",
+        "helperBody": "private static void gauge(SceneBuilder builder, SceneBuildingUtil util, boolean speed) {\n\t\tCreateSceneBuilder scene = new CreateSceneBuilder(builder);\n\t\tString component = speed ? \"Speedometer\" : \"Stressometer\";\n\t\tString title = \"Monitoring Kinetic information using the \" + component;\n\t\tscene.title(speed ? \"speedometer\" : \"stressometer\", title);\n\t\tscene.configureBasePlate(1, 0, 5);\n\n\t\tBlockPos gaugePos = util.grid().at(2, 1, 3);\n\n\t\tscene.world().showSection(util.select().layer(0), Direction.UP);\n\t\tscene.idle(5);\n\n\t\tfor (int x = 6; x >= 0; x--) {\n\t\t\tscene.idle(2);\n\t\t\tscene.world().showSection(util.select().position(x, 1, 3), Direction.DOWN);\n\t\t}\n\t\tscene.idle(10);\n\n\t\tscene.world().setBlock(gaugePos, (speed ? AllBlocks.SPEEDOMETER : AllBlocks.STRESSOMETER).getDefaultState()\n\t\t\t.setValue(GaugeBlock.FACING, Direction.UP), true);\n\t\tscene.world().setKineticSpeed(util.select().position(gaugePos), 32);\n\t\tscene.idle(10);\n\n\t\tscene.overlay().showText(80)\n\t\t\t.text(\"The \" + component + \" displays the current \" + (speed ? \"Speed\" : \"Stress Capacity\")\n\t\t\t\t+ (speed ? \" of attached components\" : \" of the attached kinetic network\"))\n\t\t\t.attachKeyFrame()\n\t\t\t.pointAt(util.vector().topOf(gaugePos))\n\t\t\t.placeNearTarget();\n\t\tscene.idle(90);\n\n\t\tif (speed) {\n\t\t\tscene.world().multiplyKineticSpeed(util.select().everywhere(), 4);\n\t\t\tscene.effects().rotationSpeedIndicator(util.grid().at(6, 1, 3));\n\t\t\tscene.idle(5);\n\t\t\tscene.effects().indicateSuccess(gaugePos);\n\n\t\t} else {\n\t\t\tBlockState state = AllBlocks.CRUSHING_WHEEL.getDefaultState()\n\t\t\t\t.setValue(CrushingWheelBlock.AXIS, Axis.X);\n\t\t\tscene.world().setBlock(util.grid().at(5, 1, 3), state, true);\n\t\t\tscene.world().setKineticSpeed(util.select().position(5, 1, 3), 32);\n\t\t\tscene.world().modifyBlockEntityNBT(util.select().position(gaugePos), StressGaugeBlockEntity.class,\n\t\t\t\tnbt -> nbt.putFloat(\"Value\", .5f));\n\t\t\tscene.effects().indicateRedstone(gaugePos);\n\t\t\tscene.idle(20);\n\t\t\tscene.world().setBlock(util.grid().at(4, 1, 3), state, true);\n\t\t\tscene.world().setKineticSpeed(util.select().position(4, 1, 3), 32);\n\t\t\tscene.world().modifyBlockEntityNBT(util.select().position(gaugePos), StressGaugeBlockEntity.class,\n\t\t\t\tnbt -> nbt.putFloat(\"Value\", .9f));\n\t\t\tscene.effects().indicateRedstone(gaugePos);\n\t\t\tscene.idle(10);\n\t\t}\n\n\t\tscene.idle(30);\n\n\t\tVec3 blockSurface = util.vector().blockSurface(gaugePos, Direction.NORTH);\n\t\tscene.overlay().showControls(blockSurface, Pointing.RIGHT, 80).withItem(AllItems.GOGGLES.asStack());\n\t\tscene.idle(7);\n\t\tscene.overlay().showText(80)\n\t\t\t.text(\"When wearing Engineers' Goggles, the player can get more detailed information from the Gauge\")\n\t\t\t.attachKeyFrame()\n\t\t\t.colored(PonderPalette.MEDIUM)\n\t\t\t.pointAt(blockSurface)\n\t\t\t.placeNearTarget();\n\t\tscene.idle(100);\n\n\t\tSelection comparator = util.select().fromTo(2, 1, 1, 2, 1, 2);\n\t\tscene.world().showSection(comparator, Direction.SOUTH);\n\t\tscene.idle(10);\n\t\tscene.world().toggleRedstonePower(comparator);\n\t\tscene.effects().indicateRedstone(util.grid().at(2, 1, 2));\n\t\tscene.idle(20);\n\n\t\tscene.overlay().showText(120)\n\t\t\t.text(\"Comparators can emit analog Redstone Signals relative to the \" + component + \"'s measurements\")\n\t\t\t.attachKeyFrame()\n\t\t\t.colored(PonderPalette.RED)\n\t\t\t.pointAt(util.vector().centerOf(2, 1, 2)\n\t\t\t\t.add(0, -0.35, 0))\n\t\t\t.placeNearTarget();\n\t\tscene.idle(130);\n\t\tscene.markAsFinished();\n\t}",
+        "booleanArgument": "true"
+      }
+    },
+    {
+      "sourceProgram": "KineticsScenes::stressometer",
+      "titleId": "create:stressometer",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": {
+        "delegate": "public static void stressometer(SceneBuilder scene, SceneBuildingUtil util) {\n\t\tgauge(scene, util, false);\n\t}",
+        "helperMethod": "gauge",
+        "helperBody": "private static void gauge(SceneBuilder builder, SceneBuildingUtil util, boolean speed) {\n\t\tCreateSceneBuilder scene = new CreateSceneBuilder(builder);\n\t\tString component = speed ? \"Speedometer\" : \"Stressometer\";\n\t\tString title = \"Monitoring Kinetic information using the \" + component;\n\t\tscene.title(speed ? \"speedometer\" : \"stressometer\", title);\n\t\tscene.configureBasePlate(1, 0, 5);\n\n\t\tBlockPos gaugePos = util.grid().at(2, 1, 3);\n\n\t\tscene.world().showSection(util.select().layer(0), Direction.UP);\n\t\tscene.idle(5);\n\n\t\tfor (int x = 6; x >= 0; x--) {\n\t\t\tscene.idle(2);\n\t\t\tscene.world().showSection(util.select().position(x, 1, 3), Direction.DOWN);\n\t\t}\n\t\tscene.idle(10);\n\n\t\tscene.world().setBlock(gaugePos, (speed ? AllBlocks.SPEEDOMETER : AllBlocks.STRESSOMETER).getDefaultState()\n\t\t\t.setValue(GaugeBlock.FACING, Direction.UP), true);\n\t\tscene.world().setKineticSpeed(util.select().position(gaugePos), 32);\n\t\tscene.idle(10);\n\n\t\tscene.overlay().showText(80)\n\t\t\t.text(\"The \" + component + \" displays the current \" + (speed ? \"Speed\" : \"Stress Capacity\")\n\t\t\t\t+ (speed ? \" of attached components\" : \" of the attached kinetic network\"))\n\t\t\t.attachKeyFrame()\n\t\t\t.pointAt(util.vector().topOf(gaugePos))\n\t\t\t.placeNearTarget();\n\t\tscene.idle(90);\n\n\t\tif (speed) {\n\t\t\tscene.world().multiplyKineticSpeed(util.select().everywhere(), 4);\n\t\t\tscene.effects().rotationSpeedIndicator(util.grid().at(6, 1, 3));\n\t\t\tscene.idle(5);\n\t\t\tscene.effects().indicateSuccess(gaugePos);\n\n\t\t} else {\n\t\t\tBlockState state = AllBlocks.CRUSHING_WHEEL.getDefaultState()\n\t\t\t\t.setValue(CrushingWheelBlock.AXIS, Axis.X);\n\t\t\tscene.world().setBlock(util.grid().at(5, 1, 3), state, true);\n\t\t\tscene.world().setKineticSpeed(util.select().position(5, 1, 3), 32);\n\t\t\tscene.world().modifyBlockEntityNBT(util.select().position(gaugePos), StressGaugeBlockEntity.class,\n\t\t\t\tnbt -> nbt.putFloat(\"Value\", .5f));\n\t\t\tscene.effects().indicateRedstone(gaugePos);\n\t\t\tscene.idle(20);\n\t\t\tscene.world().setBlock(util.grid().at(4, 1, 3), state, true);\n\t\t\tscene.world().setKineticSpeed(util.select().position(4, 1, 3), 32);\n\t\t\tscene.world().modifyBlockEntityNBT(util.select().position(gaugePos), StressGaugeBlockEntity.class,\n\t\t\t\tnbt -> nbt.putFloat(\"Value\", .9f));\n\t\t\tscene.effects().indicateRedstone(gaugePos);\n\t\t\tscene.idle(10);\n\t\t}\n\n\t\tscene.idle(30);\n\n\t\tVec3 blockSurface = util.vector().blockSurface(gaugePos, Direction.NORTH);\n\t\tscene.overlay().showControls(blockSurface, Pointing.RIGHT, 80).withItem(AllItems.GOGGLES.asStack());\n\t\tscene.idle(7);\n\t\tscene.overlay().showText(80)\n\t\t\t.text(\"When wearing Engineers' Goggles, the player can get more detailed information from the Gauge\")\n\t\t\t.attachKeyFrame()\n\t\t\t.colored(PonderPalette.MEDIUM)\n\t\t\t.pointAt(blockSurface)\n\t\t\t.placeNearTarget();\n\t\tscene.idle(100);\n\n\t\tSelection comparator = util.select().fromTo(2, 1, 1, 2, 1, 2);\n\t\tscene.world().showSection(comparator, Direction.SOUTH);\n\t\tscene.idle(10);\n\t\tscene.world().toggleRedstonePower(comparator);\n\t\tscene.effects().indicateRedstone(util.grid().at(2, 1, 2));\n\t\tscene.idle(20);\n\n\t\tscene.overlay().showText(120)\n\t\t\t.text(\"Comparators can emit analog Redstone Signals relative to the \" + component + \"'s measurements\")\n\t\t\t.attachKeyFrame()\n\t\t\t.colored(PonderPalette.RED)\n\t\t\t.pointAt(util.vector().centerOf(2, 1, 2)\n\t\t\t\t.add(0, -0.35, 0))\n\t\t\t.placeNearTarget();\n\t\tscene.idle(130);\n\t\tscene.markAsFinished();\n\t}",
+        "booleanArgument": "false"
+      }
+    },
+    {
+      "sourceProgram": "KineticsScenes::valveHandle",
+      "titleId": "create:valve_handle",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "KineticsScenes::waterWheel",
+      "titleId": "create:water_wheel",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/KineticsScenes.java",
+      "sourceSHA256": "f947579be62f5e580a245e038ce2fff1d07e0c6e0d8704e93e156b3cc5844e0e",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MechanicalDrillScenes::breaker",
+      "titleId": "create:mechanical_drill",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MechanicalDrillScenes.java",
+      "sourceSHA256": "a35f34580538b88931046985769ddbc47f2b93a9db630ba8db20d276623e50e7",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MechanicalDrillScenes::contraption",
+      "titleId": "create:mechanical_drill_contraption",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MechanicalDrillScenes.java",
+      "sourceSHA256": "a35f34580538b88931046985769ddbc47f2b93a9db630ba8db20d276623e50e7",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MechanicalSawScenes::contraption",
+      "titleId": "create:mechanical_saw_contraption",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MechanicalSawScenes.java",
+      "sourceSHA256": "d24f3c24e7375ddaeb1d45949254a22a3cc8be595377a6887e26728991370267",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MechanicalSawScenes::processing",
+      "titleId": "create:mechanical_saw_processing",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MechanicalSawScenes.java",
+      "sourceSHA256": "d24f3c24e7375ddaeb1d45949254a22a3cc8be595377a6887e26728991370267",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MechanicalSawScenes::treeCutting",
+      "titleId": "create:mechanical_saw_breaker",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MechanicalSawScenes.java",
+      "sourceSHA256": "d24f3c24e7375ddaeb1d45949254a22a3cc8be595377a6887e26728991370267",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MovementActorScenes::contraptionControls",
+      "titleId": "create:contraption_controls",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MovementActorScenes.java",
+      "sourceSHA256": "1351b2e8c4db7d0a734a079e062eb96f420df876116bc6cbe8c68a29641f8f27",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MovementActorScenes::harvester",
+      "titleId": "create:mechanical_harvester",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MovementActorScenes.java",
+      "sourceSHA256": "1351b2e8c4db7d0a734a079e062eb96f420df876116bc6cbe8c68a29641f8f27",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MovementActorScenes::plough",
+      "titleId": "create:mechanical_plough",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MovementActorScenes.java",
+      "sourceSHA256": "1351b2e8c4db7d0a734a079e062eb96f420df876116bc6cbe8c68a29641f8f27",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MovementActorScenes::psiRedstone",
+      "titleId": "create:portable_storage_interface_redstone",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MovementActorScenes.java",
+      "sourceSHA256": "1351b2e8c4db7d0a734a079e062eb96f420df876116bc6cbe8c68a29641f8f27",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "MovementActorScenes::psiTransfer",
+      "titleId": "create:portable_storage_interface",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/MovementActorScenes.java",
+      "sourceSHA256": "1351b2e8c4db7d0a734a079e062eb96f420df876116bc6cbe8c68a29641f8f27",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PackagerScenes::packager",
+      "titleId": "create:packager",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/PackagerScenes.java",
+      "sourceSHA256": "834cdbf387e0df2cc7d0dc0335a12b43e7f0b50423752a625de09ef7e4dc80e4",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PackagerScenes::packagerAddress",
+      "titleId": "create:packager_address",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/PackagerScenes.java",
+      "sourceSHA256": "834cdbf387e0df2cc7d0dc0335a12b43e7f0b50423752a625de09ef7e4dc80e4",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PipeScenes::encasing",
+      "titleId": "create:encased_fluid_pipe",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/PipeScenes.java",
+      "sourceSHA256": "ac79ebffec36d2a79fb9992a647db526d8266237c994a9727578c75b1d0a4fa0",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PipeScenes::flow",
+      "titleId": "create:fluid_pipe_flow",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/PipeScenes.java",
+      "sourceSHA256": "ac79ebffec36d2a79fb9992a647db526d8266237c994a9727578c75b1d0a4fa0",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PipeScenes::interaction",
+      "titleId": "create:fluid_pipe_interaction",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/PipeScenes.java",
+      "sourceSHA256": "ac79ebffec36d2a79fb9992a647db526d8266237c994a9727578c75b1d0a4fa0",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PipeScenes::smart",
+      "titleId": "create:smart_pipe",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/PipeScenes.java",
+      "sourceSHA256": "ac79ebffec36d2a79fb9992a647db526d8266237c994a9727578c75b1d0a4fa0",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PipeScenes::valve",
+      "titleId": "create:valve_pipe",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/PipeScenes.java",
+      "sourceSHA256": "ac79ebffec36d2a79fb9992a647db526d8266237c994a9727578c75b1d0a4fa0",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PistonScenes::movement",
+      "titleId": "create:mechanical_piston",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/PistonScenes.java",
+      "sourceSHA256": "de97d7e096f5bf88697979cceba7c1527b1042cdb1058fe1ce341c25980ae8d6",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PistonScenes::movementModes",
+      "titleId": "create:mechanical_piston_modes",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/PistonScenes.java",
+      "sourceSHA256": "de97d7e096f5bf88697979cceba7c1527b1042cdb1058fe1ce341c25980ae8d6",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PistonScenes::poles",
+      "titleId": "create:piston_pole",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/PistonScenes.java",
+      "sourceSHA256": "de97d7e096f5bf88697979cceba7c1527b1042cdb1058fe1ce341c25980ae8d6",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PostboxScenes::postbox",
+      "titleId": "create:postbox",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/PostboxScenes.java",
+      "sourceSHA256": "7af6a881f229a74bd1e6ea7c085f5f403f0f5bc28f88c659ce092d547b6c3bd0",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ProcessingScenes::basin",
+      "titleId": "create:basin",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ProcessingScenes.java",
+      "sourceSHA256": "30a60c42a02461882cffbc30d81f842c72ea3c858ef6b2a679192035aff28210",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ProcessingScenes::blazeBurner",
+      "titleId": "create:blaze_burner",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ProcessingScenes.java",
+      "sourceSHA256": "30a60c42a02461882cffbc30d81f842c72ea3c858ef6b2a679192035aff28210",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ProcessingScenes::compacting",
+      "titleId": "create:mechanical_press_compacting",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ProcessingScenes.java",
+      "sourceSHA256": "30a60c42a02461882cffbc30d81f842c72ea3c858ef6b2a679192035aff28210",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ProcessingScenes::crushingWheels",
+      "titleId": "create:crushing_wheels",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ProcessingScenes.java",
+      "sourceSHA256": "30a60c42a02461882cffbc30d81f842c72ea3c858ef6b2a679192035aff28210",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ProcessingScenes::emptyBlazeBurner",
+      "titleId": "create:empty_blaze_burner",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ProcessingScenes.java",
+      "sourceSHA256": "30a60c42a02461882cffbc30d81f842c72ea3c858ef6b2a679192035aff28210",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ProcessingScenes::millstone",
+      "titleId": "create:millstone",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ProcessingScenes.java",
+      "sourceSHA256": "30a60c42a02461882cffbc30d81f842c72ea3c858ef6b2a679192035aff28210",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ProcessingScenes::mixing",
+      "titleId": "create:mechanical_mixer",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ProcessingScenes.java",
+      "sourceSHA256": "30a60c42a02461882cffbc30d81f842c72ea3c858ef6b2a679192035aff28210",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "ProcessingScenes::pressing",
+      "titleId": "create:mechanical_press",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/ProcessingScenes.java",
+      "sourceSHA256": "30a60c42a02461882cffbc30d81f842c72ea3c858ef6b2a679192035aff28210",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PulleyScenes::attachment",
+      "titleId": "create:rope_pulley_attachment",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/PulleyScenes.java",
+      "sourceSHA256": "e7a90895cad56a7c321c26eb7d57c26ee021084022de45545e21a90063f78dd9",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PulleyScenes::movement",
+      "titleId": "create:rope_pulley",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/PulleyScenes.java",
+      "sourceSHA256": "e7a90895cad56a7c321c26eb7d57c26ee021084022de45545e21a90063f78dd9",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PulleyScenes::movementModes",
+      "titleId": "create:rope_pulley_modes",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/PulleyScenes.java",
+      "sourceSHA256": "e7a90895cad56a7c321c26eb7d57c26ee021084022de45545e21a90063f78dd9",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PulleyScenes::multiRope",
+      "titleId": "create:rope_pulley_multi_rope",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/PulleyScenes.java",
+      "sourceSHA256": "e7a90895cad56a7c321c26eb7d57c26ee021084022de45545e21a90063f78dd9",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PumpScenes::flow",
+      "titleId": "create:mechanical_pump_flow",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/PumpScenes.java",
+      "sourceSHA256": "5de3a2e910c8e006a1ed7338b596bfc45a3df7af6274aed294d1f1b7a9aeeff0",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "PumpScenes::speed",
+      "titleId": "create:mechanical_pump_speed",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/PumpScenes.java",
+      "sourceSHA256": "5de3a2e910c8e006a1ed7338b596bfc45a3df7af6274aed294d1f1b7a9aeeff0",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes::analogLever",
+      "titleId": "create:analog_lever",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes.java",
+      "sourceSHA256": "51f1022a57f21f737dac5a41de1159af83d07f9be2d65ec7870f61ebfc80c6aa",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes::contact",
+      "titleId": "create:redstone_contact",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes.java",
+      "sourceSHA256": "51f1022a57f21f737dac5a41de1159af83d07f9be2d65ec7870f61ebfc80c6aa",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes::nixieTube",
+      "titleId": "create:nixie_tube",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes.java",
+      "sourceSHA256": "51f1022a57f21f737dac5a41de1159af83d07f9be2d65ec7870f61ebfc80c6aa",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes::poweredLatch",
+      "titleId": "create:powered_latch",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes.java",
+      "sourceSHA256": "51f1022a57f21f737dac5a41de1159af83d07f9be2d65ec7870f61ebfc80c6aa",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes::poweredToggleLatch",
+      "titleId": "create:powered_toggle_latch",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes.java",
+      "sourceSHA256": "51f1022a57f21f737dac5a41de1159af83d07f9be2d65ec7870f61ebfc80c6aa",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes::pulseExtender",
+      "titleId": "create:pulse_extender",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes.java",
+      "sourceSHA256": "51f1022a57f21f737dac5a41de1159af83d07f9be2d65ec7870f61ebfc80c6aa",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes::pulseRepeater",
+      "titleId": "create:pulse_repeater",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes.java",
+      "sourceSHA256": "51f1022a57f21f737dac5a41de1159af83d07f9be2d65ec7870f61ebfc80c6aa",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes::redstoneLink",
+      "titleId": "create:redstone_link",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes.java",
+      "sourceSHA256": "51f1022a57f21f737dac5a41de1159af83d07f9be2d65ec7870f61ebfc80c6aa",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes::sticker",
+      "titleId": "create:sticker",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes.java",
+      "sourceSHA256": "51f1022a57f21f737dac5a41de1159af83d07f9be2d65ec7870f61ebfc80c6aa",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes2::pulseTimer",
+      "titleId": "create:pulse_timer",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes2.java",
+      "sourceSHA256": "344997bbdabc4719f9e7e80b6bf20582da275dba106b04c78ebd09e568fcbdd6",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RedstoneScenes2::roseQuartzLamp",
+      "titleId": "create:rose_quartz_lamp",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RedstoneScenes2.java",
+      "sourceSHA256": "344997bbdabc4719f9e7e80b6bf20582da275dba106b04c78ebd09e568fcbdd6",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RepackagerScenes::repackager",
+      "titleId": "create:repackager",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/RepackagerScenes.java",
+      "sourceSHA256": "6755d0fd0763d88bcfcc0de42e776117fb4a4b4837c66c6a1e3f676f68650f2d",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RequesterAndShopScenes::requester",
+      "titleId": "create:redstone_requester",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/RequesterAndShopScenes.java",
+      "sourceSHA256": "047f8c47e96a2ac059280fe8c2e604a745a88c2cbce0e0654cf437fd0ceb8f16",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RollerScenes::clearAndPave",
+      "titleId": "create:mechanical_roller_pave",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RollerScenes.java",
+      "sourceSHA256": "fffbc2ad5796dc1e4248a6bd1cafdcdd494166b133865286614b97a016f89219",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "RollerScenes::fill",
+      "titleId": "create:mechanical_roller_fill",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/RollerScenes.java",
+      "sourceSHA256": "fffbc2ad5796dc1e4248a6bd1cafdcdd494166b133865286614b97a016f89219",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "SpoutScenes::filling",
+      "titleId": "create:spout_filling",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/fluid/SpoutScenes.java",
+      "sourceSHA256": "a68d46f02bd7f0688919146fb1356b8a585084956f871706187e8905e5fc0a56",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "SteamScenes::engine",
+      "titleId": "create:steam_engine",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/SteamScenes.java",
+      "sourceSHA256": "b98458c844e4835876f73e67123217ed55e94eb39c07514b59c0efda06d895d5",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "SteamScenes::whistle",
+      "titleId": "create:steam_whistle",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/SteamScenes.java",
+      "sourceSHA256": "b98458c844e4835876f73e67123217ed55e94eb39c07514b59c0efda06d895d5",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "StockLinkScenes::stockLink",
+      "titleId": "create:stock_link",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/StockLinkScenes.java",
+      "sourceSHA256": "e6a240eaee0d981d51be0f506c61609544b85738298edef17a5123fbd4640d4f",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "StockTickerScenes::stockTicker",
+      "titleId": "create:stock_ticker",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/StockTickerScenes.java",
+      "sourceSHA256": "cfd54dc002a15707b1397e987c6d61bcd06a6eed34c2296f1d46522fa0e4dffc",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "StockTickerScenes::stockTickerAddress",
+      "titleId": "create:stock_ticker_address",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/StockTickerScenes.java",
+      "sourceSHA256": "cfd54dc002a15707b1397e987c6d61bcd06a6eed34c2296f1d46522fa0e4dffc",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TableClothScenes::tableCloth",
+      "titleId": "create:table_cloth",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/highLogistics/TableClothScenes.java",
+      "sourceSHA256": "c3985b756022c361aaecb31a88daf11c98dc29fb1023c3f75480f4adcb34c472",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrackObserverScenes::observe",
+      "titleId": "create:track_observer",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrackObserverScenes.java",
+      "sourceSHA256": "719754b9013803ab56c52515b02e50c2fbc19d0fd00abc8792f0d7834e27b672",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrackScenes::chunks",
+      "titleId": "create:track_chunks",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrackScenes.java",
+      "sourceSHA256": "6157e7cb18c0dec7d0032b32fc62fb902bd9d81b48bc2fea7d34d8729c286f2f",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrackScenes::placement",
+      "titleId": "create:track_placement",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrackScenes.java",
+      "sourceSHA256": "6157e7cb18c0dec7d0032b32fc62fb902bd9d81b48bc2fea7d34d8729c286f2f",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrackScenes::portal",
+      "titleId": "create:track_portal",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrackScenes.java",
+      "sourceSHA256": "6157e7cb18c0dec7d0032b32fc62fb902bd9d81b48bc2fea7d34d8729c286f2f",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrainScenes::controls",
+      "titleId": "create:train_controls",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrainScenes.java",
+      "sourceSHA256": "c05b69795c44e0fb02a5e95094f3a7ff2e011802d9934868e6a2473c07407671",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrainScenes::schedule",
+      "titleId": "create:train_schedule",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrainScenes.java",
+      "sourceSHA256": "c05b69795c44e0fb02a5e95094f3a7ff2e011802d9934868e6a2473c07407671",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrainSignalScenes::placement",
+      "titleId": "create:train_signal_placement",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrainSignalScenes.java",
+      "sourceSHA256": "032d672a67fc6cb46f5df5819ea0002d882c5587407130fdc0815b692aaed037",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrainSignalScenes::redstone",
+      "titleId": "create:train_signal_redstone",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrainSignalScenes.java",
+      "sourceSHA256": "032d672a67fc6cb46f5df5819ea0002d882c5587407130fdc0815b692aaed037",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrainSignalScenes::signaling",
+      "titleId": "create:train_signal_signaling",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrainSignalScenes.java",
+      "sourceSHA256": "032d672a67fc6cb46f5df5819ea0002d882c5587407130fdc0815b692aaed037",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrainStationScenes::assembly",
+      "titleId": "create:train_assembly",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrainStationScenes.java",
+      "sourceSHA256": "44825788f77c2b20ba732001d6f12fc10716bc82e6c84c7217ece5acfb0ac9c8",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TrainStationScenes::autoSchedule",
+      "titleId": "create:auto_schedule",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/trains/TrainStationScenes.java",
+      "sourceSHA256": "44825788f77c2b20ba732001d6f12fc10716bc82e6c84c7217ece5acfb0ac9c8",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TunnelScenes::andesite",
+      "titleId": "create:andesite_tunnel",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/TunnelScenes.java",
+      "sourceSHA256": "5fb12963fddd08b890cdd3ee84d4a86ec63d702e7d74fde6b083c9c6137b1ea4",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TunnelScenes::brass",
+      "titleId": "create:brass_tunnel",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/TunnelScenes.java",
+      "sourceSHA256": "5fb12963fddd08b890cdd3ee84d4a86ec63d702e7d74fde6b083c9c6137b1ea4",
+      "sourceTitleBranchEvidence": null
+    },
+    {
+      "sourceProgram": "TunnelScenes::brassModes",
+      "titleId": "create:brass_tunnel_modes",
+      "sourcePath": "src/main/java/com/simibubi/create/infrastructure/ponder/scenes/TunnelScenes.java",
+      "sourceSHA256": "5fb12963fddd08b890cdd3ee84d4a86ec63d702e7d74fde6b083c9c6137b1ea4",
+      "sourceTitleBranchEvidence": null
+    }
+  ]
+}

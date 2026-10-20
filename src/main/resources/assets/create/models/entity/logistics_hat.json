@@ -1,8 +1,7 @@
 {
-	"parent": "create:entity/train_hat",
-	"render_type": "minecraft:cutout",
-	"textures": {
-		"0": "create:entity/logistics_hat",
-		"particle": "create:entity/logistics_hat"
-	}
+  "parent": "create:entity/train_hat",
+  "textures": {
+    "0": "create:block/logistics_hat",
+    "particle": "create:block/logistics_hat"
+  }
 }

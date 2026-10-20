@@ -1,6 +1,7 @@
 {
-	"parent": "block/cube_all",
-	"textures": {
-		"all": "create:block/copycat_base"
-	}
+  "parent": "block/cube_all",
+  "textures": {
+    "all": "create:block/copycat_base",
+    "particle": "create:block/copycat_base"
+  }
 }

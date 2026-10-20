@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/blaze_cake",
+    "particle": "create:item/blaze_cake"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "create:mixing",
+  "ingredients": [
+    "#create:pulpifiable",
+    "#create:pulpifiable",
+    "#create:pulpifiable",
+    "#create:pulpifiable",
+    {
+      "fluid": "minecraft:water",
+      "amount": 20250
+    }
+  ],
+  "results": [
+    {
+      "id": "create:pulp"
+    }
+  ]
+}

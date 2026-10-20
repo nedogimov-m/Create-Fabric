@@ -1,29 +1,7 @@
 package com.simibubi.create.foundation.block;
-
-import org.jetbrains.annotations.NotNull;
-
-import com.mojang.serialization.MapCodec;
-import com.mojang.serialization.codecs.RecordCodecBuilder;
-
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.StairBlock;
-
+import net.minecraft.world.level.block.*;
+/** Source stair uses AIR as its model base, and its real inherited copper resistance. */
 public class CreateCopperStairBlock extends StairBlock {
-	public static final MapCodec<StairBlock> CODEC = RecordCodecBuilder.mapCodec(i -> i.group(
-			propertiesCodec()
-	).apply(i, CreateCopperStairBlock::new));
-
-	public CreateCopperStairBlock(Properties properties) {
-		super(Blocks.AIR.defaultBlockState(), properties);
-	}
-
-	@Override
-	public float getExplosionResistance() {
-		return explosionResistance;
-	}
-
-	@Override
-	public @NotNull MapCodec<? extends StairBlock> codec() {
-		return CODEC;
-	}
+ public CreateCopperStairBlock(Properties properties){super(Blocks.AIR.defaultBlockState(),properties);}
+ @Override public float getExplosionResistance(){return explosionResistance;}
 }

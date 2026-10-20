@@ -1,584 +1,197 @@
 package com.simibubi.create.content.kinetics.belt;
 
-import static com.simibubi.create.content.kinetics.belt.BeltPart.MIDDLE;
-import static com.simibubi.create.content.kinetics.belt.BeltSlope.HORIZONTAL;
-import static net.minecraft.core.Direction.AxisDirection.NEGATIVE;
-import static net.minecraft.core.Direction.AxisDirection.POSITIVE;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.function.Function;
-
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour;
-import com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour;
-import com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour.TransportedResult;
 import com.simibubi.create.content.kinetics.belt.transport.BeltInventory;
-import com.simibubi.create.content.kinetics.belt.transport.BeltMovementHandler;
-import com.simibubi.create.content.kinetics.belt.transport.BeltMovementHandler.TransportedEntityInfo;
-import com.simibubi.create.content.kinetics.belt.transport.BeltTunnelInteractionHandler;
-import com.simibubi.create.content.kinetics.belt.transport.ItemHandlerBeltSegment;
-import com.simibubi.create.content.kinetics.belt.transport.TransportedItemStack;
-import com.simibubi.create.content.logistics.tunnel.BrassTunnelBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.inventory.VersionedInventoryTrackerBehaviour;
-
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.Vec3i;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.world.Clearable;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.MoverType;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.DyeColor;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.LevelEvent;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
-
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
-import net.neoforged.neoforge.client.model.data.ModelData;
-import net.neoforged.neoforge.items.IItemHandler;
-
-public class BeltBlockEntity extends KineticBlockEntity implements Clearable {
-	public Map<Entity, TransportedEntityInfo> passengers;
-	public Optional<DyeColor> color;
-	public int beltLength;
-	public int index;
-	public Direction lastInsert;
-	public CasingType casing;
-	public boolean covered;
-
-	protected BlockPos controller;
-	protected BeltInventory inventory;
-	protected IItemHandler itemHandler;
-	public VersionedInventoryTrackerBehaviour invVersionTracker;
-
-	public CompoundTag trackerUpdateTag;
-
-	public static enum CasingType {
-		NONE, ANDESITE, BRASS;
-	}
-
-	public BeltBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		controller = BlockPos.ZERO;
-		itemHandler = null;
-		casing = CasingType.NONE;
-		color = Optional.empty();
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		event.registerBlockEntity(
-				Capabilities.ItemHandler.BLOCK,
-				AllBlockEntityTypes.BELT.get(),
-				(be, context) -> {
-						if (!BeltBlock.canTransportObjects(be.getBlockState()))
-							return null;
-						if (!be.isRemoved() && be.itemHandler == null)
-							be.initializeItemHandler();
-						return be.itemHandler;
-				}
-		);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		behaviours.add(new DirectBeltInputBehaviour(this).onlyInsertWhen(this::canInsertFrom)
-			.setInsertionHandler(this::tryInsertingFromSide).considerOccupiedWhen(this::isOccupied));
-		behaviours.add(new TransportedItemStackHandlerBehaviour(this, this::applyToAllItems)
-			.withStackPlacement(this::getWorldPositionOf));
-		behaviours.add(invVersionTracker = new VersionedInventoryTrackerBehaviour(this));
-	}
-
-	@Override
-	public void tick() {
-		// Init belt
-		if (beltLength == 0)
-			BeltBlock.initBelt(level, worldPosition);
-
-		super.tick();
-
-		if (!AllBlocks.BELT.has(level.getBlockState(worldPosition)))
-			return;
-
-		initializeItemHandler();
-
-		// Move Items
-		if (!isController())
-			return;
-
-		invalidateRenderBoundingBox();
-
-		getInventory().tick();
-
-		if (getSpeed() == 0)
-			return;
-
-		// Move Entities
-		if (passengers == null)
-			passengers = new HashMap<>();
-
-		List<Entity> toRemove = new ArrayList<>();
-		passengers.forEach((entity, info) -> {
-			boolean canBeTransported = BeltMovementHandler.canBeTransported(entity);
-			boolean leftTheBelt =
-				info.getTicksSinceLastCollision() > ((getBlockState().getValue(BeltBlock.SLOPE) != HORIZONTAL) ? 3 : 1);
-			if (!canBeTransported || leftTheBelt) {
-				toRemove.add(entity);
-				return;
-			}
-
-			info.tick();
-			BeltMovementHandler.transportEntity(this, entity, info);
-		});
-		toRemove.forEach(passengers::remove);
-	}
-
-	@Override
-	public float calculateStressApplied() {
-		if (!isController())
-			return 0;
-		return super.calculateStressApplied();
-	}
-
-	@Override
-	public AABB createRenderBoundingBox() {
-		if (!isController())
-			return super.createRenderBoundingBox();
-		else
-			return super.createRenderBoundingBox().inflate(beltLength + 1);
-	}
-
-	protected void initializeItemHandler() {
-		if (level.isClientSide || itemHandler != null)
-			return;
-		if (beltLength == 0 || controller == null)
-			return;
-		if (!level.isLoaded(controller))
-			return;
-		BlockEntity be = level.getBlockEntity(controller);
-		if (be == null || !(be instanceof BeltBlockEntity))
-			return;
-		BeltInventory inventory = ((BeltBlockEntity) be).getInventory();
-		if (inventory == null)
-			return;
-		itemHandler = new ItemHandlerBeltSegment(inventory, index);
-		invalidateCapabilities();
-	}
-
-	@Override
-	public void clearContent() {
-		if (inventory != null) {
-			inventory.getTransportedItems().clear();
-		}
-	}
-
-	@Override
-	public void destroy() {
-		super.destroy();
-		if (isController())
-			getInventory().ejectAll();
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		invalidateCapabilities();
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		if (controller != null)
-			compound.put("Controller", NbtUtils.writeBlockPos(controller));
-		compound.putBoolean("IsController", isController());
-		compound.putInt("Length", beltLength);
-		compound.putInt("Index", index);
-		NBTHelper.writeEnum(compound, "Casing", casing);
-		compound.putBoolean("Covered", covered);
-
-		color.ifPresent(dyeColor -> NBTHelper.writeEnum(compound, "Dye", dyeColor));
-
-		if (isController())
-			compound.put("Inventory", getInventory().write(registries));
-		super.write(compound, registries, clientPacket);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-
-		if (compound.getBoolean("IsController"))
-			controller = worldPosition;
-
-		color = compound.contains("Dye") ? Optional.of(NBTHelper.readEnum(compound, "Dye", DyeColor.class))
-			: Optional.empty();
-
-		if (!wasMoved) {
-			if (!isController())
-				controller = NBTHelper.readBlockPos(compound, "Controller");
-			trackerUpdateTag = compound;
-			index = compound.getInt("Index");
-			beltLength = compound.getInt("Length");
-		}
-
-		if (isController())
-			getInventory().read(compound.getCompound("Inventory"), registries);
-
-		CasingType casingBefore = casing;
-		boolean coverBefore = covered;
-		casing = NBTHelper.readEnum(compound, "Casing", CasingType.class);
-		covered = compound.getBoolean("Covered");
-
-		if (!clientPacket)
-			return;
-
-		if (casingBefore == casing && coverBefore == covered)
-			return;
-		if (!isVirtual())
-			requestModelDataUpdate();
-		if (hasLevel())
-			level.sendBlockUpdated(getBlockPos(), getBlockState(), getBlockState(), 16);
-	}
-
-	@Override
-	public void clearKineticInformation() {
-		super.clearKineticInformation();
-		beltLength = 0;
-		index = 0;
-		controller = null;
-		trackerUpdateTag = new CompoundTag();
-	}
-
-	public boolean applyColor(DyeColor colorIn) {
-		if (colorIn == null) {
-			if (!color.isPresent())
-				return false;
-		} else if (color.isPresent() && color.get() == colorIn)
-			return false;
-		if (level.isClientSide())
-			return true;
-
-		for (BlockPos blockPos : BeltBlock.getBeltChain(level, getController())) {
-			BeltBlockEntity belt = BeltHelper.getSegmentBE(level, blockPos);
-			if (belt == null)
-				continue;
-			belt.color = Optional.ofNullable(colorIn);
-			belt.setChanged();
-			belt.sendData();
-		}
-
-		return true;
-	}
-
-	public BeltBlockEntity getControllerBE() {
-		if (controller == null)
-			return null;
-		if (!level.isLoaded(controller))
-			return null;
-		BlockEntity be = level.getBlockEntity(controller);
-		if (be == null || !(be instanceof BeltBlockEntity))
-			return null;
-		return (BeltBlockEntity) be;
-	}
-
-	public void setController(BlockPos controller) {
-		this.controller = controller;
-	}
-
-	public BlockPos getController() {
-		return controller == null ? worldPosition : controller;
-	}
-
-	public boolean isController() {
-		return controller != null && worldPosition.getX() == controller.getX()
-			&& worldPosition.getY() == controller.getY() && worldPosition.getZ() == controller.getZ();
-	}
-
-	public float getBeltMovementSpeed() {
-		return getSpeed() / 480f;
-	}
-
-	public float getDirectionAwareBeltMovementSpeed() {
-		int offset = getBeltFacing().getAxisDirection()
-			.getStep();
-		if (getBeltFacing().getAxis() == Axis.X)
-			offset *= -1;
-		return getBeltMovementSpeed() * offset;
-	}
-
-	public boolean hasPulley() {
-		if (!AllBlocks.BELT.has(getBlockState()))
-			return false;
-		return getBlockState().getValue(BeltBlock.PART) != MIDDLE;
-	}
-
-	protected boolean isLastBelt() {
-		if (getSpeed() == 0)
-			return false;
-
-		Direction direction = getBeltFacing();
-		if (getBlockState().getValue(BeltBlock.SLOPE) == BeltSlope.VERTICAL)
-			return false;
-
-		BeltPart part = getBlockState().getValue(BeltBlock.PART);
-		if (part == MIDDLE)
-			return false;
-
-		boolean movingPositively = (getSpeed() > 0 == (direction.getAxisDirection()
-			.getStep() == 1)) ^ direction.getAxis() == Axis.X;
-		return part == BeltPart.START ^ movingPositively;
-	}
-
-	public Vec3i getMovementDirection(boolean firstHalf) {
-		return this.getMovementDirection(firstHalf, false);
-	}
-
-	public Vec3i getBeltChainDirection() {
-		return this.getMovementDirection(true, true);
-	}
-
-	protected Vec3i getMovementDirection(boolean firstHalf, boolean ignoreHalves) {
-		if (getSpeed() == 0)
-			return BlockPos.ZERO;
-
-		final BlockState blockState = getBlockState();
-		final Direction beltFacing = blockState.getValue(BlockStateProperties.HORIZONTAL_FACING);
-		final BeltSlope slope = blockState.getValue(BeltBlock.SLOPE);
-		final BeltPart part = blockState.getValue(BeltBlock.PART);
-		final Axis axis = beltFacing.getAxis();
-
-		Direction movementFacing = Direction.get(axis == Axis.X ? NEGATIVE : POSITIVE, axis);
-		boolean notHorizontal = blockState.getValue(BeltBlock.SLOPE) != HORIZONTAL;
-		if (getSpeed() < 0)
-			movementFacing = movementFacing.getOpposite();
-		Vec3i movement = movementFacing.getNormal();
-
-		boolean slopeBeforeHalf = (part == BeltPart.END) == (beltFacing.getAxisDirection() == POSITIVE);
-		boolean onSlope = notHorizontal && (part == MIDDLE || slopeBeforeHalf == firstHalf || ignoreHalves);
-		boolean movingUp = onSlope && slope == (movementFacing == beltFacing ? BeltSlope.UPWARD : BeltSlope.DOWNWARD);
-
-		if (!onSlope)
-			return movement;
-
-		return new Vec3i(movement.getX(), movingUp ? 1 : -1, movement.getZ());
-	}
-
-	public Direction getMovementFacing() {
-		Axis axis = getBeltFacing().getAxis();
-		return Direction.fromAxisAndDirection(axis, getBeltMovementSpeed() < 0 ^ axis == Axis.X ? NEGATIVE : POSITIVE);
-	}
-
-	protected Direction getBeltFacing() {
-		return getBlockState().getValue(BlockStateProperties.HORIZONTAL_FACING);
-	}
-
-	public BeltInventory getInventory() {
-		if (!isController()) {
-			BeltBlockEntity controllerBE = getControllerBE();
-			if (controllerBE != null)
-				return controllerBE.getInventory();
-			return null;
-		}
-		if (inventory == null) {
-			inventory = new BeltInventory(this);
-		}
-		return inventory;
-	}
-
-	private void applyToAllItems(float maxDistanceFromCenter,
-								 Function<TransportedItemStack, TransportedResult> processFunction) {
-		BeltBlockEntity controller = getControllerBE();
-		if (controller == null)
-			return;
-		BeltInventory inventory = controller.getInventory();
-		if (inventory != null)
-			inventory.applyToEachWithin(index + .5f, maxDistanceFromCenter, processFunction);
-	}
-
-	private Vec3 getWorldPositionOf(TransportedItemStack transported) {
-		BeltBlockEntity controllerBE = getControllerBE();
-		if (controllerBE == null)
-			return Vec3.ZERO;
-		return BeltHelper.getVectorForOffset(controllerBE, transported.beltPosition);
-	}
-
-	public void setCasingType(CasingType type) {
-		if (casing == type)
-			return;
-
-		BlockState blockState = getBlockState();
-		boolean shouldBlockHaveCasing = type != CasingType.NONE;
-
-		if (level.isClientSide) {
-			casing = type;
-			level.setBlock(worldPosition, blockState.setValue(BeltBlock.CASING, shouldBlockHaveCasing), 0);
-			requestModelDataUpdate();
-			level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 16);
-			return;
-		}
-
-		if (casing != CasingType.NONE)
-			level.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK, worldPosition,
-				Block.getId(casing == CasingType.ANDESITE ? AllBlocks.ANDESITE_CASING.getDefaultState()
-					: AllBlocks.BRASS_CASING.getDefaultState()));
-		if (blockState.getValue(BeltBlock.CASING) != shouldBlockHaveCasing)
-			KineticBlockEntity.switchToBlockState(level, worldPosition,
-				blockState.setValue(BeltBlock.CASING, shouldBlockHaveCasing));
-		casing = type;
-		setChanged();
-		sendData();
-	}
-
-	private boolean canInsertFrom(Direction side) {
-		if (getSpeed() == 0)
-			return false;
-		BlockState state = getBlockState();
-		if (state.hasProperty(BeltBlock.SLOPE) && (state.getValue(BeltBlock.SLOPE) == BeltSlope.SIDEWAYS
-			|| state.getValue(BeltBlock.SLOPE) == BeltSlope.VERTICAL))
-			return false;
-		return getMovementFacing() != side.getOpposite();
-	}
-
-	private boolean isOccupied(Direction side) {
-		BeltBlockEntity nextBeltController = getControllerBE();
-		if (nextBeltController == null)
-			return true;
-		BeltInventory nextInventory = nextBeltController.getInventory();
-		if (nextInventory == null)
-			return true;
-		if (getSpeed() == 0)
-			return true;
-		if (getMovementFacing() == side.getOpposite())
-			return true;
-		if (!nextInventory.canInsertAtFromSide(index, side))
-			return true;
-		return false;
-	}
-
-	private ItemStack tryInsertingFromSide(TransportedItemStack transportedStack, Direction side, boolean simulate) {
-		BeltBlockEntity nextBeltController = getControllerBE();
-		ItemStack inserted = transportedStack.stack;
-		ItemStack empty = ItemStack.EMPTY;
-
-		if (!BeltBlock.canTransportObjects(getBlockState()))
-			return inserted;
-		if (nextBeltController == null)
-			return inserted;
-		BeltInventory nextInventory = nextBeltController.getInventory();
-		if (nextInventory == null)
-			return inserted;
-
-		BlockEntity teAbove = level.getBlockEntity(worldPosition.above());
-		if (teAbove instanceof BrassTunnelBlockEntity tunnelBE) {
-			if (tunnelBE.hasDistributionBehaviour()) {
-				if (!tunnelBE.getStackToDistribute()
-					.isEmpty())
-					return inserted;
-				if (!tunnelBE.testFlapFilter(side.getOpposite(), inserted))
-					return inserted;
-				if (!simulate) {
-					BeltTunnelInteractionHandler.flapTunnel(nextInventory, index, side.getOpposite(), true);
-					tunnelBE.setStackToDistribute(inserted, side.getOpposite());
-				}
-				return empty;
-			}
-		}
-
-		if (isOccupied(side))
-			return inserted;
-		if (simulate)
-			return empty;
-
-		transportedStack = transportedStack.copy();
-		transportedStack.beltPosition = index + .5f - Math.signum(getDirectionAwareBeltMovementSpeed()) / 16f;
-
-		Direction movementFacing = getMovementFacing();
-		if (!side.getAxis()
-			.isVertical()) {
-			if (movementFacing != side) {
-				transportedStack.sideOffset = side.getAxisDirection()
-					.getStep() * .675f;
-				if (side.getAxis() == Axis.X)
-					transportedStack.sideOffset *= -1;
-			} else {
-				// This creates a smoother transition from belt to belt
-				float extraOffset = transportedStack.prevBeltPosition != 0
-					&& BeltHelper.getSegmentBE(level, worldPosition.relative(movementFacing.getOpposite())) != null
-						? .26f
-						: 0;
-				transportedStack.beltPosition =
-					getDirectionAwareBeltMovementSpeed() > 0 ? index - extraOffset : index + 1 + extraOffset;
-			}
-		}
-
-		transportedStack.prevSideOffset = transportedStack.sideOffset;
-		transportedStack.insertedAt = index;
-		transportedStack.insertedFrom = side;
-		transportedStack.prevBeltPosition = transportedStack.beltPosition;
-
-		BeltTunnelInteractionHandler.flapTunnel(nextInventory, index, side.getOpposite(), true);
-
-		nextInventory.addItem(transportedStack);
-		nextBeltController.setChanged();
-		nextBeltController.sendData();
-		return empty;
-	}
-
-	@Override
-	public ModelData getModelData() {
-		return ModelData.builder()
-			.with(BeltModel.CASING_PROPERTY, casing)
-			.with(BeltModel.COVER_PROPERTY, covered)
-			.build();
-	}
-
-	@Override
-	protected boolean canPropagateDiagonally(IRotate block, BlockState state) {
-		return state.hasProperty(BeltBlock.SLOPE) && (state.getValue(BeltBlock.SLOPE) == BeltSlope.UPWARD
-			|| state.getValue(BeltBlock.SLOPE) == BeltSlope.DOWNWARD);
-	}
-
-	@Override
-	public float propagateRotationTo(KineticBlockEntity target, BlockState stateFrom, BlockState stateTo, BlockPos diff,
-									 boolean connectedViaAxes, boolean connectedViaCogs) {
-		if (target instanceof BeltBlockEntity && !connectedViaAxes)
-			return getController().equals(((BeltBlockEntity) target).getController()) ? 1 : 0;
-		return 0;
-	}
-
-	public void invalidateItemHandler() {
-		invalidateCapabilities();
-		itemHandler = null;
-	}
-
-	public boolean shouldRenderNormally() {
-		if (level == null)
-			return isController();
-		BlockState state = getBlockState();
-		return state != null && state.hasProperty(BeltBlock.PART) && state.getValue(BeltBlock.PART) == BeltPart.START;
-	}
-
-	public void setCovered(boolean blockCoveringBelt) {
-		if (blockCoveringBelt == covered)
-			return;
-		covered = blockCoveringBelt;
-		notifyUpdate();
-	}
+import net.minecraft.world.level.storage.*;
+import net.minecraft.world.phys.*;
+
+public final class BeltBlockEntity extends KineticBlockEntity {
+    private BlockPos controller;
+    public int beltLength;
+    public int index;
+    private DyeColor color;
+    public enum CasingType { NONE, ANDESITE, BRASS }
+    private CasingType casing = CasingType.NONE;
+    private final BeltInventory inventory = new BeltInventory(this);
+    private long passengerTick = Long.MIN_VALUE;
+    private final java.util.Set<java.util.UUID> movedPassengers = new java.util.HashSet<>();
+    public BeltBlockEntity(BlockPos pos, BlockState state) { super(AllBlockEntityTypes.BELT, pos, state); }
+    // Source belts discover their real sloped chain neighbors in the shaft plane.
+    @Override protected boolean canPropagateDiagonally(com.simibubi.create.content.kinetics.base.IRotate block, BlockState state) {
+        return state.hasProperty(BeltBlock.SLOPE) && (state.getValue(BeltBlock.SLOPE) == BeltSlope.UPWARD
+            || state.getValue(BeltBlock.SLOPE) == BeltSlope.DOWNWARD);
+    }
+    @Override public float propagateRotationTo(KineticBlockEntity target, BlockState stateFrom, BlockState stateTo, BlockPos diff,
+            boolean connectedViaAxes, boolean connectedViaCogs) {
+        if (target instanceof BeltBlockEntity belt && !connectedViaAxes)
+            return getController().equals(belt.getController()) ? 1 : 0;
+        return 0;
+    }
+    public void configure(BlockPos controller, int index, int length) {
+        if (controller.equals(this.controller) && this.index == index && beltLength == length) return;
+        if (isController() && !controller.equals(worldPosition)) inventory.ejectAll();
+        this.controller = controller.immutable(); this.index = index; beltLength = length; contentsChanged();
+    }
+    /** Source Ponder restore reconnects the actual local belt controller without moving cargo. */
+    public void setController(BlockPos controller) { this.controller = controller; }
+    public BlockPos getController() { return controller == null ? worldPosition : controller; }
+    public boolean isController() { return controller != null && controller.equals(worldPosition); }
+    public BeltBlockEntity getControllerBE() { return level == null ? null : BeltHelper.getSegmentBE(level, getController()); }
+    public BeltInventory getInventory() { return inventory; }
+    public Direction getBeltFacing() { return getBlockState().getValue(BeltBlock.HORIZONTAL_FACING); }
+    public Direction getMovementFacing(){var axis=getBeltFacing().getAxis();return Direction.get(getBeltMovementSpeed()<0^axis==Direction.Axis.X?Direction.AxisDirection.NEGATIVE:Direction.AxisDirection.POSITIVE,axis);}
+    public boolean hasPulley() { return getBlockState().getValue(BeltBlock.PART) != BeltPart.MIDDLE; }
+    public DyeColor getColor() { return color; }
+    public CasingType getCasingType() { return getBlockState().getValue(BeltBlock.CASING) ? casing == CasingType.NONE ? CasingType.ANDESITE : casing : CasingType.NONE; }
+    public void setCasingType(CasingType type) {
+        if (level == null || level.isClientSide()) return;
+        casing = type;
+        level.setBlockAndUpdate(worldPosition, getBlockState().setValue(BeltBlock.CASING, type != CasingType.NONE));
+        contentsChanged();
+    }
+    public boolean applyColor(DyeColor dye) {
+        var master = getControllerBE();
+        if (master == null || !master.chainLoaded()) return false;
+        var chain = BeltBlock.getBeltChain(level, master.getBlockPos());
+        if (chain.stream().allMatch(pos -> BeltHelper.getSegmentBE(level, pos).color == dye)) return false;
+        if (!level.isClientSide()) for (var pos : chain) {
+            var segment = BeltHelper.getSegmentBE(level, pos);
+            if (segment != null) { segment.color = dye; segment.contentsChanged(); }
+        }
+        return true;
+    }
+    public float getBeltMovementSpeed() { return getSpeed() / 480f; }
+    public float getDirectionAwareBeltMovementSpeed() { return getBeltMovementSpeed() * getBeltFacing().getAxisDirection().getStep() * (getBeltFacing().getAxis() == Direction.Axis.X ? -1 : 1); }
+    public boolean chainLoaded() {
+        if (level == null || !isController() || beltLength < 2 || getBlockState().getValue(BeltBlock.PART) != BeltPart.START) return false;
+        var chain = BeltBlock.getBeltChain(level, worldPosition);
+        if (chain.size() != beltLength || level.getBlockState(chain.getLast()).getValue(BeltBlock.PART) != BeltPart.END) return false;
+        for (int i = 0; i < beltLength; i++) {
+            var location = chain.get(i);
+            var segment = BeltHelper.getSegmentBE(level, location);
+            if (segment == null || !segment.getController().equals(worldPosition) || segment.index != i || segment.beltLength != beltLength) return false;
+        }
+        return true;
+    }
+    public Storage<ItemVariant> storage(Direction side) {
+        var master = getControllerBE();
+        return master == null || !BeltBlock.canTransportObjects(getBlockState()) ? null : master.inventory.segment(index, side);
+    }
+    public void contentsChanged() { setChanged(); if (level instanceof ServerLevel) sync(); }
+    public void collectItems(Player player) {
+        var storage = storage(Direction.UP); if (storage == null) return;
+        for (var view : storage) {
+            var resource = view.getResource(); long amount;
+            try (Transaction transaction = Transaction.openOuter()) { amount = view.extract(resource, view.getAmount(), transaction); transaction.commit(); }
+            if (amount > 0) player.getInventory().placeItemBackInInventory(resource.toStack((int) amount), net.minecraft.util.Prediction.SERVER_ONLY);
+        }
+    }
+    private void transportEntities() {
+        if (level == null || getSpeed() == 0 || !BeltBlock.canTransportObjects(getBlockState())) return;
+        var area = new AABB(worldPosition).expandTowards(0, 1, 0);
+        var master = getControllerBE(); if (master == null || !master.chainLoaded()) return;
+        if (master.passengerTick != level.getGameTime()) { master.passengerTick = level.getGameTime(); master.movedPassengers.clear(); }
+        var state = getBlockState(); float movement = getDirectionAwareBeltMovementSpeed();
+        for (Entity entity : level.getEntities(null, area)) {
+            if (!entity.isAlive()||com.simibubi.create.content.equipment.armor.DivingBootsItem.isWornBy(entity)) continue;
+            var facing = getBeltFacing();
+            double offset = entity.position().subtract(Vec3.atCenterOf(master.getBlockPos()))
+                    .dot(new Vec3(facing.getStepX(), 0, facing.getStepZ())) + 0.5;
+            if (offset < 0 || offset >= master.beltLength || (int) offset != index) continue;
+            double surface = BeltHelper.getVectorForOffset(master, (float) offset).y + 5f / 16;
+            if (entity.getY() < surface - 0.15 || entity.getY() > surface + 0.9) continue;
+            if (entity instanceof ItemEntity || entity instanceof com.simibubi.create.content.logistics.box.PackageEntity) {
+                if (level.isClientSide() || entity.getDeltaMovement().y > 0.01) continue;
+                var stack=entity instanceof ItemEntity item?item.getItem():((com.simibubi.create.content.logistics.box.PackageEntity)entity).getBox();
+                if(!com.simibubi.create.content.logistics.box.PackageEntity.centerPackage(entity,BeltHelper.getVectorForOffset(master,(float)offset).add(0,5f/16,0)))continue;
+                if(entity instanceof com.simibubi.create.content.logistics.box.PackageEntity&&com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,worldPosition.above()) instanceof com.simibubi.create.content.logistics.tunnel.BeltTunnelBlockEntity)continue;
+                var storage = storage(Direction.UP); if (storage == null) continue;
+                try (Transaction transaction = Transaction.openOuter()) {
+                    long inserted = storage.insert(ItemVariant.of(stack), stack.getCount(), transaction);
+                    if (inserted == 0) continue;
+                    transaction.commit();
+                    var remaining = stack.copy(); remaining.shrink((int) inserted);
+                    if (remaining.isEmpty()) entity.discard(); else if(entity instanceof ItemEntity item)item.setItem(remaining);
+                }
+            } else {
+                if (entity instanceof Player player && (player.isShiftKeyDown()&&!com.simibubi.create.content.equipment.armor.CardboardArmorHandler.testForStealth(player) || player.getAbilities().flying || player.isSpectator())) continue;
+                var slope = state.getValue(BeltBlock.SLOPE);
+                boolean onSlope = slope.isDiagonal() && offset >= 0.5 && offset <= master.beltLength - 0.5;
+                double dy = !onSlope ? 0 : slope == BeltSlope.UPWARD ? movement : -movement;
+                double center = facing.getAxis() == Direction.Axis.X ? worldPosition.getZ() + 0.5 - entity.getZ() : worldPosition.getX() + 0.5 - entity.getX();
+                if (Math.abs(center) > 0.75) continue;
+                if (!master.movedPassengers.add(entity.getUUID())) continue;
+                double correction = center * Math.min(Math.abs(movement), 0.1) * 4;
+                var delta = new Vec3(facing.getStepX() * movement + (facing.getAxis() == Direction.Axis.Z ? correction : 0), dy,
+                        facing.getStepZ() * movement + (facing.getAxis() == Direction.Axis.X ? correction : 0));
+                LivingEntity living = entity instanceof LivingEntity mob && !(entity instanceof Player) ? mob : null;
+                double step = living == null ? 0 : living.getAttributeBaseValue(net.minecraft.world.entity.ai.attributes.Attributes.STEP_HEIGHT);
+                if (living != null) {
+                    living.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.STEP_HEIGHT).setBaseValue(1);
+                    living.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.SLOWNESS, 10, 1, false, false));
+                }
+                try { entity.move(MoverType.SELF, delta); }
+                finally { if (living != null) living.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.STEP_HEIGHT).setBaseValue(step); }
+                entity.setOnGround(true);
+                entity.resetFallDistance();
+                if (entity instanceof net.minecraft.server.level.ServerPlayer player) player.connection.resetFlyingTicks();
+            }
+        }
+    }
+    public static void tick(Level level, BlockPos pos, BlockState state, BeltBlockEntity belt) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, belt)) {
+            if (!createTick.shouldTick()) return;
+
+        KineticBlockEntity.tick(level, pos, state, belt);
+        if (belt.beltLength == 0 && !level.isClientSide() && level.getGameTime() % 5 == 0) BeltBlock.initBelt(level, pos);
+        if (belt.isController()) belt.inventory.tick();
+        belt.transportEntities();
+    
+        }
+    }
+    @Override public void preRemoveSideEffects(BlockPos pos, BlockState state) {
+        if (isController()) inventory.ejectAll();
+        super.preRemoveSideEffects(pos, state);
+    }
+    @Override protected void write(ValueOutput output, boolean clientPacket) {
+        super.write(output, clientPacket);
+        if (controller != null) output.store("Controller", BlockPos.CODEC, controller);
+        output.putBoolean("IsController", isController()); output.putInt("Length", beltLength); output.putInt("Index", index);
+        if (color != null) output.store("Dye", DyeColor.CODEC, color);
+        output.putString("Casing", getCasingType().name());
+        if (isController()) inventory.save(output.child("Inventory"));
+    }
+    @Override protected void read(ValueInput input, boolean clientPacket) {
+        super.read(input, clientPacket);
+        controller = input.read("Controller", BlockPos.CODEC).orElse(null);
+        if (input.getBooleanOr("IsController", false)) controller = worldPosition;
+        beltLength = input.getIntOr("Length", 0); index = input.getIntOr("Index", 0);
+        if (beltLength < 0 || beltLength == 1 || index < 0 || isController() && index != 0 || beltLength == 0 && index != 0 || beltLength > 0 && index >= beltLength)
+            throw new IllegalArgumentException("Invalid persisted belt length/index");
+        color = input.read("Dye", DyeColor.CODEC).orElse(null);
+        try { casing = CasingType.valueOf(input.getStringOr("Casing", "NONE").toUpperCase(java.util.Locale.ROOT)); }
+        catch (IllegalArgumentException ignored) { casing = CasingType.NONE; }
+        if (isController()) inventory.load(input.childOrEmpty("Inventory"));
+    }
+    private final com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour directBeltInput = com.simibubi.create.content.kinetics.belt.behaviour.DirectBeltInputBehaviour.createNative(this);
+    private final com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour transportedItemHandler = com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour.createNative(this);
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (directBeltInput != null) behaviours.add(directBeltInput);
+        if (transportedItemHandler != null) behaviours.add(transportedItemHandler);
+    }
 }

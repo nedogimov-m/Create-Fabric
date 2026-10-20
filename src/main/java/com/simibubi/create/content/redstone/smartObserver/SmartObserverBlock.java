@@ -1,158 +1,54 @@
 package com.simibubi.create.content.redstone.smartObserver;
 
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.content.fluids.FluidTransportBehaviour;
+import com.simibubi.create.*;
+import com.simibubi.create.content.fluids.FluidPropagator;
 import com.simibubi.create.content.kinetics.belt.behaviour.TransportedItemStackHandlerBehaviour;
-import com.simibubi.create.content.logistics.funnel.FunnelBlockEntity;
-import com.simibubi.create.content.redstone.DirectedDirectionalBlock;
-import com.simibubi.create.foundation.block.IBE;
+import com.simibubi.create.content.logistics.funnel.*;
+import com.simibubi.create.content.redstone.*;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.inventory.InvManipulationBehaviour;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.AttachFace;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.*;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.redstone.Orientation;
+import net.minecraft.world.phys.BlockHitResult;
 
-import net.neoforged.neoforge.capabilities.Capabilities;
-
-public class SmartObserverBlock extends DirectedDirectionalBlock implements IBE<SmartObserverBlockEntity> {
-
-	public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
-
-	public SmartObserverBlock(Properties properties) {
-		super(properties);
-		registerDefaultState(defaultBlockState().setValue(POWERED, false));
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(POWERED));
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		BlockState state = defaultBlockState();
-
-		Direction preferredFacing = null;
-		for (Direction face : context.getNearestLookingDirections()) {
-			BlockPos offsetPos = context.getClickedPos()
-				.relative(face);
-			Level world = context.getLevel();
-			boolean canDetect = false;
-			BlockEntity blockEntity = world.getBlockEntity(offsetPos);
-
-			if (BlockEntityBehaviour.get(blockEntity, TransportedItemStackHandlerBehaviour.TYPE) != null)
-				canDetect = true;
-			else if (BlockEntityBehaviour.get(blockEntity, FluidTransportBehaviour.TYPE) != null)
-				canDetect = true;
-			else if (blockEntity != null && (
-					context.getLevel().getCapability(Capabilities.ItemHandler.BLOCK, blockEntity.getBlockPos(), null) != null ||
-					context.getLevel().getCapability(Capabilities.FluidHandler.BLOCK, blockEntity.getBlockPos(), null) != null
-			))
-				canDetect = true;
-			else if (blockEntity instanceof FunnelBlockEntity)
-				canDetect = true;
-
-			if (canDetect) {
-				preferredFacing = face;
-				break;
-			}
-		}
-
-		if (preferredFacing == null) {
-			Direction facing = context.getNearestLookingDirection();
-			preferredFacing = context.getPlayer() != null && context.getPlayer()
-				.isShiftKeyDown() ? facing : facing.getOpposite();
-		}
-
-		if (preferredFacing.getAxis() == Axis.Y) {
-			state = state.setValue(TARGET, preferredFacing == Direction.UP ? AttachFace.CEILING : AttachFace.FLOOR);
-			preferredFacing = context.getHorizontalDirection();
-		}
-
-		return state.setValue(FACING, preferredFacing);
-	}
-
-	@Override
-	public boolean isSignalSource(BlockState state) {
-		return state.getValue(POWERED);
-	}
-
-	@Override
-	public int getSignal(BlockState blockState, BlockGetter blockAccess, BlockPos pos, Direction side) {
-		return isSignalSource(blockState) && (side == null || side != getTargetDirection(blockState)
-			.getOpposite()) ? 15 : 0;
-	}
-
-	@Override
-	public void tick(BlockState state, ServerLevel worldIn, BlockPos pos, RandomSource random) {
-		worldIn.setBlock(pos, state.setValue(POWERED, false), Block.UPDATE_CLIENTS);
-		worldIn.updateNeighborsAt(pos, this);
-	}
-
-	@Override
-	public boolean canConnectRedstone(BlockState state, BlockGetter world, BlockPos pos, Direction side) {
-		return side != state.getValue(FACING)
-			.getOpposite();
-	}
-
-	@Override
-	public void onRemove(BlockState state, Level worldIn, BlockPos pos, BlockState newState, boolean isMoving) {
-		IBE.onRemove(state, worldIn, pos, newState);
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level worldIn, BlockPos pos, Block blockIn, BlockPos fromPos,
-		boolean isMoving) {
-		InvManipulationBehaviour behaviour = BlockEntityBehaviour.get(worldIn, pos, InvManipulationBehaviour.TYPE);
-		if (behaviour != null)
-			behaviour.onNeighborChanged(fromPos);
-	}
-
-	public void onFunnelTransfer(Level world, BlockPos funnelPos, ItemStack transferred) {
-		for (Direction direction : Iterate.directions) {
-			BlockPos detectorPos = funnelPos.relative(direction);
-			BlockState detectorState = world.getBlockState(detectorPos);
-			if (!AllBlocks.SMART_OBSERVER.has(detectorState))
-				continue;
-			if (SmartObserverBlock.getTargetDirection(detectorState) != direction.getOpposite())
-				continue;
-			withBlockEntityDo(world, detectorPos, be -> {
-				FilteringBehaviour filteringBehaviour = BlockEntityBehaviour.get(be, FilteringBehaviour.TYPE);
-				if (filteringBehaviour == null)
-					return;
-				if (!filteringBehaviour.test(transferred))
-					return;
-				be.activate(4);
-			});
-		}
-	}
-
-	@Override
-	public Class<SmartObserverBlockEntity> getBlockEntityClass() {
-		return SmartObserverBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends SmartObserverBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.SMART_OBSERVER.get();
-	}
-
+public final class SmartObserverBlock extends DirectedDirectionalBlock {
+    public static final BooleanProperty POWERED=BlockStateProperties.POWERED;
+    public static final FilteredDetectorFilterSlot FILTER_SLOT=new FilteredDetectorFilterSlot(false);
+    public SmartObserverBlock(Properties properties){super(properties);registerDefaultState(defaultBlockState().setValue(POWERED,false));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){super.createBlockStateDefinition(builder);builder.add(POWERED);}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new SmartObserverBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity>BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.SMART_OBSERVER,SmartObserverBlockEntity::tick);}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){
+        Direction preferred=null;var level=context.getLevel();
+        for(var side:context.getNearestLookingDirections()){
+            var target=context.getClickedPos().relative(side);if(!level.isLoaded(target))continue;var entity=LoadedLevelAccess.blockEntity(level,target);
+            if(BlockEntityBehaviour.get(entity,TransportedItemStackHandlerBehaviour.TYPE)!=null||FluidPropagator.getPipe(level,target)!=null||SmartObserverBlockEntity.findItems(level,target)!=null||SmartObserverBlockEntity.findFluids(level,target)!=null||entity instanceof FunnelBlockEntity||entity instanceof com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorBlockEntity){preferred=side;break;}
+        }
+        if(preferred==null){var facing=context.getNearestLookingDirection();preferred=context.getPlayer()!=null&&context.getPlayer().isShiftKeyDown()?facing:facing.getOpposite();}
+        return preferred.getAxis().isVertical()?defaultBlockState().setValue(TARGET,preferred==Direction.UP?AttachFace.CEILING:AttachFace.FLOOR).setValue(FACING,context.getHorizontalDirection()):defaultBlockState().setValue(FACING,preferred);
+    }
+    @Override protected boolean isSignalSource(BlockState state){return state.getValue(POWERED);}
+    @Override protected int getSignal(BlockState state,BlockGetter level,BlockPos pos,Direction side){return state.getValue(POWERED)&&side!=getTargetDirection(state).getOpposite()?15:0;}
+    @Override protected boolean shouldRedstoneWireConnectTo(BlockState state,BlockGetter level,BlockPos pos,Direction side){return side!=state.getValue(FACING).getOpposite();}
+    @Override protected void tick(BlockState state,ServerLevel level,BlockPos pos,RandomSource random){level.setBlock(pos,state.setValue(POWERED,false),Block.UPDATE_CLIENTS);level.updateNeighborsAt(pos,this);}
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block neighbor,Orientation orientation,boolean moved){if(LoadedLevelAccess.blockEntity(level,pos) instanceof SmartObserverBlockEntity observer)observer.resetInventoryTracking();}
+    public InteractionResult onWrenched(BlockState state,UseOnContext context){var next=getRotatedBlockState(state,context.getClickedFace());if(!context.getLevel().isClientSide())context.getLevel().setBlockAndUpdate(context.getClickedPos(),next);return InteractionResult.SUCCESS;}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){return com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringSettings.interact(level,player,hand,hit);}
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){return useItemOn(ItemStack.EMPTY,state,level,pos,player,InteractionHand.MAIN_HAND,hit);}
+    public void onFunnelTransfer(Level level,BlockPos pos,ItemStack stack){
+        if(level.isClientSide()||stack.isEmpty())return;
+        for(var side:Direction.values()){var observerPos=pos.relative(side);var state=LoadedLevelAccess.blockState(level,observerPos);if(!state.is(this)||getTargetDirection(state)!=side.getOpposite())continue;if(LoadedLevelAccess.blockEntity(level,observerPos) instanceof SmartObserverBlockEntity observer&&observer.filtering.test(stack))observer.activate(4);}
+    }
 }

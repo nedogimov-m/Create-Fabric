@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "create:block/rose_quartz_lamp_powered",
+    "particle": "create:block/rose_quartz_lamp_powered"
+  }
+}

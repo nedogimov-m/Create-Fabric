@@ -17,7 +17,7 @@ import java.util.function.Consumer;
 
 import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.apache.commons.lang3.mutable.MutableObject;
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import com.simibubi.create.Create;
 import com.simibubi.create.api.behaviour.movement.MovementBehaviour;
@@ -42,18 +42,18 @@ import com.simibubi.create.content.trains.signal.SignalBoundary;
 import com.simibubi.create.content.trains.signal.SignalEdgeGroup;
 import com.simibubi.create.content.trains.station.GlobalStation;
 import com.simibubi.create.content.trains.station.StationBlockEntity;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.infrastructure.config.AllConfigs;
+import com.simibubi.create.content.trains.TrainAdvancements;
+import com.simibubi.create.content.trains.TrainManager;
+import com.simibubi.create.content.trains.TrainConfig;
+import com.simibubi.create.content.trains.RailwayGraphManager;
+import com.simibubi.create.foundation.fluid.FluidStack;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
+import com.simibubi.create.content.trains.graph.RailMath;
 
-import net.createmod.catnip.codecs.stream.CatnipLargerStreamCodecs;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
 import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.Iterate;
 import net.createmod.catnip.data.Pair;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.createmod.catnip.platform.CatnipServices;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Direction.Axis;
@@ -67,7 +67,7 @@ import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -77,24 +77,23 @@ import net.minecraft.world.level.Level.ExplosionInteraction;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler.FluidAction;
-import net.neoforged.neoforge.items.IItemHandlerModifiable;
-import net.neoforged.neoforge.items.ItemHandlerHelper;
 
 public class Train {
-	public static final StreamCodec<RegistryFriendlyByteBuf, Train> STREAM_CODEC = CatnipLargerStreamCodecs.composite(
-			UUIDUtil.STREAM_CODEC, train -> train.id,
-			CatnipStreamCodecBuilders.nullable(UUIDUtil.STREAM_CODEC), train -> train.owner,
-			CatnipStreamCodecBuilders.list(Carriage.STREAM_CODEC), train -> train.carriages,
-			CatnipStreamCodecBuilders.list(ByteBufCodecs.VAR_INT), train -> train.carriageSpacing,
-			ByteBufCodecs.BOOL, train -> train.doubleEnded,
-			ComponentSerialization.STREAM_CODEC, train -> train.name,
-			TrainIconType.STREAM_CODEC, train -> train.icon,
-			ByteBufCodecs.INT, train -> train.mapColorIndex,
-			Train::new
-	);
+    public static final int MAX_CARRIAGES=200;
+    /** Source public description: true bogey metadata and train identity, never cargo/body/passengers. */
+    public static final StreamCodec<RegistryFriendlyByteBuf,Train> STREAM_CODEC=StreamCodec.of((buffer,train)->{
+        if(train.isRestoring())throw new IllegalStateException("A restoring Train has no active public carriage description");
+        buffer.writeUUID(train.id);buffer.writeBoolean(train.owner!=null);if(train.owner!=null)buffer.writeUUID(train.owner);
+        buffer.writeVarInt(train.carriages.size());for(var carriage:train.carriages)Carriage.STREAM_CODEC.encode(buffer,carriage);
+        buffer.writeVarInt(train.carriageSpacing.size());for(int spacing:train.carriageSpacing)buffer.writeVarInt(spacing);
+        buffer.writeBoolean(train.doubleEnded);ComponentSerialization.STREAM_CODEC.encode(buffer,train.name);TrainIconType.STREAM_CODEC.encode(buffer,train.icon);buffer.writeInt(train.mapColorIndex);
+    },buffer->{var id=buffer.readUUID();var owner=buffer.readBoolean()?buffer.readUUID():null;int count=descriptionCount(buffer,1,MAX_CARRIAGES);var carriages=new ArrayList<Carriage>();for(int i=0;i<count;i++)carriages.add(Carriage.STREAM_CODEC.decode(buffer));count=descriptionCount(buffer,0,MAX_CARRIAGES-1);var spacing=new ArrayList<Integer>();for(int i=0;i<count;i++)spacing.add(buffer.readVarInt());boolean doubleEnded=buffer.readBoolean();var name=ComponentSerialization.STREAM_CODEC.decode(buffer);var icon=TrainIconType.STREAM_CODEC.decode(buffer);int color=buffer.readInt();return new Train(id,owner,carriages,spacing,doubleEnded,name,icon,color);});
+    private static int descriptionCount(RegistryFriendlyByteBuf buffer,int min,int max){int count=buffer.readVarInt();if(count<min||count>max)throw new io.netty.handler.codec.DecoderException("Invalid actual Train description size");return count;}
+    private TrainManager manager;
+    public TrainManager manager(){if(manager==null)throw new IllegalStateException("Public or unregistered Train has no native server traffic owner");return manager;}
+    public @Nullable TrainManager trafficManager(){return manager;}
+    public void bindManager(TrainManager owner){if(manager!=null&&owner!=null&&manager!=owner)throw new IllegalStateException("Train already belongs to another actual server");manager=owner;}
+    private TrainConfig.Values config(){return manager==null?TrainConfig.client():TrainConfig.server();}
 
 	public double speed = 0;
 	public double targetSpeed = 0;
@@ -138,6 +137,12 @@ public class Train {
 	public int migrationCooldown;
 	public boolean derailed;
 
+    private UUID disassemblyRequester;
+    private net.minecraft.core.GlobalPos disassemblyReturnPosition;
+    private ItemStack disassemblySchedule=ItemStack.EMPTY;
+    private UUID disassemblyDropId;
+    private boolean disassemblyDropAttempted;
+
 	public int fuelTicks;
 	public int honkTicks;
 
@@ -158,17 +163,28 @@ public class Train {
 	}
 
 	public Train(UUID id, UUID owner, TrackGraph graph, List<Carriage> carriages, List<Integer> carriageSpacing, boolean doubleEnded, int mapColorIndex) {
-		this(id, owner, graph, carriages, carriageSpacing, doubleEnded, CreateLang.translateDirect("train.unnamed"), TrainIconType.getDefault(), mapColorIndex);
+		this(id, owner, graph, carriages, carriageSpacing, doubleEnded, Component.translatable("create." + "train.unnamed"), TrainIconType.getDefault(), mapColorIndex);
 	}
 
 	public Train(UUID id, UUID owner, TrackGraph graph, List<Carriage> carriages, List<Integer> carriageSpacing,
 		boolean doubleEnded, Component name, TrainIconType icon, int mapColorIndex) {
 
-		this.id = id;
+        java.util.Objects.requireNonNull(carriages);
+        java.util.Objects.requireNonNull(carriageSpacing);
+        var checkedCarriages = List.copyOf(carriages);
+        var checkedSpacing = List.copyOf(carriageSpacing);
+        if(checkedCarriages.isEmpty()||checkedCarriages.size()>MAX_CARRIAGES||checkedSpacing.size()!=checkedCarriages.size()-1||checkedSpacing.stream().anyMatch(value->value<0||value>512))throw new IllegalArgumentException("Invalid actual Train carriage/spacing description");
+        var distinct = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Carriage,Boolean>());
+        for(var carriage:checkedCarriages)
+            if(!distinct.add(carriage)||carriage.train!=null)
+                throw new IllegalArgumentException("An actual Carriage may belong to exactly one Train");
+        java.util.Objects.requireNonNull(name);
+        java.util.Objects.requireNonNull(icon);
+		this.id = java.util.Objects.requireNonNull(id);
 		this.owner = owner;
 		this.graph = graph;
-		this.carriages = carriages;
-		this.carriageSpacing = carriageSpacing;
+		this.carriages = checkedCarriages;
+		this.carriageSpacing = checkedSpacing;
 		this.icon = icon;
 		this.mapColorIndex = mapColorIndex;
 		this.stress = new double[carriageSpacing.size()];
@@ -176,7 +192,7 @@ public class Train {
 		this.status = new TrainStatus(this);
 		this.doubleEnded = doubleEnded;
 
-		carriages.forEach(c -> c.setTrain(this));
+		checkedCarriages.forEach(c -> c.setTrain(this));
 
 		navigation = new Navigation(this);
 		runtime = new ScheduleRuntime(this);
@@ -187,11 +203,23 @@ public class Train {
 		reservedSignalBlocks = new HashSet<>();
 		occupiedObservers = new HashSet<>();
 		cachedObserverFiltering = new HashMap<>();
-		tickOffset = Create.RANDOM.nextInt(100);
+		tickOffset = java.util.concurrent.ThreadLocalRandom.current().nextInt(100);
 	}
+
+    public void validateMotion(){
+        if(!Double.isFinite(speed)||!Double.isFinite(targetSpeed)||!Double.isFinite(throttle)||throttle<0||throttle>1
+            ||speedBeforeStall!=null&&!Double.isFinite(speedBeforeStall)||fuelTicks<0)
+            throw new IllegalArgumentException("Invalid actual native Train speed/throttle/fuel state");
+    }
+
+    public boolean isRestoring(){return carriages.stream().anyMatch(carriage->carriage.isRestoring()||carriage.isWorldRestored());}
 
 	public void earlyTick(Level level) {
 		status.tick(level);
+        if(isRestoring()){
+            if(carriages.stream().anyMatch(carriage->!carriage.isWorldRestored()))addToSignalGroups(occupiedSignalBlocks.keySet());
+            return;
+        }
 		if (graph == null && !migratingPoints.isEmpty())
 			reattachToTracks(level);
 		if (graph == null) {
@@ -219,13 +247,13 @@ public class Train {
 			storageVersion += carriage.storage.getVersion();
 
 		for (UUID uuid : occupiedObservers) {
-			TrackObserver observer = graph.getPoint(EdgePointType.OBSERVER, uuid);
+			TrackObserver observer = graph.getPoint(com.simibubi.create.content.trains.observer.ObserverEdgePoints.OBSERVER, uuid);
 			if (observer == null)
 				continue;
 
 			FilterItemStack filter = observer.getFilter();
 			if (filter.isEmpty()) {
-				observer.keepAlive(this);
+				observer.keepAlive(id);
 				continue;
 			}
 
@@ -234,7 +262,7 @@ public class Train {
 
 			if (cachedMatch.getFirst() == storageVersion) {
 				if (shouldActivate)
-					observer.keepAlive(this);
+					observer.keepAlive(id);
 				continue;
 			}
 
@@ -243,40 +271,41 @@ public class Train {
 				if (shouldActivate)
 					break;
 
-				IItemHandlerModifiable inv = carriage.storage.getAllItems();
-				if (inv != null) {
-					for (int slot = 0; slot < inv.getSlots(); slot++) {
-						if (shouldActivate)
-							break;
-						ItemStack extractItem = inv.extractItem(slot, 1, true);
-						if (extractItem.isEmpty())
-							continue;
-						shouldActivate |= filter.test(level, extractItem);
-					}
-				}
-
-				IFluidHandler tank = carriage.storage.getFluids();
-				if (tank != null) {
-					for (int slot = 0; slot < tank.getTanks(); slot++) {
-						if (shouldActivate)
-							break;
-						FluidStack drain = tank.drain(1, FluidAction.SIMULATE);
-						if (drain.isEmpty())
-							continue;
-						shouldActivate |= filter.test(level, drain);
-					}
-				}
+                var inventory=carriage.storage.getAllItems();
+                if(inventory!=null)for(var slot:inventory){
+                    if(slot.isResourceBlank()||slot.getAmount()<1)continue;
+                    try(var transaction=Transaction.openOuter()){
+                        var item=slot.getResource();
+                        if(slot.extract(item,1,transaction)==1&&filter.test(level,item.toStack(1))){
+                            shouldActivate=true;
+                            break;
+                        }
+                    }
+                }
+                if(!shouldActivate){
+                    var tanks=carriage.storage.getFluids();
+                    if(tanks!=null)for(var tank:tanks){
+                        if(tank.isResourceBlank()||tank.getAmount()<1)continue;
+                        try(var transaction=Transaction.openOuter()){
+                            var fluid=tank.getResource();
+                            if(tank.extract(fluid,1,transaction)==1&&filter.test(level,new FluidStack(fluid,1))){
+                                shouldActivate=true;
+                                break;
+                            }
+                        }
+                    }
+                }
 			}
 
 			cachedObserverFiltering.put(uuid, Pair.of(storageVersion, shouldActivate));
 
 			if (shouldActivate)
-				observer.keepAlive(this);
+				observer.keepAlive(id);
 		}
 	}
 
 	private void addToSignalGroups(Collection<UUID> groups) {
-		Map<UUID, SignalEdgeGroup> groupMap = Create.RAILWAYS.signalEdgeGroups;
+		Map<UUID, SignalEdgeGroup> groupMap = manager().signalEdgeGroups();
 		for (Iterator<UUID> iterator = groups.iterator(); iterator.hasNext();) {
 			SignalEdgeGroup signalEdgeGroup = groupMap.get(iterator.next());
 			if (signalEdgeGroup == null)
@@ -287,7 +316,14 @@ public class Train {
 	}
 
 	public void tick(Level level) {
-		Create.RAILWAYS.markTracksDirty();
+        manager().markDirty();
+        if(isRestoring()){
+            speed=targetSpeed=0;
+            reservedSignalBlocks.clear();
+            manager().hideRestoring(this);
+            if(CarriageDisassembly.resume(this))finishDisassembly();
+            return;
+        }
 
 		if (graph == null) {
 			carriages.forEach(c -> c.manageEntities(level));
@@ -336,7 +372,7 @@ public class Train {
 				if (leadingPoint.node1 != null && trailingPoint.node1 != null) {
 					ResourceKey<Level> d1 = leadingPoint.node1.getLocation().dimension;
 					ResourceKey<Level> d2 = trailingPoint.node1.getLocation().dimension;
-					for (boolean b : Iterate.trueAndFalse) {
+					for (boolean b : new boolean[]{true,false}) {
 						ResourceKey<Level> d = b ? d1 : d2;
 						if (!b && d1.equals(d2))
 							continue;
@@ -355,7 +391,7 @@ public class Train {
 
 						double distanceTo = leadingAnchor.distanceToSqr(trailingAnchor);
 						if (carriage.leadingBogey().isUpsideDown() != previousCarriage.trailingBogey().isUpsideDown()) {
-							distanceTo = Math.sqrt(distanceTo - 4);
+							distanceTo = Math.sqrt(Math.max(0,distanceTo - 4));
 						} else {
 							distanceTo = Math.sqrt(distanceTo);
 						}
@@ -488,17 +524,17 @@ public class Train {
 				return true;
 			}
 
-			UUID groupId = signal.getGroup(couple.getSecond()
+			UUID groupId = signal.groupFor(couple.getSecond()
 				.getSecond());
-			SignalEdgeGroup signalEdgeGroup = Create.RAILWAYS.signalEdgeGroups.get(groupId);
+			SignalEdgeGroup signalEdgeGroup = manager().signalEdgeGroups().get(groupId);
 			if (signalEdgeGroup == null)
 				return false;
 
 			if ((runtime.getSchedule() == null || runtime.paused) && signalEdgeGroup.isOccupiedUnless(this))
 				carriages.forEach(c -> c.forEachPresentEntity(cce -> cce.getControllingPlayer()
-					.ifPresent(uuid -> AllAdvancements.RED_SIGNAL.awardTo(cce.level().getPlayerByUUID(uuid)))));
+					.ifPresent(uuid -> TrainAdvancements.RED_SIGNAL.awardTo(cce.level().getPlayerByUUID(uuid)))));
 
-			signalEdgeGroup.reserved = signal;
+			manager().reserve(this,signalEdgeGroup,signal);
 			occupy(groupId, signal.id);
 			return false;
 
@@ -536,7 +572,7 @@ public class Train {
 			}
 			if (!(couple.getFirst()instanceof SignalBoundary signal))
 				return false;
-			UUID groupId = signal.getGroup(couple.getSecond()
+			UUID groupId = signal.groupFor(couple.getSecond()
 				.getFirst());
 			occupiedSignalBlocks.remove(groupId);
 			return false;
@@ -565,8 +601,8 @@ public class Train {
 		partialRefresh &= navigation.distanceToDestination % 50 <= 5;
 
 		if (blockingSignal != null && navigation.ticksWaitingForSignal % 100 == 50) {
-			SignalBoundary signal = graph.getPoint(EdgePointType.SIGNAL, blockingSignal.getFirst());
-			fullRefresh |= signal != null && signal.types.get(blockingSignal.getSecond()) == SignalType.CROSS_SIGNAL;
+			SignalBoundary signal = graph.getPoint(com.simibubi.create.content.trains.signal.SignalEdgePoints.SIGNAL, blockingSignal.getFirst());
+			fullRefresh |= signal != null && signal.type(blockingSignal.getSecond()) == SignalType.CROSS_SIGNAL;
 		}
 
 		if (signalRefresh)
@@ -653,19 +689,24 @@ public class Train {
 	}
 
 	public Pair<Train, Vec3> findCollidingTrain(Level level, Vec3 start, Vec3 end, ResourceKey<Level> dimension) {
-		Vec3 diff = end.subtract(start);
-		double maxDistanceSqr = Math.pow(AllConfigs.server().trains.maxAssemblyLength.get(), 2.0);
+		return findCollidingTrain(level,start,end,dimension,graph);
+	}
 
-		Trains: for (Train train : Create.RAILWAYS.sided(level).trains.values()) {
+	/** Relocation probes the actual target graph without changing this train's old graph. */
+	public Pair<Train, Vec3> findCollidingTrain(Level level, Vec3 start, Vec3 end, ResourceKey<Level> dimension, TrackGraph collisionGraph) {
+		Vec3 diff = end.subtract(start);
+		double maxDistanceSqr = Math.pow(config().maxAssemblyLength(), 2.0);
+
+		Trains: for (Train train : level.isClientSide()?TrainClientRegistry.trains().values():manager().trains().values()) {
 			if (train == this)
 				continue;
-			if (train.graph != null && train.graph != graph)
+			if (train.graph != null && train.graph != collisionGraph)
 				continue;
 
 			Vec3 lastPoint = null;
 
 			for (Carriage otherCarriage : train.carriages) {
-				for (boolean betweenBits : Iterate.trueAndFalse) {
+				for (boolean betweenBits : new boolean[]{true,false}) {
 					if (betweenBits && lastPoint == null)
 						continue;
 
@@ -699,10 +740,10 @@ public class Train {
 					Vec3 diff2 = end2.subtract(start2);
 					Vec3 normedDiff = diff.normalize();
 					Vec3 normedDiff2 = diff2.normalize();
-					double[] intersect = VecHelper.intersect(start, start2, normedDiff, normedDiff2, Axis.Y);
+					double[] intersect = RailMath.intersect(start, start2, normedDiff, normedDiff2, Axis.Y);
 
 					if (intersect == null) {
-						Vec3 intersectSphere = VecHelper.intersectSphere(start2, normedDiff2, start, .125f);
+						Vec3 intersectSphere = TrainMath.intersectSphere(start2, normedDiff2, start, .125f);
 						if (intersectSphere == null)
 							continue;
 						if (!Mth.equal(normedDiff2.dot(intersectSphere.subtract(start2)
@@ -747,68 +788,109 @@ public class Train {
 					if (controllingPlayer.isPresent() && controllingPlayer.get()
 						.equals(p.getUUID()))
 						return;
-					AllAdvancements.TRAIN_CRASH.awardTo(p);
+					TrainAdvancements.TRAIN_CRASH.awardTo(p);
 				}));
 
 		if (backwardsDriver != null)
-			AllAdvancements.TRAIN_CRASH_BACKWARDS.awardTo(backwardsDriver);
+			TrainAdvancements.TRAIN_CRASH_BACKWARDS.awardTo(backwardsDriver);
 	}
 
-	public boolean disassemble(Direction assemblyDirection, BlockPos pos) {
-		if (!canDisassemble())
-			return false;
+    public boolean disassemble(Direction direction,BlockPos position,Player requester){
+        if(requester==null||requester.level().getServer()!=manager().server())throw new IllegalArgumentException("Actual native disassembly requester required");
+        if(isRestoring()&&disassemblyRequester!=null&&!disassemblyRequester.equals(requester.getUUID()))return false;
+        disassemblyRequester=requester.getUUID();
+        boolean completed=disassemble(direction,position);
+        if(!completed&&!isRestoring()){disassemblyRequester=null;disassemblyReturnPosition=null;}
+        return completed;
+    }
 
-		int offset = 1;
-		boolean backwards = currentlyBackwards;
-		Level level = null;
+    public boolean disassemble(Direction assemblyDirection,BlockPos pos){
+        boolean completed;
+        if(isRestoring())completed=CarriageDisassembly.resume(this);
+        else{
+            if(!canDisassemble())return false;
+            var station=getCurrentStation();
+            if(station!=null)disassemblyReturnPosition=station.owner();
+            else{
+                var front=carriages.getFirst().anyAvailableEntity();
+                if(front==null)return false;
+                disassemblyReturnPosition=net.minecraft.core.GlobalPos.of(front.level().dimension(),pos);
+            }
+            completed=CarriageDisassembly.begin(this,assemblyDirection,pos);
+        }
+        if(isRestoring()){
+            speed=targetSpeed=0;
+            reservedSignalBlocks.clear();
+            manager().hideRestoring(this);
+            manager().markDirty();
+        }
+        if(completed)return finishDisassembly();
+        return false;
+    }
 
-		for (int i = 0; i < carriages.size(); i++) {
+    /** Derived solely from actual consumed row receipts and absence of every private schedule owner. */
+    public boolean hasCompletedDisassembly(){
+        return isRestoring()&&carriages.stream().allMatch(Carriage::isWorldRestored)
+            &&runtime.getSchedule()==null&&disassemblySchedule.isEmpty()&&disassemblyDropId==null&&!disassemblyDropAttempted;
+    }
 
-			Carriage carriage = carriages.get(backwards ? carriages.size() - i - 1 : i);
-			CarriageContraptionEntity entity = carriage.anyAvailableEntity();
-			if (entity == null)
-				return false;
-			level = entity.level();
+    private boolean finishDisassembly(){
+        if(carriages.stream().anyMatch(carriage->!carriage.isWorldRestored()))
+            throw new IllegalStateException("Native Train disassembly has unfinished actual carriage owners");
+        if(!returnDisassembledSchedule())return false;
+        var station=getCurrentStation();
+        if(station!=null){
+            var world=manager().server().getLevel(station.getBlockEntityDimension());
+            if(world!=null&&LoadedLevelAccess.blockEntity(world,station.getBlockEntityPos()) instanceof StationBlockEntity owner&&station.ownedBy(owner)){
+                // Native BE load clears its transient point binding. Real Train ticks may finish
+                // consumed restoration before that BE's next tick; refresh the actual binding
+                // and retain these receipts until the exact current graph owner is ready.
+                if(owner.targeting().resolveTick()!=station)return false;
+                owner.rememberDisassembledTrain(this);
+            }
+            station.cancelReservation(this);
+        }
+        manager().remove(id);
+        return true;
+    }
 
-			if (entity.getContraption()instanceof CarriageContraption cc)
-				cc.returnStorageForDisassembly(carriage.storage);
-			entity.setPos(Vec3
-				.atLowerCornerOf(pos.relative(assemblyDirection, backwards ? offset + carriage.bogeySpacing : offset).below(carriage.leadingBogey().isUpsideDown() ? 2 : 0)));
-			entity.disassemble();
-
-			for (CarriageBogey bogey : carriage.bogeys) {
-				if (bogey == null)
-					continue;
-				Vec3 bogeyPosition = bogey.getAnchorPosition();
-				if (bogeyPosition == null) continue;
-				BlockEntity be = level.getBlockEntity(BlockPos.containing(bogeyPosition));
-				if (!(be instanceof AbstractBogeyBlockEntity sbbe))
-					continue;
-				sbbe.setBogeyData(bogey.bogeyData);
-			}
-
-			offset += carriage.bogeySpacing;
-
-			if (i < carriageSpacing.size())
-				offset += carriageSpacing.get(backwards ? carriageSpacing.size() - i - 1 : i);
-		}
-
-		GlobalStation currentStation = getCurrentStation();
-		if (currentStation != null) {
-			currentStation.cancelReservation(this);
-			BlockPos blockEntityPos = currentStation.getBlockEntityPos();
-			if (level.getBlockEntity(blockEntityPos) instanceof StationBlockEntity sbe) {
-				sbe.lastDisassembledTrainName = name.copy();
-				sbe.lastDisassembledMapColorIndex = mapColorIndex;
-			}
-		}
-
-		Create.RAILWAYS.removeTrain(id);
-		CatnipServices.NETWORK.sendToAllClients(new RemoveTrainPacket(this));
-		return true;
-	}
+    private boolean returnDisassembledSchedule(){
+        if(runtime.getSchedule()!=null){
+            if(!disassemblySchedule.isEmpty())throw new IllegalStateException("Native disassembly schedule has two owners");
+            disassemblySchedule=runtime.returnSchedule(manager().server().registryAccess());
+            if(!disassemblySchedule.isEmpty())disassemblyDropId=UUID.randomUUID();
+            manager().markDirty();
+        }
+        if(disassemblySchedule.isEmpty())return true;
+        var player=disassemblyRequester==null?null:manager().server().getPlayerList().getPlayer(disassemblyRequester);
+        if(disassemblyReturnPosition==null)throw new IllegalStateException("Actual native schedule return position is missing");
+        if(disassemblyDropId==null)throw new IllegalStateException("Actual native schedule return identity is missing");
+        var world=manager().server().getLevel(disassemblyReturnPosition.dimension());
+        boolean ready=world!=null&&com.simibubi.create.foundation.utility.LoadedEntityAccess.isReady(world,disassemblyReturnPosition.pos());
+        if(disassemblyDropAttempted){
+            if(!ready)return false;
+            var existing=world.getEntity(disassemblyDropId);
+            if(existing!=null){
+                if(!(existing instanceof net.minecraft.world.entity.item.ItemEntity item)||!ItemStack.matches(item.getItem(),disassemblySchedule))
+                    throw new IllegalStateException("Another native entity owns the pending schedule return identity");
+                disassemblySchedule=ItemStack.EMPTY;disassemblyDropId=null;disassemblyDropAttempted=false;manager().markDirty();return true;
+            }
+        }
+        if(player!=null&&player.getMainHandItem().isEmpty()){
+            player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND,disassemblySchedule);
+            disassemblySchedule=ItemStack.EMPTY;disassemblyDropId=null;disassemblyDropAttempted=false;manager().markDirty();return true;
+        }
+        if(!ready)return false;
+        var at=Vec3.atCenterOf(disassemblyReturnPosition.pos());
+        var item=new net.minecraft.world.entity.item.ItemEntity(world,at.x,at.y,at.z,disassemblySchedule.copy());
+        item.setUUID(disassemblyDropId);item.setDeltaMovement(Vec3.ZERO);
+        disassemblyDropAttempted=true;manager().markDirty();
+        if(!world.addFreshEntity(item)||world.getEntity(disassemblyDropId)!=item)return false;
+        disassemblySchedule=ItemStack.EMPTY;disassemblyDropId=null;disassemblyDropAttempted=false;manager().markDirty();return true;
+    }
 
 	public boolean canDisassemble() {
+        if(isRestoring())return false;
 		for (Carriage carriage : carriages) {
 			if (carriage.presentInMultipleDimensions())
 				return false;
@@ -886,7 +968,7 @@ public class Train {
 			return;
 		}
 
-		Set<Entry<UUID, TrackGraph>> entrySet = new HashSet<>(Create.RAILWAYS.trackNetworks.entrySet());
+		Set<Entry<UUID, TrackGraph>> entrySet = new HashSet<>(RailwayGraphManager.get(level).getTrackNetworks().entrySet());
 		Map<UUID, List<TrackGraphLocation>> successfulMigrations = new HashMap<>();
 		for (TrainMigration md : migratingPoints) {
 			for (Iterator<Entry<UUID, TrackGraph>> iterator = entrySet.iterator(); iterator.hasNext();) {
@@ -967,7 +1049,7 @@ public class Train {
 			return null;
 		if (graph == null)
 			return null;
-		return graph.getPoint(EdgePointType.STATION, currentStation);
+		return graph.getPoint(com.simibubi.create.content.trains.station.StationEdgePoints.STATION, currentStation);
 	}
 
 	@Nullable
@@ -1005,7 +1087,8 @@ public class Train {
 		TrackNode node2 = trailingPoint.node2;
 		TrackEdge edge = trailingPoint.edge;
 
-		if (edge == null) return;
+        if(graph==null||!trailingPoint.resolve(graph)){updateSignalBlocks=true;return;}
+        node1=trailingPoint.node1;node2=trailingPoint.node2;edge=trailingPoint.edge;
 
 		double position = trailingPoint.position;
 		EdgeData signalData = edge.getEdgeData();
@@ -1016,31 +1099,31 @@ public class Train {
 		cachedObserverFiltering.clear();
 
 		TravellingPoint signalScout = new TravellingPoint(node1, node2, edge, position, false);
-		Map<UUID, SignalEdgeGroup> allGroups = Create.RAILWAYS.signalEdgeGroups;
+		Map<UUID, SignalEdgeGroup> allGroups = manager().signalEdgeGroups();
 		MutableObject<UUID> prevGroup = new MutableObject<>(null);
 
 		if (signalData.hasSignalBoundaries()) {
-			SignalBoundary nextBoundary = signalData.next(EdgePointType.SIGNAL, position);
+			SignalBoundary nextBoundary = signalData.next(com.simibubi.create.content.trains.signal.SignalEdgePoints.SIGNAL, position);
 			if (nextBoundary == null) {
 				double d = 0;
 				SignalBoundary prev = null;
-				SignalBoundary current = signalData.next(EdgePointType.SIGNAL, 0);
+				SignalBoundary current = signalData.next(com.simibubi.create.content.trains.signal.SignalEdgePoints.SIGNAL, 0);
 				while (current != null) {
 					prev = current;
 					d = current.getLocationOn(edge);
-					current = signalData.next(EdgePointType.SIGNAL, d);
+					current = signalData.next(com.simibubi.create.content.trains.signal.SignalEdgePoints.SIGNAL, d);
 				}
 				if (prev != null) {
-					UUID group = prev.getGroup(node2);
-					if (Create.RAILWAYS.signalEdgeGroups.containsKey(group)) {
+					UUID group = prev.groupFor(node2);
+					if (manager().signalEdgeGroups().containsKey(group)) {
 						occupy(group, null);
 						prevGroup.setValue(group);
 					}
 				}
 
 			} else {
-				UUID group = nextBoundary.getGroup(node1);
-				if (Create.RAILWAYS.signalEdgeGroups.containsKey(group)) {
+				UUID group = nextBoundary.groupFor(node1);
+				if (manager().signalEdgeGroups().containsKey(group)) {
 					occupy(group, null);
 					prevGroup.setValue(group);
 				}
@@ -1063,9 +1146,9 @@ public class Train {
 				if (!(couple.getFirst()instanceof SignalBoundary signal))
 					return false;
 				couple.getSecond()
-					.map(signal::getGroup)
+					.map(signal::groupFor)
 					.forEach(id -> {
-						if (!Create.RAILWAYS.signalEdgeGroups.containsKey(id))
+						if (!manager().signalEdgeGroups().containsKey(id))
 							return;
 						if (id.equals(prevGroup.getValue()))
 							return;
@@ -1120,50 +1203,57 @@ public class Train {
 		for (int index = 0; index < carriageCount; index++) {
 			int i = iterateFromBack ? carriageCount - 1 - index : index;
 			Carriage carriage = carriages.get(i);
-			IItemHandlerModifiable fuelItems = carriage.storage.getFuelItems();
-			if (fuelItems == null)
-				continue;
-
-			for (int slot = 0; slot < fuelItems.getSlots(); slot++) {
-				ItemStack stack = fuelItems.extractItem(slot, 1, true);
-				int burnTime = stack.getBurnTime(null);
-				if (burnTime <= 0)
-					continue;
-
-				stack = fuelItems.extractItem(slot, 1, false);
-				fuelTicks += burnTime * stack.getCount();
-				ItemStack containerItem = stack.getCraftingRemainingItem();
-				if (!containerItem.isEmpty())
-					ItemHandlerHelper.insertItemStacked(fuelItems, containerItem, false);
-				return;
-			}
+            var fuelItems=carriage.storage.getFuelItems();
+            if(fuelItems==null)continue;
+            var front=carriage.anyAvailableEntity();
+            net.minecraft.server.level.ServerLevel world;
+            Vec3 origin;
+            if(front!=null&&front.level() instanceof net.minecraft.server.level.ServerLevel actual&&!front.isRemoved()){
+                world=actual;
+                origin=front.position();
+            }else{
+                var point=carriage.getLeadingPoint();
+                if(graph==null||!point.resolve(graph))continue;
+                world=manager().server().getLevel(point.node1.getLocation().dimension);
+                if(world==null)continue;
+                origin=point.getPosition(graph);
+                front=null;
+            }
+            int duration=TrainFuel.consume(fuelItems,world,origin,front);
+            if(duration>0){fuelTicks=duration;return;}
 		}
 	}
 
 	public float maxSpeed() {
-		return (fuelTicks > 0 ? AllConfigs.server().trains.poweredTrainTopSpeed.getF()
-			: AllConfigs.server().trains.trainTopSpeed.getF()) / 20;
+		return (fuelTicks > 0 ? config().poweredTrainTopSpeed()
+			: config().trainTopSpeed()) / 20;
 	}
 
 	public float maxTurnSpeed() {
-		return (fuelTicks > 0 ? AllConfigs.server().trains.poweredTrainTurningTopSpeed.getF()
-			: AllConfigs.server().trains.trainTurningTopSpeed.getF()) / 20;
+		return (fuelTicks > 0 ? config().poweredTrainTurningTopSpeed()
+			: config().trainTurningTopSpeed()) / 20;
 	}
 
 	public float acceleration() {
-		return (fuelTicks > 0 ? AllConfigs.server().trains.poweredTrainAcceleration.getF()
-			: AllConfigs.server().trains.trainAcceleration.getF()) / 400;
+		return (fuelTicks > 0 ? config().poweredTrainAcceleration()
+			: config().trainAcceleration()) / 400;
 	}
 
 	public CompoundTag write(DimensionPalette dimensions, HolderLookup.Provider registries) {
+        validateMotion();
 		CompoundTag tag = new CompoundTag();
-		tag.putUUID("Id", id);
+		tag.store("Id",UUIDUtil.CODEC,id);
+        if(disassemblyRequester!=null)tag.store("DisassemblyRequester",UUIDUtil.CODEC,disassemblyRequester);
+        if(disassemblyReturnPosition!=null)tag.store("DisassemblyReturnPosition",net.minecraft.core.GlobalPos.CODEC,disassemblyReturnPosition);
+        if(!disassemblySchedule.isEmpty())tag.store("DisassemblySchedule",ItemStack.CODEC,registries.createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE),disassemblySchedule);
+        if(disassemblyDropId!=null)tag.store("DisassemblyDropId",UUIDUtil.CODEC,disassemblyDropId);
+        if(disassemblyDropAttempted)tag.putBoolean("DisassemblyDropAttempted",true);
 		if (owner != null)
-			tag.putUUID("Owner", owner);
+			tag.store("Owner",UUIDUtil.CODEC,owner);
 		if (graph != null)
-			tag.putUUID("Graph", graph.id);
-		tag.put("Carriages", NBTHelper.writeCompoundList(carriages, c -> c.write(dimensions, registries)));
-		tag.putIntArray("CarriageSpacing", carriageSpacing);
+			tag.store("Graph",UUIDUtil.CODEC,graph.id);
+		tag.put("Carriages", TrainNbt.writeCompoundList(carriages, c -> c.write(dimensions, registries)));
+		tag.putIntArray("CarriageSpacing",carriageSpacing.stream().mapToInt(Integer::intValue).toArray());
 		tag.putBoolean("DoubleEnded", doubleEnded);
 		tag.putDouble("Speed", speed);
 		tag.putDouble("Throttle", throttle);
@@ -1171,32 +1261,32 @@ public class Train {
 			tag.putDouble("SpeedBeforeStall", speedBeforeStall);
 		tag.putInt("Fuel", fuelTicks);
 		tag.putDouble("TargetSpeed", targetSpeed);
-		tag.putString("IconType", icon.id.toString());
+		tag.putString("IconType", icon.getId().toString());
 		tag.putInt("MapColorIndex", mapColorIndex);
-		tag.putString("Name", Component.Serializer.toJson(name, registries));
+		tag.store("Name",ComponentSerialization.CODEC,registries.createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE),name);
 		if (currentStation != null)
-			tag.putUUID("Station", currentStation);
+			tag.store("Station",UUIDUtil.CODEC,currentStation);
 		tag.putBoolean("Backwards", currentlyBackwards);
 		tag.putBoolean("Derailed", derailed);
 		tag.putBoolean("UpdateSignals", updateSignalBlocks);
-		tag.put("SignalBlocks", NBTHelper.writeCompoundList(occupiedSignalBlocks.entrySet(), e -> {
+		tag.put("SignalBlocks", TrainNbt.writeCompoundList(occupiedSignalBlocks.entrySet(), e -> {
 			CompoundTag compoundTag = new CompoundTag();
-			compoundTag.putUUID("Id", e.getKey());
+			compoundTag.store("Id",UUIDUtil.CODEC,e.getKey());
 			if (e.getValue() != null)
-				compoundTag.putUUID("Boundary", e.getValue());
+				compoundTag.store("Boundary",UUIDUtil.CODEC,e.getValue());
 			return compoundTag;
 		}));
-		tag.put("ReservedSignalBlocks", NBTHelper.writeCompoundList(reservedSignalBlocks, uid -> {
+		tag.put("ReservedSignalBlocks", TrainNbt.writeCompoundList(reservedSignalBlocks, uid -> {
 			CompoundTag compoundTag = new CompoundTag();
-			compoundTag.putUUID("Id", uid);
+			compoundTag.store("Id",UUIDUtil.CODEC,uid);
 			return compoundTag;
 		}));
-		tag.put("OccupiedObservers", NBTHelper.writeCompoundList(occupiedObservers, uid -> {
+		tag.put("OccupiedObservers", TrainNbt.writeCompoundList(occupiedObservers, uid -> {
 			CompoundTag compoundTag = new CompoundTag();
-			compoundTag.putUUID("Id", uid);
+			compoundTag.store("Id",UUIDUtil.CODEC,uid);
 			return compoundTag;
 		}));
-		tag.put("MigratingPoints", NBTHelper.writeCompoundList(migratingPoints, tm -> tm.write(dimensions)));
+		tag.put("MigratingPoints", TrainNbt.writeCompoundList(migratingPoints, tm -> tm.write(dimensions)));
 
 		tag.put("Runtime", runtime.write(registries));
 		tag.put("Navigation", navigation.write(dimensions));
@@ -1205,49 +1295,57 @@ public class Train {
 	}
 
 	public static Train read(CompoundTag tag, HolderLookup.Provider registries, Map<UUID, TrackGraph> trackNetworks, DimensionPalette dimensions) {
-		UUID id = tag.getUUID("Id");
-		UUID owner = tag.contains("Owner") ? tag.getUUID("Owner") : null;
-		UUID graphId = tag.contains("Graph") ? tag.getUUID("Graph") : null;
+		UUID id = TrainNbt.uuid(tag,"Id");
+		UUID owner = tag.contains("Owner") ? TrainNbt.uuid(tag,"Owner") : null;
+		UUID graphId = tag.contains("Graph") ? TrainNbt.uuid(tag,"Graph") : null;
 		TrackGraph graph = graphId == null ? null : trackNetworks.get(graphId);
 		List<Carriage> carriages = new ArrayList<>();
-		NBTHelper.iterateCompoundList(tag.getList("Carriages", Tag.TAG_COMPOUND),
+		TrainNbt.iterateCompoundList(tag.getListOrEmpty("Carriages"),
 			c -> carriages.add(Carriage.read(c, registries, graph, dimensions)));
 		List<Integer> carriageSpacing = new ArrayList<>();
-		for (int i : tag.getIntArray("CarriageSpacing"))
+		for (int i : tag.getIntArray("CarriageSpacing").orElseThrow())
 			carriageSpacing.add(i);
-		boolean doubleEnded = tag.getBoolean("DoubleEnded");
-		int mapColorIndex = tag.getInt("MapColorIndex");
+		boolean doubleEnded = tag.getBooleanOr("DoubleEnded",false);
+		int mapColorIndex = tag.getIntOr("MapColorIndex",0);
 
 		Train train = new Train(id, owner, graph, carriages, carriageSpacing, doubleEnded, mapColorIndex);
 
-		train.speed = tag.getDouble("Speed");
-		train.throttle = tag.getDouble("Throttle");
+		train.speed = tag.getDoubleOr("Speed",0);
+		train.throttle = tag.getDoubleOr("Throttle",1);
 		if (tag.contains("SpeedBeforeStall"))
-			train.speedBeforeStall = tag.getDouble("SpeedBeforeStall");
-		train.targetSpeed = tag.getDouble("TargetSpeed");
-		train.icon = TrainIconType.byId(ResourceLocation.parse(tag.getString("IconType")));
-		train.name = Component.Serializer.fromJson(tag.getString("Name"), registries);
-		train.currentStation = tag.contains("Station") ? tag.getUUID("Station") : null;
-		train.currentlyBackwards = tag.getBoolean("Backwards");
-		train.derailed = tag.getBoolean("Derailed");
-		train.updateSignalBlocks = tag.getBoolean("UpdateSignals");
-		train.fuelTicks = tag.getInt("Fuel");
+			train.speedBeforeStall = tag.getDoubleOr("SpeedBeforeStall",0);
+		train.targetSpeed = tag.getDoubleOr("TargetSpeed",0);
+		train.icon = TrainIconType.byId(Identifier.parse(tag.getStringOr("IconType",TrainIconType.getDefault().getId().toString())));
+		train.name = TrainNbt.component(tag,"Name",registries);
+		train.currentStation = tag.contains("Station") ? TrainNbt.uuid(tag,"Station") : null;
+		train.currentlyBackwards = tag.getBooleanOr("Backwards",false);
+		train.derailed = tag.getBooleanOr("Derailed",false);
+		train.updateSignalBlocks = tag.getBooleanOr("UpdateSignals",false);
+		train.fuelTicks = tag.getIntOr("Fuel",0);
 
-		NBTHelper.iterateCompoundList(tag.getList("SignalBlocks", Tag.TAG_COMPOUND), c -> train.occupiedSignalBlocks
-			.put(c.getUUID("Id"), c.contains("Boundary") ? c.getUUID("Boundary") : null));
-		NBTHelper.iterateCompoundList(tag.getList("ReservedSignalBlocks", Tag.TAG_COMPOUND),
-			c -> train.reservedSignalBlocks.add(c.getUUID("Id")));
-		NBTHelper.iterateCompoundList(tag.getList("OccupiedObservers", Tag.TAG_COMPOUND),
-			c -> train.occupiedObservers.add(c.getUUID("Id")));
-		NBTHelper.iterateCompoundList(tag.getList("MigratingPoints", Tag.TAG_COMPOUND),
+		TrainNbt.iterateCompoundList(tag.getListOrEmpty("SignalBlocks"), c -> train.occupiedSignalBlocks
+			.put(TrainNbt.uuid(c,"Id"), c.contains("Boundary") ? TrainNbt.uuid(c,"Boundary") : null));
+		TrainNbt.iterateCompoundList(tag.getListOrEmpty("ReservedSignalBlocks"),
+			c -> train.reservedSignalBlocks.add(TrainNbt.uuid(c,"Id")));
+		TrainNbt.iterateCompoundList(tag.getListOrEmpty("OccupiedObservers"),
+			c -> train.occupiedObservers.add(TrainNbt.uuid(c,"Id")));
+		TrainNbt.iterateCompoundList(tag.getListOrEmpty("MigratingPoints"),
 			c -> train.migratingPoints.add(TrainMigration.read(c, dimensions)));
 
-		train.runtime.read(registries, tag.getCompound("Runtime"));
-		train.navigation.read(tag.getCompound("Navigation"), graph, dimensions);
+        train.disassemblyRequester=tag.read("DisassemblyRequester",UUIDUtil.CODEC).orElse(null);
+        train.disassemblyReturnPosition=tag.read("DisassemblyReturnPosition",net.minecraft.core.GlobalPos.CODEC).orElse(null);
+        train.disassemblySchedule=tag.read("DisassemblySchedule",ItemStack.CODEC,registries.createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE)).orElse(ItemStack.EMPTY);
+        train.disassemblyDropId=tag.read("DisassemblyDropId",UUIDUtil.CODEC).orElse(null);
+        train.disassemblyDropAttempted=tag.getBooleanOr("DisassemblyDropAttempted",false);
+        if(train.disassemblyDropAttempted&&train.disassemblySchedule.isEmpty()
+            ||!train.disassemblySchedule.isEmpty()&&(!train.isRestoring()||train.disassemblyReturnPosition==null||train.disassemblyDropId==null||train.disassemblySchedule.getCount()!=1||!train.disassemblySchedule.is(com.simibubi.create.AllItems.SCHEDULE)))
+            throw new IllegalArgumentException("Invalid actual pending disassembly schedule custody");
+        train.validateMotion();
+		train.runtime.read(registries, tag.getCompoundOrEmpty("Runtime"));
+        if(!train.disassemblySchedule.isEmpty()&&train.runtime.getSchedule()!=null)
+            throw new IllegalArgumentException("Actual pending schedule cannot also remain owned by runtime");
+		train.navigation.read(tag.getCompoundOrEmpty("Navigation"), graph, dimensions);
 
-		if (train.getCurrentStation() != null)
-			train.getCurrentStation()
-				.reserveFor(train);
 
 		return train;
 	}

@@ -1,37 +1,20 @@
 package com.simibubi.create.content.logistics.redstoneRequester;
 
-import java.util.List;
-
 import com.simibubi.create.AllDataComponents;
 import com.simibubi.create.content.logistics.packagerLink.LogisticallyLinkedBlockItem;
-import com.simibubi.create.foundation.utility.CreateLang;
-
+import java.util.function.Consumer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.level.block.Block;
 
-public class RedstoneRequesterBlockItem extends LogisticallyLinkedBlockItem {
-
-	public RedstoneRequesterBlockItem(Block pBlock, Properties pProperties) {
-		super(pBlock, pProperties);
-	}
-
-	@Override
-	public void appendHoverText(ItemStack stack, TooltipContext tooltipContext, List<Component> tooltipComponents, TooltipFlag tooltipFlag) {
-		if (!isTuned(stack))
-			return;
-
-		if (!stack.has(AllDataComponents.AUTO_REQUEST_DATA)) {
-			super.appendHoverText(stack, tooltipContext, tooltipComponents, tooltipFlag);
-			return;
-		}
-
-		CreateLang.translate("logistically_linked.tooltip")
-			.style(ChatFormatting.GOLD)
-			.addTo(tooltipComponents);
-		RedstoneRequesterBlock.appendRequesterTooltip(stack, tooltipComponents);
-	}
-
+public final class RedstoneRequesterBlockItem extends LogisticallyLinkedBlockItem {
+    public RedstoneRequesterBlockItem(Block block,Properties properties) { super(block,properties); }
+    @Override public void appendHoverText(ItemStack stack,TooltipContext context,TooltipDisplay display,Consumer<Component> lines,TooltipFlag flag) {
+        if(!isTuned(stack))return;var data=stack.get(AllDataComponents.AUTO_REQUEST_DATA);if(data==null){super.appendHoverText(stack,context,display,lines,flag);return;}
+        lines.accept(Component.translatable("create.logistically_linked.tooltip").withStyle(ChatFormatting.GOLD));
+        for(var entry:data.encodedRequest().stacks())lines.accept(entry.stack.getHoverName().copy().append(" x"+entry.count).withStyle(ChatFormatting.GRAY));
+        lines.accept(Component.translatable("create.logistically_linked.tooltip_clear").withStyle(ChatFormatting.DARK_GRAY));
+    }
 }

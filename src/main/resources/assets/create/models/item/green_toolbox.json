@@ -1,0 +1,7 @@
+{
+  "parent": "create:block/toolbox/item",
+  "textures": {
+    "0": "create:block/toolbox/green",
+    "particle": "create:block/toolbox/green"
+  }
+}

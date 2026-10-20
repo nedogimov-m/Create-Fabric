@@ -1,0 +1,31 @@
+{
+  "textures": {
+    "icon": "create:block/roller_mode_icons",
+    "particle": "create:block/roller_mode_icons"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        0,
+        16
+      ],
+      "faces": {
+        "up": {
+          "texture": "#icon",
+          "uv": [
+            11,
+            4,
+            12,
+            5
+          ]
+        }
+      }
+    }
+  ]
+}

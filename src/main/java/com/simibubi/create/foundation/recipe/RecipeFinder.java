@@ -1,59 +1,45 @@
 package com.simibubi.create.foundation.recipe;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.function.Predicate;
 
 import org.jetbrains.annotations.Nullable;
-
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
-import com.simibubi.create.Create;
-
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.level.Level;
 
-/**
- * Utility for searching through a level's recipe collection.
- * Non-dynamic conditions can be split off into an initial search for caching intermediate results.
- *
- * @author simibubi
- */
+/** Source keyed static recipe search, with the actual native manager/reload generation. */
 public class RecipeFinder {
-	private static final Cache<Object, List<RecipeHolder<? extends Recipe<?>>>> CACHED_SEARCHES = CacheBuilder.newBuilder().build();
+	private record CachedSearch(RecipeManager manager, Object generation,
+			List<RecipeHolder<? extends Recipe<?>>> recipes) {}
 
+	private static final Cache<Object, CachedSearch> CACHED_SEARCHES = CacheBuilder.newBuilder().build();
 	public static final ResourceManagerReloadListener LISTENER = resourceManager -> CACHED_SEARCHES.invalidateAll();
 
-	/**
-	 * Find all recipes matching the condition predicate.
-	 * If this search is made more than once,
-	 * using the same object instance as the cacheKey will retrieve the cached result from the first search.
-	 *
-	 * @param cacheKey (can be null to prevent the caching)
-	 * @return A started search to continue with more specific conditions.
-	 */
-	public static List<RecipeHolder<? extends Recipe<?>>> get(@Nullable Object cacheKey, Level level, Predicate<RecipeHolder<? extends Recipe<?>>> conditions) {
-		if (cacheKey == null)
-			return startSearch(level, conditions);
-
-		try {
-			return CACHED_SEARCHES.get(cacheKey, () -> startSearch(level, conditions));
-		} catch (ExecutionException e) {
-			Create.LOGGER.error("Encountered a exception while searching for recipes", e);
+	/** The same key denotes the same static predicate; null disables caching, as in the source API. */
+	public static List<RecipeHolder<? extends Recipe<?>>> get(@Nullable Object cacheKey, Level level,
+			Predicate<RecipeHolder<? extends Recipe<?>>> conditions) {
+		if (!(level instanceof ServerLevel server))
+			return new ArrayList<>();
+		var manager = server.getServer().getRecipeManager();
+		var generation = manager.getRecipes();
+		if (cacheKey != null) {
+			var cached = CACHED_SEARCHES.getIfPresent(cacheKey);
+			if (cached != null && cached.manager() == manager && cached.generation() == generation)
+				return cached.recipes();
 		}
-
-		return Collections.emptyList();
-	}
-
-	private static List<RecipeHolder<? extends Recipe<?>>> startSearch(Level level, Predicate<? super RecipeHolder<? extends Recipe<?>>> conditions) {
-		List<RecipeHolder<? extends Recipe<?>>> recipes = new ArrayList<>();
-		for (RecipeHolder<? extends Recipe<?>> r : level.getRecipeManager().getRecipes())
-			if (conditions.test(r))
-				recipes.add(r);
+		var recipes = new ArrayList<RecipeHolder<? extends Recipe<?>>>();
+		for (RecipeHolder<? extends Recipe<?>> recipe : generation)
+			if (conditions.test(recipe))
+				recipes.add(recipe);
+		if (cacheKey != null)
+			CACHED_SEARCHES.put(cacheKey, new CachedSearch(manager, generation, recipes));
 		return recipes;
 	}
 }

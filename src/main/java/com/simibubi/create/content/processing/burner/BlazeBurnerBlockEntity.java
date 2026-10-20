@@ -1,411 +1,143 @@
 package com.simibubi.create.content.processing.burner;
 
-import java.util.List;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllItems;
-import com.simibubi.create.AllTags.AllItemTags;
-import com.simibubi.create.api.data.datamaps.BlazeBurnerFuel;
+import com.simibubi.create.AllBlockEntityTypes;
+import com.simibubi.create.Create;
 import com.simibubi.create.api.registry.CreateDataMaps;
-import com.simibubi.create.content.fluids.tank.FluidTankBlock;
-import com.simibubi.create.content.logistics.stockTicker.StockTickerBlockEntity;
-import com.simibubi.create.content.processing.basin.BasinBlock;
-import com.simibubi.create.content.processing.burner.BlazeBurnerBlock.HeatLevel;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import dev.engine_room.flywheel.api.visualization.VisualizationManager;
-import net.createmod.catnip.animation.LerpedFloat;
-import net.createmod.catnip.animation.LerpedFloat.Chaser;
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.math.AngleHelper;
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Holder;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.core.*;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.Mth;
-import net.minecraft.util.RandomSource;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.*;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.component.CookingFuel;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
+import net.minecraft.world.level.storage.loot.*;
+import net.minecraft.world.level.storage.loot.parameters.*;
+import net.minecraft.world.level.storage.loot.providers.number.ints.ResolvableInt;
 import net.minecraft.world.phys.Vec3;
+import java.util.Optional;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+public final class BlazeBurnerBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity {
+    public boolean goggles;
+    public boolean trainHat;
+    public void setGoggles(boolean value){goggles=value;setChanged();sync();}
+    public static final int MAX_HEAT_CAPACITY = 10000;
+    public static final int INSERTION_THRESHOLD = 500;
+    private static final TagKey<Item> NORMAL_FUEL = TagKey.create(net.minecraft.core.registries.Registries.ITEM, Create.asResource("blaze_burner_fuel/regular"));
+    private static final TagKey<Item> SPECIAL_FUEL = TagKey.create(net.minecraft.core.registries.Registries.ITEM, Create.asResource("blaze_burner_fuel/special"));
+    private int fuelType; // 0: none, 1: normal, 2: special, persisted with upstream ordinal.
+    private int remainingBurnTime;
+    private boolean creative;
+    public BlazeBurnerBlockEntity(BlockPos pos, BlockState state) { super(AllBlockEntityTypes.HEATER, pos, state); }
+    public int getRemainingBurnTime() { return remainingBurnTime; }
+    public boolean isCreative() { return creative; }
 
-public class BlazeBurnerBlockEntity extends SmartBlockEntity {
+    private int normalBurnTime(ItemStack stack) {
+        if (!(level instanceof ServerLevel server)) return 0;
+        var params = new LootParams.Builder(server).withParameter(LootContextParams.BLOCK_STATE, getBlockState())
+                .withParameter(LootContextParams.BLOCK_ENTITY, this).withParameter(LootContextParams.ORIGIN, Vec3.atCenterOf(worldPosition))
+                .withParameter(LootContextParams.CONTAINER, new SimpleContainer(stack.copyWithCount(1))).create(LootContextParamSets.CONTAINER_PROCESS);
+        var context = new LootContext.Builder(params).create(Optional.empty());
+        int duration = ResolvableInt.getFromItem(stack, DataComponents.COOKING_FUEL, CookingFuel::burnTime, context, 0);
+        return duration > 0 ? duration : stack.is(NORMAL_FUEL) ? 1600 : 0;
+    }
+    private record FuelState(int type, int remaining) {}
+    private final net.fabricmc.fabric.api.transfer.v1.transaction.base.SnapshotParticipant<FuelState> fuelTransaction = new net.fabricmc.fabric.api.transfer.v1.transaction.base.SnapshotParticipant<>() {
+        @Override protected FuelState createSnapshot() { return new FuelState(fuelType,remainingBurnTime); }
+        @Override protected void readSnapshot(FuelState state) { fuelType=state.type();remainingBurnTime=state.remaining(); }
+        @Override protected void onFinalCommit() {
+            updateHeat();setChanged();sync();
+            level.playSound(null,worldPosition,SoundEvents.BLAZE_SHOOT,SoundSource.BLOCKS,0.25f,0.75f);
+        }
+    };
+    public boolean tryFuel(ItemStack stack, boolean forceOverflow, boolean simulate) {
+        try(var transaction=net.fabricmc.fabric.api.transfer.v1.transaction.Transaction.openOuter()) {
+            boolean accepted=tryFuel(stack,forceOverflow,transaction);
+            if(accepted&&!simulate)transaction.commit();
+            return accepted;
+        }
+    }
+    /** Reserve the actual fuel fields; heat, sound and network updates run only on final commit. */
+    public boolean tryFuel(ItemStack stack,boolean forceOverflow,net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext transaction) {
+        if (creative || stack.isEmpty() || !(level instanceof ServerLevel server)
+            || getBlockState().getValue(BlazeBurnerBlock.HEAT_LEVEL) == BlazeBurnerBlock.HeatLevel.NONE) return false;
+        var superheated = CreateDataMaps.get(server.getServer(), CreateDataMaps.SUPERHEATED_BLAZE_BURNER_FUELS, stack.getItem());
+        var regular = CreateDataMaps.get(server.getServer(), CreateDataMaps.REGULAR_BLAZE_BURNER_FUELS, stack.getItem());
+        int newType, duration;
+        if (superheated != null) {
+            newType = 2; duration = superheated.burnTime();
+        } else if (regular != null) {
+            newType = 1; duration = regular.burnTime();
+        } else if (stack.is(SPECIAL_FUEL)) {
+            newType = 2; duration = 3200;
+        } else {
+            newType = 1; duration = normalBurnTime(stack);
+        }
+        if (duration <= 0 || newType < fuelType) return false;
+        if (newType == fuelType) {
+            if (remainingBurnTime <= INSERTION_THRESHOLD) duration += remainingBurnTime;
+            else if (forceOverflow && newType == 1) duration = remainingBurnTime < MAX_HEAT_CAPACITY
+                ? Math.min(MAX_HEAT_CAPACITY, remainingBurnTime + duration) : remainingBurnTime;
+            else return false;
+        }
+        fuelTransaction.updateSnapshots(transaction);
+        fuelType=newType;remainingBurnTime=duration;
+        return true;
+    }
+    public void applyCreativeFuel() {
+        creative = true; fuelType = 0; remainingBurnTime = 0;
+        var heat = getBlockState().getValue(BlazeBurnerBlock.HEAT_LEVEL);
+        heat = switch (heat) {
+            case NONE, SMOULDERING, FADING -> BlazeBurnerBlock.HeatLevel.KINDLED;
+            case KINDLED -> BlazeBurnerBlock.HeatLevel.SEETHING;
+            case SEETHING -> BlazeBurnerBlock.HeatLevel.SMOULDERING;
+        };
+        level.setBlockAndUpdate(worldPosition, getBlockState().setValue(BlazeBurnerBlock.HEAT_LEVEL, heat));
+        setChanged(); sync();
+    }
+    private void updateHeat() {
+        if (getBlockState().getValue(BlazeBurnerBlock.HEAT_LEVEL) == BlazeBurnerBlock.HeatLevel.NONE) return;
+        var heat = fuelType == 2 ? BlazeBurnerBlock.HeatLevel.SEETHING : fuelType == 1
+                ? remainingBurnTime < 125 ? BlazeBurnerBlock.HeatLevel.FADING : BlazeBurnerBlock.HeatLevel.KINDLED
+                : BlazeBurnerBlock.HeatLevel.SMOULDERING;
+        if (heat != getBlockState().getValue(BlazeBurnerBlock.HEAT_LEVEL)) {
+            level.setBlockAndUpdate(worldPosition, getBlockState().setValue(BlazeBurnerBlock.HEAT_LEVEL, heat)); sync();
+        }
+    }
+    public static void tick(Level level, BlockPos pos, BlockState state, BlazeBurnerBlockEntity burner) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, burner)) {
+            if (!createTick.shouldTick()) return;
 
-	public static final int MAX_HEAT_CAPACITY = 10000;
-	public static final int INSERTION_THRESHOLD = 500;
-
-	public LerpedFloat headAnimation;
-	public boolean stockKeeper;
-	public boolean isCreative;
-	public boolean goggles;
-	public boolean hat;
-
-	protected FuelType activeFuel;
-	protected int remainingBurnTime;
-	protected LerpedFloat headAngle;
-
-
-	public BlazeBurnerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		activeFuel = FuelType.NONE;
-		remainingBurnTime = 0;
-		headAnimation = LerpedFloat.linear();
-		headAngle = LerpedFloat.angular();
-		isCreative = false;
-		goggles = false;
-		stockKeeper = false;
-
-		headAngle.startWithValue((AngleHelper.horizontalAngle(state.getOptionalValue(BlazeBurnerBlock.FACING)
-			.orElse(Direction.SOUTH)) + 180) % 360);
-	}
-
-	public FuelType getActiveFuel() {
-		return activeFuel;
-	}
-
-	public int getRemainingBurnTime() {
-		return remainingBurnTime;
-	}
-
-	public boolean isCreative() {
-		return isCreative;
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		if (level.isClientSide) {
-			if (shouldTickAnimation())
-				tickAnimation();
-			if (!isVirtual())
-				spawnParticles(getHeatLevelFromBlock(), 1);
-			return;
-		}
-
-		if (isCreative)
-			return;
-
-		if (remainingBurnTime > 0)
-			remainingBurnTime--;
-
-		if (activeFuel == FuelType.NORMAL)
-			updateBlockState();
-		if (remainingBurnTime > 0)
-			return;
-
-		if (activeFuel == FuelType.SPECIAL) {
-			activeFuel = FuelType.NORMAL;
-			remainingBurnTime = MAX_HEAT_CAPACITY / 2;
-		} else
-			activeFuel = FuelType.NONE;
-
-		updateBlockState();
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		stockKeeper = getStockTicker(level, worldPosition) != null;
-	}
-
-	@Nullable
-	public static StockTickerBlockEntity getStockTicker(LevelAccessor level, BlockPos pos) {
-		for (Direction direction : Iterate.horizontalDirections) {
-			if (level instanceof Level l && !l.isLoaded(pos))
-				return null;
-			BlockState blockState = level.getBlockState(pos.relative(direction));
-			if (!AllBlocks.STOCK_TICKER.has(blockState))
-				continue;
-			if (level.getBlockEntity(pos.relative(direction)) instanceof StockTickerBlockEntity stbe)
-				return stbe;
-		}
-		return null;
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private boolean shouldTickAnimation() {
-		// Offload the animation tick to the visual when flywheel in enabled
-		return !VisualizationManager.supportsVisualization(level);
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	void tickAnimation() {
-		boolean active = getHeatLevelFromBlock().isAtLeast(HeatLevel.FADING) && isValidBlockAbove();
-
-		if (!active) {
-			float target = 0;
-			LocalPlayer player = Minecraft.getInstance().player;
-			if (player != null && !player.isInvisible()) {
-				double x;
-				double z;
-				if (isVirtual()) {
-					x = -4;
-					z = -10;
-				} else {
-					x = player.getX();
-					z = player.getZ();
-				}
-				double dx = x - (getBlockPos().getX() + 0.5);
-				double dz = z - (getBlockPos().getZ() + 0.5);
-				target = AngleHelper.deg(-Mth.atan2(dz, dx)) - 90;
-			}
-			target = headAngle.getValue() + AngleHelper.getShortestAngleDiff(headAngle.getValue(), target);
-			headAngle.chase(target, .25f, Chaser.exp(5));
-			headAngle.tickChaser();
-		} else {
-			headAngle.chase((AngleHelper.horizontalAngle(getBlockState().getOptionalValue(BlazeBurnerBlock.FACING)
-				.orElse(Direction.SOUTH)) + 180) % 360, .125f, Chaser.EXP);
-			headAngle.tickChaser();
-		}
-
-		headAnimation.chase(active ? 1 : 0, .25f, Chaser.exp(.25f));
-		headAnimation.tickChaser();
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		if (!isCreative) {
-			compound.putInt("fuelLevel", activeFuel.ordinal());
-			compound.putInt("burnTimeRemaining", remainingBurnTime);
-		} else
-			compound.putBoolean("isCreative", true);
-		if (goggles)
-			compound.putBoolean("Goggles", true);
-		if (hat)
-			compound.putBoolean("TrainHat", true);
-		super.write(compound, registries, clientPacket);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		activeFuel = FuelType.values()[compound.getInt("fuelLevel")];
-		remainingBurnTime = compound.getInt("burnTimeRemaining");
-		isCreative = compound.getBoolean("isCreative");
-		goggles = compound.contains("Goggles");
-		hat = compound.contains("TrainHat");
-		super.read(compound, registries, clientPacket);
-	}
-
-	public BlazeBurnerBlock.HeatLevel getHeatLevelFromBlock() {
-		return BlazeBurnerBlock.getHeatLevelOf(getBlockState());
-	}
-
-	public BlazeBurnerBlock.HeatLevel getHeatLevelForRender() {
-		HeatLevel heatLevel = getHeatLevelFromBlock();
-		if (!heatLevel.isAtLeast(HeatLevel.FADING) && stockKeeper)
-			return HeatLevel.FADING;
-		return heatLevel;
-	}
-
-	public void updateBlockState() {
-		setBlockHeat(getHeatLevel());
-	}
-
-	protected void setBlockHeat(HeatLevel heat) {
-		HeatLevel inBlockState = getHeatLevelFromBlock();
-		if (inBlockState == heat)
-			return;
-		level.setBlockAndUpdate(worldPosition, getBlockState().setValue(BlazeBurnerBlock.HEAT_LEVEL, heat));
-		notifyUpdate();
-	}
-
-	/**
-	 * @return true if the heater updated its burn time and an item should be
-	 *         consumed
-	 */
-	protected boolean tryUpdateFuel(ItemStack itemStack, boolean forceOverflow, boolean simulate) {
-		if (isCreative)
-			return false;
-
-		FuelType newFuel = FuelType.NONE;
-		int newBurnTime;
-
-		Holder<Item> holder = itemStack.getItem().builtInRegistryHolder();
-		BlazeBurnerFuel superheatedFuel = holder.getData(CreateDataMaps.SUPERHEATED_BLAZE_BURNER_FUELS);
-		BlazeBurnerFuel normalFuel = holder.getData(CreateDataMaps.REGULAR_BLAZE_BURNER_FUELS);
-
-		// TODO: 1.21.1+ - Remove fallback to tags
-		if (superheatedFuel != null) {
-			newBurnTime = superheatedFuel.burnTime();
-			newFuel = FuelType.SPECIAL;
-		} else if (normalFuel != null) {
-			newBurnTime = normalFuel.burnTime();
-			newFuel = FuelType.NORMAL;
-		} else if (AllItemTags.BLAZE_BURNER_FUEL_SPECIAL.matches(itemStack)) {
-			newBurnTime = 3200;
-			newFuel = FuelType.SPECIAL;
-		} else {
-			newBurnTime = itemStack.getBurnTime(null);
-			if (newBurnTime > 0) {
-				newFuel = FuelType.NORMAL;
-			} else if (AllItemTags.BLAZE_BURNER_FUEL_REGULAR.matches(itemStack)) {
-				newBurnTime = 1600; // Same as coal
-				newFuel = FuelType.NORMAL;
-			}
-		}
-
-		if (newFuel == FuelType.NONE)
-			return false;
-		if (newFuel.ordinal() < activeFuel.ordinal())
-			return false;
-
-		if (newFuel == activeFuel) {
-			if (remainingBurnTime <= INSERTION_THRESHOLD) {
-				newBurnTime += remainingBurnTime;
-			} else if (forceOverflow && newFuel == FuelType.NORMAL) {
-				if (remainingBurnTime < MAX_HEAT_CAPACITY) {
-					newBurnTime = Math.min(remainingBurnTime + newBurnTime, MAX_HEAT_CAPACITY);
-				} else {
-					newBurnTime = remainingBurnTime;
-				}
-			} else {
-				return false;
-			}
-		}
-
-		if (simulate)
-			return true;
-
-		activeFuel = newFuel;
-		remainingBurnTime = newBurnTime;
-
-		if (level.isClientSide) {
-			spawnParticleBurst(activeFuel == FuelType.SPECIAL);
-			return true;
-		}
-
-		HeatLevel prev = getHeatLevelFromBlock();
-		playSound();
-		updateBlockState();
-
-		if (prev != getHeatLevelFromBlock())
-			level.playSound(null, worldPosition, SoundEvents.BLAZE_AMBIENT, SoundSource.BLOCKS,
-				.125f + level.random.nextFloat() * .125f, 1.15f - level.random.nextFloat() * .25f);
-
-		return true;
-	}
-
-	protected void applyCreativeFuel() {
-		activeFuel = FuelType.NONE;
-		remainingBurnTime = 0;
-		isCreative = true;
-
-		HeatLevel next = getHeatLevelFromBlock().nextActiveLevel();
-
-		if (level.isClientSide) {
-			spawnParticleBurst(next.isAtLeast(HeatLevel.SEETHING));
-			return;
-		}
-
-		playSound();
-		if (next == HeatLevel.FADING)
-			next = next.nextActiveLevel();
-		setBlockHeat(next);
-	}
-
-	public boolean isCreativeFuel(ItemStack stack) {
-		return AllItems.CREATIVE_BLAZE_CAKE.isIn(stack);
-	}
-
-	public boolean isValidBlockAbove() {
-		if (isVirtual())
-			return false;
-		BlockState blockState = level.getBlockState(worldPosition.above());
-		return BasinBlock.isBasin(level, worldPosition.above()) || blockState.getBlock() instanceof FluidTankBlock;
-	}
-
-	protected void playSound() {
-		level.playSound(null, worldPosition, SoundEvents.BLAZE_SHOOT, SoundSource.BLOCKS,
-			.125f + level.random.nextFloat() * .125f, .75f - level.random.nextFloat() * .25f);
-	}
-
-	protected HeatLevel getHeatLevel() {
-		HeatLevel level = HeatLevel.SMOULDERING;
-		switch (activeFuel) {
-			case SPECIAL -> level = HeatLevel.SEETHING;
-			case NORMAL -> {
-				boolean lowPercent = (double) remainingBurnTime / MAX_HEAT_CAPACITY < 0.0125;
-				level = lowPercent ? HeatLevel.FADING : HeatLevel.KINDLED;
-			}
-		}
-		return level;
-	}
-
-	protected void spawnParticles(HeatLevel heatLevel, double burstMult) {
-		if (level == null)
-			return;
-		if (heatLevel == BlazeBurnerBlock.HeatLevel.NONE)
-			return;
-
-		RandomSource r = level.getRandom();
-
-		Vec3 c = VecHelper.getCenterOf(worldPosition);
-		Vec3 v = c.add(VecHelper.offsetRandomly(Vec3.ZERO, r, .125f)
-			.multiply(1, 0, 1));
-
-		if (r.nextInt(4) != 0)
-			return;
-
-		boolean empty = level.getBlockState(worldPosition.above())
-			.getCollisionShape(level, worldPosition.above())
-			.isEmpty();
-
-		if (empty || r.nextInt(8) == 0)
-			level.addParticle(ParticleTypes.LARGE_SMOKE, v.x, v.y, v.z, 0, 0, 0);
-
-		double yMotion = empty ? .0625f : r.nextDouble() * .0125f;
-		Vec3 v2 = c.add(VecHelper.offsetRandomly(Vec3.ZERO, r, .5f)
-			.multiply(1, .25f, 1)
-			.normalize()
-			.scale((empty ? .25f : .5) + r.nextDouble() * .125f))
-			.add(0, .5, 0);
-
-		if (heatLevel.isAtLeast(HeatLevel.SEETHING)) {
-			level.addParticle(ParticleTypes.SOUL_FIRE_FLAME, v2.x, v2.y, v2.z, 0, yMotion, 0);
-		} else if (heatLevel.isAtLeast(HeatLevel.FADING)) {
-			level.addParticle(ParticleTypes.FLAME, v2.x, v2.y, v2.z, 0, yMotion, 0);
-		}
-		return;
-	}
-
-	public void spawnParticleBurst(boolean soulFlame) {
-		Vec3 c = VecHelper.getCenterOf(worldPosition);
-		RandomSource r = level.random;
-		for (int i = 0; i < 20; i++) {
-			Vec3 offset = VecHelper.offsetRandomly(Vec3.ZERO, r, .5f)
-				.multiply(1, .25f, 1)
-				.normalize();
-			Vec3 v = c.add(offset.scale(.5 + r.nextDouble() * .125f))
-				.add(0, .125, 0);
-			Vec3 m = offset.scale(1 / 32f);
-
-			level.addParticle(soulFlame ? ParticleTypes.SOUL_FIRE_FLAME : ParticleTypes.FLAME, v.x, v.y, v.z, m.x, m.y,
-				m.z);
-		}
-	}
-
-	public enum FuelType {
-		NONE, NORMAL, SPECIAL
-	}
-
+        if (level.isClientSide() || burner.creative || state.getValue(BlazeBurnerBlock.HEAT_LEVEL) == BlazeBurnerBlock.HeatLevel.NONE) return;
+        if (burner.remainingBurnTime > 0) { burner.remainingBurnTime--; burner.setChanged(); }
+        if (burner.remainingBurnTime == 0 && burner.fuelType != 0) {
+            if (burner.fuelType == 2) { burner.fuelType = 1; burner.remainingBurnTime = MAX_HEAT_CAPACITY / 2; }
+            else burner.fuelType = 0;
+        }
+        burner.updateHeat();
+    
+        }
+    }
+    private void sync() { if (level != null) level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 2); }
+    @Override protected void write(ValueOutput output, boolean clientPacket) {
+        if(goggles)output.putBoolean("Goggles",true);
+        if(trainHat)output.putBoolean("TrainHat",true);
+        super.write(output, clientPacket); output.putInt("fuelLevel", fuelType); output.putInt("burnTimeRemaining", remainingBurnTime); output.putBoolean("isCreative", creative);
+    }
+    @Override protected void read(ValueInput input, boolean clientPacket) {
+        goggles=input.getBooleanOr("Goggles",false);
+        trainHat=input.getBooleanOr("TrainHat",false);
+         fuelType = Math.clamp(input.getIntOr("fuelLevel", 0), 0, 2);
+        remainingBurnTime = input.getIntOr("burnTimeRemaining", 0); creative = input.getBooleanOr("isCreative", false);
+    
+        super.read(input, clientPacket);
+    }
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket() { return ClientboundBlockEntityDataPacket.create(this); }
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries) { return super.getUpdateTag(registries); }
 }

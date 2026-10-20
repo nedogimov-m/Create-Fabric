@@ -1,83 +1,79 @@
 package com.simibubi.create.content.trains.entity;
 
-import java.util.UUID;
-
-import com.simibubi.create.AllPackets;
+import com.simibubi.create.AllItems;
 import com.simibubi.create.Create;
 import com.simibubi.create.content.contraptions.ContraptionRelocationPacket;
+import com.simibubi.create.content.trains.TrainManager;
 import com.simibubi.create.content.trains.track.BezierTrackPointLocation;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.trains.track.UnloadedTrackException;
 import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecs;
-import net.createmod.catnip.net.base.ServerboundPacketPayload;
-import net.createmod.catnip.platform.CatnipServices;
+import java.util.UUID;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.PlayerLookup;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.UUIDUtil;
-import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
-public record TrainRelocationPacket(UUID trainId, BlockPos pos, Vec3 lookAngle, int entityId, boolean direction,
-									BezierTrackPointLocation hoveredBezier) implements ServerboundPacketPayload {
+/** Actual source wrench relocation request; native server custody remains authoritative. */
+public record TrainRelocationPacket(UUID trainId, BlockPos pos, Vec3 lookAngle, int entityId,
+        boolean direction, BezierTrackPointLocation hoveredBezier, UUID entityUuid) implements CustomPacketPayload {
+    public TrainRelocationPacket {
+        pos=pos.immutable();
+        if(!Double.isFinite(lookAngle.lengthSqr())||lookAngle.lengthSqr()<1e-12)
+            throw new IllegalArgumentException("Invalid actual relocation look vector");
+    }
+    public TrainRelocationPacket(UUID trainId,BlockPos pos,Vec3 lookAngle,int entityId,
+            boolean direction,BezierTrackPointLocation hoveredBezier) {
+        this(trainId,pos,lookAngle,entityId,direction,hoveredBezier,null);
+    }
+    public static final Type<TrainRelocationPacket> TYPE=new Type<>(Create.asResource("relocate_train"));
+    public static final StreamCodec<RegistryFriendlyByteBuf,TrainRelocationPacket> CODEC=StreamCodec.of((b,p)->{
+        b.writeUUID(p.trainId);b.writeBlockPos(p.pos);b.writeDouble(p.lookAngle.x);b.writeDouble(p.lookAngle.y);b.writeDouble(p.lookAngle.z);
+        b.writeInt(p.entityId);b.writeBoolean(p.direction);b.writeBoolean(p.hoveredBezier!=null);
+        if(p.hoveredBezier!=null)BezierTrackPointLocation.STREAM_CODEC.encode(b,p.hoveredBezier);
+        b.writeBoolean(p.entityUuid!=null);if(p.entityUuid!=null)b.writeUUID(p.entityUuid);
+    },b->{
+        var train=b.readUUID();var pos=b.readBlockPos();var look=new Vec3(b.readDouble(),b.readDouble(),b.readDouble());
+        int id=b.readInt();boolean direction=b.readBoolean();var curve=b.readBoolean()?BezierTrackPointLocation.STREAM_CODEC.decode(b):null;
+        var uuid=b.readBoolean()?b.readUUID():null;return new TrainRelocationPacket(train,pos,look,id,direction,curve,uuid);
+    });
+    public static final StreamCodec<RegistryFriendlyByteBuf,TrainRelocationPacket> STREAM_CODEC=CODEC;
+    @Override public Type<TrainRelocationPacket> type(){return TYPE;}
 
-	public static final StreamCodec<ByteBuf, TrainRelocationPacket> STREAM_CODEC = StreamCodec.composite(
-			UUIDUtil.STREAM_CODEC, TrainRelocationPacket::trainId,
-			BlockPos.STREAM_CODEC, TrainRelocationPacket::pos,
-			CatnipStreamCodecs.VEC3, TrainRelocationPacket::lookAngle,
-			ByteBufCodecs.INT, TrainRelocationPacket::entityId,
-			ByteBufCodecs.BOOL, TrainRelocationPacket::direction,
-			CatnipStreamCodecBuilders.nullable(BezierTrackPointLocation.STREAM_CODEC), TrainRelocationPacket::hoveredBezier,
-	        TrainRelocationPacket::new
-	);
+    public static boolean apply(ServerPlayer sender,TrainRelocationPacket packet) {
+        if(sender.isSpectator()||!sender.isAlive()||!sender.mayBuild()||sender.isPassenger()
+                ||!sender.getMainHandItem().is(AllItems.WRENCH))return false;
+        var level=sender.level();var manager=TrainManager.get(level);
+        var train=manager.get(packet.trainId);var entity=level.getEntity(packet.entityId);
+        if(train==null||train.isRestoring()||!(entity instanceof CarriageContraptionEntity carriage)
+                ||packet.entityUuid!=null&&!packet.entityUuid.equals(entity.getUUID())
+                ||carriage.getCarriage()==null||carriage.getCarriage().train!=train
+                ||!train.carriages.contains(carriage.getCarriage()))return false;
+        double extraRange=AllConfigs.server().trains.maxTrackPlacementLength.get()*2d;
+        if(!sender.isWithinBlockInteractionRange(packet.pos,extraRange)
+                ||!sender.isWithinEntityInteractionRange(carriage,extraRange)
+                ||!level.mayInteract(sender,packet.pos)||!level.isLoaded(packet.pos))return false;
+        try {
+            if(!TrainRelocator.relocate(train,level,packet.pos,packet.hoveredBezier,
+                    packet.direction,packet.lookAngle,false))return false;
+        } catch(UnloadedTrackException pending){return false;}
+        sender.sendOverlayMessage(Component.translatable("create.train.relocate.success").withStyle(ChatFormatting.GREEN));
+        for(var row:train.carriages)row.forEachPresentEntity(front->{
+            front.nonDamageTicks=10;
+            for(var player:PlayerLookup.tracking(front))ServerPlayNetworking.send(player,new ContraptionRelocationPacket(front.getId()));
+        });
+        return true;
+    }
 
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.RELOCATE_TRAIN;
-	}
-
-	@Override
-	public void handle(ServerPlayer sender) {
-		Train train = Create.RAILWAYS.trains.get(trainId);
-		Entity entity = sender.level().getEntity(entityId);
-
-		String messagePrefix = sender.getName()
-				.getString() + " could not relocate Train ";
-
-		if (train == null || !(entity instanceof CarriageContraptionEntity cce)) {
-			Create.LOGGER.warn(messagePrefix + train.id.toString()
-					.substring(0, 5) + ": not present on server");
-			return;
-		}
-
-		if (!train.id.equals(cce.trainId))
-			return;
-
-		int verifyDistance = AllConfigs.server().trains.maxTrackPlacementLength.get() * 2;
-		if (!sender.canInteractWithBlock(pos, verifyDistance)) {
-			Create.LOGGER.warn(messagePrefix + train.name.getString() + ": player too far from clicked pos");
-			return;
-		}
-		if (!sender.canInteractWithEntity(cce, verifyDistance)) {
-			Create.LOGGER.warn(messagePrefix + train.name.getString() + ": player too far from carriage entity");
-			return;
-		}
-
-		if (TrainRelocator.relocate(train, sender.level(), pos, hoveredBezier, direction, lookAngle, false)) {
-			sender.displayClientMessage(CreateLang.translateDirect("train.relocate.success")
-					.withStyle(ChatFormatting.GREEN), true);
-			train.carriages.forEach(c -> c.forEachPresentEntity(e -> {
-				e.nonDamageTicks = 10;
-				CatnipServices.NETWORK.sendToClientsTrackingEntity(e,
-						new ContraptionRelocationPacket(e.getId()));
-			}));
-			return;
-		}
-
-		Create.LOGGER.warn(messagePrefix + train.name.getString() + ": relocation failed server-side");
-	}
+    public static void register() {
+        PayloadTypeRegistry.serverboundPlay().register(TYPE,CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(ContraptionRelocationPacket.TYPE,ContraptionRelocationPacket.CODEC);
+        ServerPlayNetworking.registerGlobalReceiver(TYPE,(packet,context)->apply(context.player(),packet));
+    }
 }

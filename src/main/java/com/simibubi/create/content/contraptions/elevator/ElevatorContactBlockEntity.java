@@ -1,159 +1,59 @@
 package com.simibubi.create.content.contraptions.elevator;
 
-import java.util.List;
-
-import com.simibubi.create.content.contraptions.elevator.ElevatorColumn.ColumnCoords;
-import com.simibubi.create.content.decoration.slidingDoor.DoorControlBehaviour;
-import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
+import com.simibubi.create.AllBlockEntityTypes;
+import com.simibubi.create.content.decoration.slidingDoor.*;
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import java.util.function.Consumer;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
-public class ElevatorContactBlockEntity extends SmartBlockEntity {
-
-	public DoorControlBehaviour doorControls;
-	public ColumnCoords columnCoords;
-	public boolean activateBlock;
-
-	public String shortName;
-	public String longName;
-
-	public String lastReportedCurrentFloor = "";
-
-	private int yTargetFromNBT = Integer.MIN_VALUE;
-	private boolean deferNameGenerator;
-
-	public ElevatorContactBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		shortName = "";
-		longName = "";
-		deferNameGenerator = false;
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(doorControls = new DoorControlBehaviour(this));
-	}
-
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-
-		tag.putString("ShortName", shortName);
-		tag.putString("LongName", longName);
-
-		if (lastReportedCurrentFloor != null)
-			tag.putString("LastReportedCurrentFloor", lastReportedCurrentFloor);
-
-		if (clientPacket)
-			return;
-		tag.putBoolean("Activate", activateBlock);
-		if (columnCoords == null)
-			return;
-
-		ElevatorColumn column = ElevatorColumn.get(level, columnCoords);
-		if (column == null)
-			return;
-		tag.putInt("ColumnTarget", column.getTargetedYLevel());
-		if (column.isActive())
-			NBTHelper.putMarker(tag, "ColumnActive");
-	}
-
-	@Override
-	protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(tag, registries, clientPacket);
-
-		shortName = tag.getString("ShortName");
-		longName = tag.getString("LongName");
-
-		if (tag.contains("LastReportedCurrentFloor"))
-			lastReportedCurrentFloor = tag.getString("LastReportedCurrentFloor");
-
-		if (clientPacket)
-			return;
-		activateBlock = tag.getBoolean("Activate");
-		if (!tag.contains("ColumnTarget"))
-			return;
-
-		int target = tag.getInt("ColumnTarget");
-		boolean active = tag.contains("ColumnActive");
-
-		if (columnCoords == null) {
-			yTargetFromNBT = target;
-			return;
-		}
-
-		ElevatorColumn column = ElevatorColumn.getOrCreate(level, columnCoords);
-		column.target(target);
-		column.setActive(active);
-	}
-
-	public void updateDisplayedFloor(String floor) {
-		if (floor.equals(lastReportedCurrentFloor))
-			return;
-		lastReportedCurrentFloor = floor;
-		DisplayLinkBlock.notifyGatherers(level, worldPosition);
-	}
-
-	@Override
-	public void initialize() {
-		super.initialize();
-		if (level.isClientSide())
-			return;
-		columnCoords = ElevatorContactBlock.getColumnCoords(level, worldPosition);
-		if (columnCoords == null)
-			return;
-		ElevatorColumn column = ElevatorColumn.getOrCreate(level, columnCoords);
-		column.add(worldPosition);
-		if (shortName.isBlank())
-			deferNameGenerator = true;
-		if (yTargetFromNBT == Integer.MIN_VALUE)
-			return;
-		column.target(yTargetFromNBT);
-		yTargetFromNBT = Integer.MIN_VALUE;
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		if (!deferNameGenerator)
-			return;
-		if (columnCoords != null)
-			ElevatorColumn.getOrCreate(level, columnCoords)
-				.initNames(level);
-		deferNameGenerator = false;
-	}
-
-	@Override
-	public void invalidate() {
-		if (columnCoords != null) {
-			ElevatorColumn column = ElevatorColumn.get(level, columnCoords);
-			if (column != null)
-				column.remove(worldPosition);
-		}
-		super.invalidate();
-	}
-
-	public void updateName(String shortName, String longName) {
-		this.shortName = shortName;
-		this.longName = longName;
-		this.deferNameGenerator = false;
-		notifyUpdate();
-
-		ElevatorColumn column = ElevatorColumn.get(level, columnCoords);
-		if (column != null)
-			column.namesChanged();
-	}
-
-	public Couple<String> getNames() {
-		return Couple.create(shortName, longName);
-	}
-
+/** Native floor names, door mode, arrival marker and load-before-level column target persistence. */
+public class ElevatorContactBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements BlockEntityBehaviour.Provider {
+    private static final List<Consumer<ElevatorContactBlockEntity>> DISPLAY_LISTENERS=new ArrayList<>();
+    public final DoorControlBehaviour doorControls=new DoorControlBehaviour(this);
+    public ElevatorColumn.ColumnCoords columnCoords;
+    public boolean activateBlock;
+    public String shortName="",longName="",lastReportedCurrentFloor="";
+    private boolean initialized,deferNames,pendingActive;
+    private Integer pendingTarget;
+    private UUID pendingOwner;
+    private BlockPos pendingController;
+    public ElevatorContactBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.ELEVATOR_CONTACT,pos,state);}
+    public static void registerFloorDisplayListener(Consumer<ElevatorContactBlockEntity> listener){DISPLAY_LISTENERS.add(Objects.requireNonNull(listener));}
+    public void updateDisplayedFloor(String floor){if(Objects.equals(floor,lastReportedCurrentFloor))return;lastReportedCurrentFloor=floor;notifyUpdate();for(var listener:List.copyOf(DISPLAY_LISTENERS))listener.accept(this);}
+    public void updateName(String shortName,String longName){this.shortName=Objects.requireNonNull(shortName);this.longName=Objects.requireNonNull(longName);deferNames=false;notifyUpdate();if(level!=null&&columnCoords!=null){var column=ElevatorColumn.get(level,columnCoords);if(column!=null)column.namesChanged();}}
+    public void notifyUpdate(){setChanged();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS);}
+    public void initialize(){super.initialize();registerColumn();}
+    private void registerColumn(){
+        if(level==null||level.isClientSide()||initialized||isRemoved()||LoadedLevelAccess.blockEntity(level,worldPosition)!=this)return;initialized=true;columnCoords=ElevatorContactBlock.getColumnCoords(level,worldPosition);if(columnCoords==null)return;var column=ElevatorColumn.getOrCreate(level,columnCoords);column.add(worldPosition);deferNames=shortName.isBlank();
+        if(pendingTarget!=null){column.restoreSavedTarget(pendingTarget,pendingActive,pendingOwner,pendingController);pendingTarget=null;pendingOwner=null;pendingController=null;}
+    }
+    public static void tick(Level level,BlockPos pos,BlockState state,ElevatorContactBlockEntity contact){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, contact)) {
+            if (!createTick.shouldTick()) return;
+if(level.isClientSide())return;var actual=ElevatorContactBlock.getColumnCoords(level,pos);if(contact.initialized&&!Objects.equals(actual,contact.columnCoords)){var previous=contact.columnCoords==null?null:ElevatorColumn.get(level,contact.columnCoords);if(previous!=null)previous.remove(pos);contact.initialized=false;}contact.registerColumn();if(contact.deferNames&&contact.columnCoords!=null){contact.deferNames=false;ElevatorColumn.getOrCreate(level,contact.columnCoords).initNames();}
+        }
+    }
+    @Override public void invalidate(){if(level!=null&&!level.isClientSide()&&columnCoords!=null){var column=ElevatorColumn.get(level,columnCoords);if(column!=null)column.remove(worldPosition);}initialized=false;super.invalidate();}
+    @Override protected void write(ValueOutput out, boolean clientPacket){
+        super.write(out, clientPacket);out.putString("ShortName",shortName);out.putString("LongName",longName);out.putString("LastReportedCurrentFloor",lastReportedCurrentFloor);out.putBoolean("Activate",activateBlock);
+        var column=level==null||columnCoords==null?null:ElevatorColumn.get(level,columnCoords);
+        if(column!=null&&column.isTargetAvailable()){out.putInt("ColumnTarget",column.getTargetedYLevel());out.putBoolean("ColumnActive",column.isActive());if(column.activeOwner()!=null)out.store("ColumnOwner",UUIDUtil.CODEC,column.activeOwner());if(column.activeController()!=null)out.store("ColumnController",BlockPos.CODEC,column.activeController());}
+        else if(pendingTarget!=null){out.putInt("ColumnTarget",pendingTarget);out.putBoolean("ColumnActive",pendingActive);if(pendingOwner!=null)out.store("ColumnOwner",UUIDUtil.CODEC,pendingOwner);if(pendingController!=null)out.store("ColumnController",BlockPos.CODEC,pendingController);}
+    }
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);shortName=in.getStringOr("ShortName","");longName=in.getStringOr("LongName","");lastReportedCurrentFloor=in.getStringOr("LastReportedCurrentFloor","");activateBlock=in.getBooleanOr("Activate",false);pendingTarget=in.getInt("ColumnTarget").orElse(null);pendingActive=in.getBooleanOr("ColumnActive",false);pendingOwner=in.read("ColumnOwner",UUIDUtil.CODEC).orElse(null);pendingController=in.read("ColumnController",BlockPos.CODEC).orElse(null);initialized=false;}
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){return super.getUpdateTag(registries);}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
+    @Override protected void addNativeBehaviours(java.util.List<com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour> behaviours) {
+        super.addNativeBehaviours(behaviours);
+        if (doorControls != null) behaviours.add(doorControls);
+    }
 }

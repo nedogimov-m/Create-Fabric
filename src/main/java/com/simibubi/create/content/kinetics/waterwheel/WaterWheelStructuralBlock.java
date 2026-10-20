@@ -1,216 +1,77 @@
 package com.simibubi.create.content.kinetics.waterwheel;
 
-import java.util.HashSet;
-import java.util.Set;
-
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
-import com.mojang.serialization.MapCodec;
 import com.simibubi.create.AllBlocks;
-import com.simibubi.create.api.equipment.goggles.IProxyHoveringInformation;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-import com.simibubi.create.foundation.block.render.MultiPosDestructionHandler;
-
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.particle.ParticleEngine;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.DirectionalBlock;
-import net.minecraft.world.level.block.RenderShape;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
 import net.minecraft.world.level.material.PushReaction;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 
+public final class WaterWheelStructuralBlock extends Block implements com.simibubi.create.api.equipment.goggles.IProxyHoveringInformation {
+    @Override public BlockPos getInformationSource(Level level,BlockPos pos,BlockState state){var root=master(level,pos,state);return root==null?pos:root;}
+    public static final EnumProperty<Direction> FACING = BlockStateProperties.FACING;
+    public WaterWheelStructuralBlock(Properties properties) {
+        super(properties.noLootTable().pushReaction(PushReaction.IMMOVEABLE));
+        registerDefaultState(stateDefinition.any().setValue(FACING, Direction.DOWN));
+    }
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { builder.add(FACING); }
+    @Override protected RenderShape getRenderShape(BlockState state) { return RenderShape.INVISIBLE; }
 
-import net.neoforged.neoforge.client.extensions.common.IClientBlockExtensions;
+    /** At most two links. Malformed structure states cannot recurse or cross chunk boundaries. */
+    public static BlockPos master(LevelReader level, BlockPos pos, BlockState state) {
+        BlockPos cursor = pos;
+        for (int i = 0; i < 2 && state.is(AllBlocks.WATER_WHEEL_STRUCTURAL); i++) {
+            var direction = state.getValue(FACING);
+            cursor = cursor.relative(direction);
+            if (!level.hasChunkAt(cursor)) return null;
+            state = level.getBlockState(cursor);
+            if (state.is(AllBlocks.LARGE_WATER_WHEEL) && state.getValue(LargeWaterWheelBlock.AXIS) != direction.getAxis()
+                    && LargeWaterWheelBlock.structure(cursor, state.getValue(LargeWaterWheelBlock.AXIS)).containsKey(pos)) return cursor;
+        }
+        return null;
+    }
 
-public class WaterWheelStructuralBlock extends DirectionalBlock implements IWrenchable, IProxyHoveringInformation {
-
-	public static final MapCodec<WaterWheelStructuralBlock> CODEC = simpleCodec(WaterWheelStructuralBlock::new);
-
-	public WaterWheelStructuralBlock(Properties p_52591_) {
-		super(p_52591_);
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> pBuilder) {
-		super.createBlockStateDefinition(pBuilder.add(FACING));
-	}
-
-	@Override
-	public RenderShape getRenderShape(BlockState pState) {
-		return RenderShape.INVISIBLE;
-	}
-
-	@Override
-	public PushReaction getPistonPushReaction(BlockState pState) {
-		return PushReaction.BLOCK;
-	}
-
-	@Override
-	public InteractionResult onWrenched(BlockState state, UseOnContext context) {
-		return InteractionResult.PASS;
-	}
-
-	@Override
-	public ItemStack getCloneItemStack(BlockState state, HitResult target, LevelReader level, BlockPos pos, Player player) {
-		return AllBlocks.LARGE_WATER_WHEEL.asStack();
-	}
-
-	@Override
-	public InteractionResult onSneakWrenched(BlockState state, UseOnContext context) {
-		BlockPos clickedPos = context.getClickedPos();
-		Level level = context.getLevel();
-
-		if (stillValid(level, clickedPos, state, false)) {
-			BlockPos masterPos = getMaster(level, clickedPos, state);
-			context = new UseOnContext(level, context.getPlayer(), context.getHand(), context.getItemInHand(),
-				new BlockHitResult(context.getClickLocation(), context.getClickedFace(), masterPos,
-					context.isInside()));
-			state = level.getBlockState(masterPos);
-		}
-
-		return IWrenchable.super.onSneakWrenched(state, context);
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (!stillValid(level, pos, state, false))
-			return ItemInteractionResult.FAIL;
-		if (!(level.getBlockEntity(getMaster(level, pos, state)) instanceof WaterWheelBlockEntity wwt))
-			return ItemInteractionResult.FAIL;
-		return wwt.applyMaterialIfValid(stack);
-	}
-
-	@Override
-	public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pIsMoving) {
-		if (stillValid(pLevel, pPos, pState, false))
-			pLevel.destroyBlock(getMaster(pLevel, pPos, pState), true);
-	}
-
-	public BlockState playerWillDestroy(Level pLevel, BlockPos pPos, BlockState pState, Player pPlayer) {
-		if (stillValid(pLevel, pPos, pState, false)) {
-			BlockPos masterPos = getMaster(pLevel, pPos, pState);
-			pLevel.destroyBlockProgress(masterPos.hashCode(), masterPos, -1);
-			if (!pLevel.isClientSide() && pPlayer.isCreative())
-				pLevel.destroyBlock(masterPos, false);
-		}
-		return super.playerWillDestroy(pLevel, pPos, pState, pPlayer);
-	}
-
-	@Override
-	public BlockState updateShape(BlockState pState, Direction pFacing, BlockState pFacingState, LevelAccessor pLevel,
-								  BlockPos pCurrentPos, BlockPos pFacingPos) {
-		if (stillValid(pLevel, pCurrentPos, pState, false)) {
-			BlockPos masterPos = getMaster(pLevel, pCurrentPos, pState);
-			if (!pLevel.getBlockTicks()
-				.hasScheduledTick(masterPos, AllBlocks.LARGE_WATER_WHEEL.get()))
-				pLevel.scheduleTick(masterPos, AllBlocks.LARGE_WATER_WHEEL.get(), 1);
-			return pState;
-		}
-		if (!(pLevel instanceof Level level) || level.isClientSide())
-			return pState;
-		if (!level.getBlockTicks()
-			.hasScheduledTick(pCurrentPos, this))
-			level.scheduleTick(pCurrentPos, this, 1);
-		return pState;
-	}
-
-	public static BlockPos getMaster(BlockGetter level, BlockPos pos, BlockState state) {
-		Direction direction = state.getValue(FACING);
-		BlockPos targetedPos = pos.relative(direction);
-		BlockState targetedState = level.getBlockState(targetedPos);
-		if (targetedState.is(AllBlocks.WATER_WHEEL_STRUCTURAL.get()))
-			return getMaster(level, targetedPos, targetedState);
-		return targetedPos;
-	}
-
-	public boolean stillValid(BlockGetter level, BlockPos pos, BlockState state, boolean directlyAdjacent) {
-		if (!state.is(this))
-			return false;
-
-		Direction direction = state.getValue(FACING);
-		BlockPos targetedPos = pos.relative(direction);
-		BlockState targetedState = level.getBlockState(targetedPos);
-
-		if (!directlyAdjacent && stillValid(level, targetedPos, targetedState, true))
-			return true;
-		return targetedState.getBlock() instanceof LargeWaterWheelBlock
-			&& targetedState.getValue(LargeWaterWheelBlock.AXIS) != direction.getAxis();
-	}
-
-	@Override
-	public void tick(BlockState pState, ServerLevel pLevel, BlockPos pPos, RandomSource pRandom) {
-		if (!stillValid(pLevel, pPos, pState, false))
-			pLevel.setBlockAndUpdate(pPos, Blocks.AIR.defaultBlockState());
-	}
-
-	@Override
-	public boolean addLandingEffects(BlockState state1, ServerLevel level, BlockPos pos, BlockState state2,
-									 LivingEntity entity, int numberOfParticles) {
-		return true;
-	}
-
-	public static class RenderProperties implements IClientBlockExtensions, MultiPosDestructionHandler {
-
-		@Override
-		public boolean addDestroyEffects(BlockState state, Level Level, BlockPos pos, ParticleEngine manager) {
-			return true;
-		}
-
-		@Override
-		public boolean addHitEffects(BlockState state, Level level, HitResult target, ParticleEngine manager) {
-			if (target instanceof BlockHitResult bhr) {
-				BlockPos targetPos = bhr.getBlockPos();
-				WaterWheelStructuralBlock waterWheelStructuralBlock = AllBlocks.WATER_WHEEL_STRUCTURAL.get();
-				if (waterWheelStructuralBlock.stillValid(level, targetPos, state, false))
-					manager.crack(WaterWheelStructuralBlock.getMaster(level, targetPos, state), bhr.getDirection());
-				return true;
-			}
-			return IClientBlockExtensions.super.addHitEffects(state, level, target, manager);
-		}
-
-		@Override
-		@Nullable
-		public Set<BlockPos> getExtraPositions(ClientLevel level, BlockPos pos, BlockState blockState, int progress) {
-			WaterWheelStructuralBlock waterWheelStructuralBlock = AllBlocks.WATER_WHEEL_STRUCTURAL.get();
-			if (!waterWheelStructuralBlock.stillValid(level, pos, blockState, false))
-				return null;
-			HashSet<BlockPos> set = new HashSet<>();
-			set.add(WaterWheelStructuralBlock.getMaster(level, pos, blockState));
-			return set;
-		}
-	}
-
-	@Override
-	public BlockPos getInformationSource(Level level, BlockPos pos, BlockState state) {
-		return stillValid(level, pos, state, false) ? getMaster(level, pos, state) : pos;
-	}
-
-	@Override
-	public boolean isFlammable(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
-		return false;
-	}
-	@Override
-	protected @NotNull MapCodec<? extends DirectionalBlock> codec() {
-		return CODEC;
-	}
+    @Override protected BlockState updateShape(BlockState state, LevelReader level, ScheduledTickAccess ticks,
+            BlockPos pos, Direction side, BlockPos neighborPos, BlockState neighbor, RandomSource random) {
+        ticks.scheduleTick(pos, this, 1);
+        return state;
+    }
+    @Override protected void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
+        // Do not delete cells whose centre may be in an unloaded chunk.
+        var target = pos.relative(state.getValue(FACING));
+        if (!level.hasChunkAt(target)) return;
+        var next = level.getBlockState(target);
+        if (next.is(this) && !level.hasChunkAt(target.relative(next.getValue(FACING)))) return;
+        if (master(level, pos, state) == null) level.removeBlock(pos, false);
+    }
+    @Override protected void affectNeighborsAfterRemoval(BlockState state, ServerLevel level, BlockPos pos, boolean moved) {
+        super.affectNeighborsAfterRemoval(state, level, pos, moved);
+        if (level.getBlockState(pos).is(this)) return;
+        var centre = master(level, pos, state);
+        if (centre != null) level.destroyBlock(centre, true);
+    }
+    @Override public BlockState playerWillDestroy(Level level, BlockPos pos, BlockState state, Player player) {
+        if (!level.isClientSide() && player.isCreative()) {
+            var centre = master(level, pos, state);
+            if (centre != null) level.destroyBlock(centre, false);
+        }
+        return super.playerWillDestroy(level, pos, state, player);
+    }
+    @Override protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos,
+            Player player, InteractionHand hand, BlockHitResult hit) {
+        var centre = master(level, pos, state);
+        return centre == null ? InteractionResult.PASS : AllBlocks.WATER_WHEEL.useMaterial(stack, level, centre, player);
+    }
+    @Override protected ItemStack getCloneItemStack(LevelReader level, BlockPos pos, BlockState state, boolean includeData) {
+        return new ItemStack(AllBlocks.LARGE_WATER_WHEEL);
+    }
 }

@@ -1,27 +1,23 @@
 package com.simibubi.create.content.equipment.armor;
 
-import net.minecraft.core.Holder;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.item.ArmorItem;
-import net.minecraft.world.item.ArmorMaterial;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.resources.*;
+import net.minecraft.world.entity.*;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
+import net.minecraft.world.item.equipment.*;
 
-import org.jetbrains.annotations.Nullable;
-
-import java.util.Locale;
-
-public class BaseArmorItem extends ArmorItem {
-	protected final ResourceLocation textureLoc;
-
-	public BaseArmorItem(Holder<ArmorMaterial> armorMaterial, ArmorItem.Type type, Properties properties, ResourceLocation textureLoc) {
-		super(armorMaterial, type, properties.stacksTo(1));
-		this.textureLoc = textureLoc;
-	}
-
-	@Override
-	public @Nullable ResourceLocation getArmorTexture(ItemStack stack, Entity entity, EquipmentSlot slot, ArmorMaterial.Layer layer, boolean innerModel) {
-		return ResourceLocation.parse(String.format(Locale.ROOT, "%s:textures/models/armor/%s_layer_%d.png", textureLoc.getNamespace(), textureLoc.getPath(), slot == EquipmentSlot.LEGS ? 2 : 1));
-	}
+/** Native attributes, repair, enchantability, equip/swap/dispense and resource-pack equipment assets. */
+public class BaseArmorItem extends Item {
+    protected final Identifier textureLoc;
+    protected final ArmorMaterial material;
+    protected final ArmorType type;
+    public BaseArmorItem(ArmorMaterial material,ArmorType type,Properties properties,Identifier textureLoc){this(material,type,properties,textureLoc,material.createAttributes(type));}
+    protected BaseArmorItem(ArmorMaterial material,ArmorType type,Properties properties,Identifier textureLoc,ItemAttributeModifiers attributes){
+        super(properties.stacksTo(1).attributes(attributes).enchantable(material.enchantmentValue()).repairable(material.repairIngredient()).component(DataComponents.EQUIPPABLE,Equippable.builder(type.getSlot()).setEquipSound(material.equipSound()).setAsset(ResourceKey.create(EquipmentAssets.ROOT_ID,textureLoc)).build()));
+        this.material=material;this.type=type;this.textureLoc=textureLoc;
+    }
+    public Identifier getArmorTexture(ItemStack stack,Entity entity,EquipmentSlot slot){return Identifier.fromNamespaceAndPath(textureLoc.getNamespace(),"textures/models/armor/"+textureLoc.getPath()+"_layer_"+(slot==EquipmentSlot.LEGS?2:1)+".png");}
+    public ArmorType armorType(){return type;}
+    public ArmorMaterial armorMaterial(){return material;}
 }

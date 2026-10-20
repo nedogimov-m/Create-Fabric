@@ -1,64 +1,16 @@
 package com.simibubi.create.foundation.block;
 
-import com.mojang.serialization.MapCodec;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.DirectionalBlock;
-import net.minecraft.world.level.block.Mirror;
-import net.minecraft.world.level.block.Rotation;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.state.*;
 
-import org.jetbrains.annotations.NotNull;
-
-public class WrenchableDirectionalBlock extends DirectionalBlock implements IWrenchable {
-
-	public static final MapCodec<WrenchableDirectionalBlock> CODEC = simpleCodec(WrenchableDirectionalBlock::new);
-
-	public WrenchableDirectionalBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		builder.add(FACING);
-		super.createBlockStateDefinition(builder);
-	}
-
-	@Override
-	public BlockState getRotatedBlockState(BlockState originalState, Direction targetedFace) {
-		Direction facing = originalState.getValue(FACING);
-
-		if (facing.getAxis() == targetedFace.getAxis())
-			return originalState;
-
-		Direction newFacing = facing.getClockWise(targetedFace.getAxis());
-
-		return originalState.setValue(FACING, newFacing);
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		return defaultBlockState().setValue(FACING, context.getNearestLookingDirection());
-	}
-
-	@Override
-	public BlockState rotate(BlockState state, Rotation rot) {
-		return state.setValue(FACING, rot.rotate(state.getValue(FACING)));
-	}
-
-	@Override
-	@SuppressWarnings("deprecation")
-	public BlockState mirror(BlockState state, Mirror mirrorIn) {
-		return state.rotate(mirrorIn.getRotation(state.getValue(FACING)));
-	}
-
-	@Override
-	protected @NotNull MapCodec<? extends DirectionalBlock> codec() {
-		return CODEC;
-	}
-
+/** Actual source directional helper block; registration may deliberately omit an item. */
+public class WrenchableDirectionalBlock extends DirectionalBlock {
+    public WrenchableDirectionalBlock(Properties properties){super(properties);}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(FACING);}
+    public BlockState getRotatedBlockState(BlockState state,Direction face){var facing=state.getValue(FACING);return facing.getAxis()==face.getAxis()?state:state.setValue(FACING,facing.getClockWise(face.getAxis()));}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){return defaultBlockState().setValue(FACING,context.getNearestLookingDirection());}
+    @Override protected BlockState rotate(BlockState state,Rotation rotation){return state.setValue(FACING,rotation.rotate(state.getValue(FACING)));}
+    @Override protected BlockState mirror(BlockState state,Mirror mirror){return state.rotate(mirror.getRotation(state.getValue(FACING)));}
 }

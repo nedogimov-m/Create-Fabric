@@ -4,14 +4,10 @@ import com.simibubi.create.content.kinetics.clock.CuckooClockBlockEntity;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
 import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
 import com.simibubi.create.content.trains.display.FlapDisplaySection;
-import com.simibubi.create.foundation.gui.ModularGuiLineBuilder;
-import com.simibubi.create.foundation.utility.CreateLang;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerLevel;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 public class TimeOfDayDisplaySource extends SingleLineDisplaySource {
 
@@ -31,14 +27,13 @@ public class TimeOfDayDisplaySource extends SingleLineDisplaySource {
 			return EMPTY_TIME;
 
 		boolean c12 = context.sourceConfig()
-			.getInt("Cycle") == 0;
-		boolean isNatural = sLevel.dimensionType()
-			.natural();
+			.getIntOr("Cycle",0) == 0;
+		boolean isNatural = !sLevel.dimensionType().hasFixedTime();
 
-		int dayTime = (int) (sLevel.getDayTime() % 24000);
+		int dayTime = (int) (sLevel.getOverworldClockTime() % 24000);
 		int hours = (dayTime / 1000 + 6) % 24;
 		int minutes = (dayTime % 1000) * 60 / 1000;
-		MutableComponent suffix = CreateLang.translateDirect("generic.daytime." + (hours > 11 ? "pm" : "am"));
+		MutableComponent suffix = Component.translatable("create.generic.daytime." + (hours > 11 ? "pm" : "am"));
 
 		minutes = minutes / 5 * 5;
 		if (c12) {
@@ -48,8 +43,8 @@ public class TimeOfDayDisplaySource extends SingleLineDisplaySource {
 		}
 
 		if (!isNatural) {
-			hours = sLevel.random.nextInt(70) + 24;
-			minutes = sLevel.random.nextInt(40) + 60;
+			hours = sLevel.getRandom().nextInt(70) + 24;
+			minutes = sLevel.getRandom().nextInt(40) + 60;
 		}
 
 		MutableComponent component = Component.literal(
@@ -73,18 +68,7 @@ public class TimeOfDayDisplaySource extends SingleLineDisplaySource {
 		return "time_of_day";
 	}
 
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void initConfigurationWidgets(DisplayLinkContext context, ModularGuiLineBuilder builder, boolean isFirstLine) {
-		super.initConfigurationWidgets(context, builder, isFirstLine);
-		if (isFirstLine)
-			return;
-
-		builder.addSelectionScrollInput(0, 60, (si, l) -> {
-			si.forOptions(CreateLang.translatedOptions("display_source.time", "12_hour", "24_hour"))
-				.titled(CreateLang.translateDirect("display_source.time.format"));
-		}, "Cycle");
-	}
+    @Override public java.util.List<com.simibubi.create.content.redstone.displayLink.DisplaySourceConfiguration> configuration(DisplayLinkContext context){var options=new java.util.ArrayList<>(super.configuration(context));options.add(com.simibubi.create.content.redstone.displayLink.DisplaySourceConfiguration.choice("Cycle","create.display_source.time.12_hour","create.display_source.time.24_hour"));return java.util.List.copyOf(options);}
 
 	@Override
 	protected boolean allowsLabeling(DisplayLinkContext context) {

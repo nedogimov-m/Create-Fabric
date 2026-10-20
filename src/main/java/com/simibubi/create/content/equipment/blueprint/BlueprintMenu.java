@@ -1,178 +1,51 @@
 package com.simibubi.create.content.equipment.blueprint;
 
-import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllMenuTypes;
+import com.simibubi.create.Create;
 import com.simibubi.create.content.equipment.blueprint.BlueprintEntity.BlueprintSection;
-import com.simibubi.create.foundation.gui.menu.GhostItemMenu;
-
-import net.minecraft.client.Minecraft;
+import java.util.*;
+import net.fabricmc.fabric.api.menu.v1.ExtendedMenuType;
+import net.minecraft.core.*;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.CraftingContainer;
-import net.minecraft.world.inventory.MenuType;
-import net.minecraft.world.inventory.TransientCraftingContainer;
+import net.minecraft.network.codec.*;
+import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.player.*;
+import net.minecraft.world.inventory.*;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.CraftingRecipe;
-import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.item.crafting.RecipeType;
-import net.minecraft.world.level.Level;
+import net.minecraft.world.item.crafting.*;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.items.IItemHandler;
-import net.neoforged.neoforge.items.ItemStackHandler;
-import net.neoforged.neoforge.items.SlotItemHandler;
-
-import java.util.Optional;
-
-public class BlueprintMenu extends GhostItemMenu<BlueprintSection> {
-
-	public BlueprintMenu(MenuType<?> type, int id, Inventory inv, RegistryFriendlyByteBuf extraData) {
-		super(type, id, inv, extraData);
-	}
-
-	public BlueprintMenu(MenuType<?> type, int id, Inventory inv, BlueprintSection section) {
-		super(type, id, inv, section);
-	}
-
-	public static BlueprintMenu create(int id, Inventory inv, BlueprintSection section) {
-		return new BlueprintMenu(AllMenuTypes.CRAFTING_BLUEPRINT.get(), id, inv, section);
-	}
-
-	@Override
-	protected boolean allowRepeats() {
-		return true;
-	}
-
-	@Override
-	protected void addSlots() {
-		addPlayerSlots(8, 131);
-
-		int x = 29;
-		int y = 21;
-		int index = 0;
-		for (int row = 0; row < 3; ++row)
-			for (int col = 0; col < 3; ++col)
-				this.addSlot(new BlueprintCraftSlot(ghostInventory, index++, x + col * 18, y + row * 18));
-
-		addSlot(new BlueprintCraftSlot(ghostInventory, index++, 123, 40));
-		addSlot(new SlotItemHandler(ghostInventory, index++, 135, 57));
-	}
-
-	public void onCraftMatrixChanged() {
-		Level level = contentHolder.getBlueprintWorld();
-		if (level.isClientSide)
-			return;
-
-		ServerPlayer serverplayerentity = (ServerPlayer) player;
-		CraftingContainer craftingInventory = new BlueprintCraftingInventory(this, ghostInventory);
-		Optional<RecipeHolder<CraftingRecipe>> optional = player.getServer()
-			.getRecipeManager()
-			.getRecipeFor(RecipeType.CRAFTING, craftingInventory.asCraftInput(), player.getCommandSenderWorld());
-
-		if (!optional.isPresent()) {
-			if (ghostInventory.getStackInSlot(9)
-				.isEmpty())
-				return;
-			if (!contentHolder.inferredIcon)
-				return;
-
-			ghostInventory.setStackInSlot(9, ItemStack.EMPTY);
-			serverplayerentity.connection.send(new ClientboundContainerSetSlotPacket(containerId, incrementStateId(), 36 + 9, ItemStack.EMPTY));
-			contentHolder.inferredIcon = false;
-			return;
-		}
-
-		CraftingRecipe icraftingrecipe = optional.get().value();
-		ItemStack itemstack = icraftingrecipe.assemble(craftingInventory.asCraftInput(), level.registryAccess());
-		ghostInventory.setStackInSlot(9, itemstack);
-		contentHolder.inferredIcon = true;
-		ItemStack toSend = itemstack.copy();
-		toSend.set(AllDataComponents.INFERRED_FROM_RECIPE, true);
-		serverplayerentity.connection.send(new ClientboundContainerSetSlotPacket(containerId, incrementStateId(), 36 + 9, toSend));
-	}
-
-	@Override
-	public void setItem(int slotId, int stateId, ItemStack stack) {
-		if (slotId == 36 + 9) {
-			contentHolder.inferredIcon = stack.getOrDefault(AllDataComponents.INFERRED_FROM_RECIPE, false);
-			stack.remove(AllDataComponents.INFERRED_FROM_RECIPE);
-		}
-		super.setItem(slotId, stateId, stack);
-	}
-
-	@Override
-	protected ItemStackHandler createGhostInventory() {
-		return contentHolder.getItems();
-	}
-
-	@Override
-	protected void initAndReadInventory(BlueprintSection contentHolder) {
-		super.initAndReadInventory(contentHolder);
-	}
-
-	@Override
-	protected void saveData(BlueprintSection contentHolder) {
-		contentHolder.save(ghostInventory);
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	protected BlueprintSection createOnClient(RegistryFriendlyByteBuf extraData) {
-		int entityID = extraData.readVarInt();
-		int section = extraData.readVarInt();
-		Entity entityByID = Minecraft.getInstance().level.getEntity(entityID);
-		if (!(entityByID instanceof BlueprintEntity blueprintEntity))
-			return null;
-		BlueprintSection blueprintSection = blueprintEntity.getSection(section);
-		return blueprintSection;
-	}
-
-	@Override
-	public boolean stillValid(Player player) {
-		return contentHolder != null && contentHolder.canPlayerUse(player);
-	}
-
-	static class BlueprintCraftingInventory extends TransientCraftingContainer {
-
-		public BlueprintCraftingInventory(AbstractContainerMenu menu, ItemStackHandler items) {
-			super(menu, 3, 3);
-			for (int y = 0; y < 3; y++) {
-				for (int x = 0; x < 3; x++) {
-					ItemStack stack = items.getStackInSlot(y * 3 + x);
-					setItem(y * 3 + x, stack == null ? ItemStack.EMPTY : stack.copy());
-				}
-			}
-		}
-
-	}
-
-	class BlueprintCraftSlot extends SlotItemHandler {
-
-		private int index;
-
-		public BlueprintCraftSlot(IItemHandler itemHandler, int index, int xPosition, int yPosition) {
-			super(itemHandler, index, xPosition, yPosition);
-			this.index = index;
-		}
-
-		@Override
-		public void setChanged() {
-			super.setChanged();
-			if (index == 9 && hasItem() && !contentHolder.getBlueprintWorld().isClientSide) {
-				contentHolder.inferredIcon = false;
-				ServerPlayer serverplayerentity = (ServerPlayer) player;
-				serverplayerentity.connection.send(new ClientboundContainerSetSlotPacket(containerId, incrementStateId(), 36 + 9, getItem()));
-			}
-			if (index < 9)
-				onCraftMatrixChanged();
-		}
-
-	}
-
+/** Eleven genuine synchronized ghost slots and thirty-six actual native player inventory slots. */
+public final class BlueprintMenu extends AbstractContainerMenu {
+ public record Opening(int entity,UUID uuid,int section){public static final StreamCodec<RegistryFriendlyByteBuf,Opening> CODEC=StreamCodec.composite(ByteBufCodecs.VAR_INT,Opening::entity,UUIDUtil.STREAM_CODEC,Opening::uuid,ByteBufCodecs.VAR_INT,Opening::section,Opening::new);}
+ public static final ExtendedMenuType<BlueprintMenu,Opening> TYPE=Registry.register(BuiltInRegistries.MENU,Create.asResource("crafting_blueprint"),new ExtendedMenuType<>(BlueprintMenu::client,Opening.CODEC));
+ public final Inventory playerInventory;public final BlueprintSection section;private final Opening opening;private final SimpleContainer ghosts;private final ContainerData flags=new SimpleContainerData(1);
+ private static BlueprintMenu client(int id,Inventory inventory,Opening opening){var entity=inventory.player.level().getEntity(opening.entity());var section=entity instanceof BlueprintEntity blueprint&&blueprint.getUUID().equals(opening.uuid())&&opening.section()>=0&&opening.section()<blueprint.size()*blueprint.size()?blueprint.getSection(opening.section()):null;return new BlueprintMenu(id,inventory,section,opening);}
+ public BlueprintMenu(int id,Inventory inventory,BlueprintSection section){this(id,inventory,section,new Opening(section.blueprint().getId(),section.blueprint().getUUID(),section.index));}
+ private BlueprintMenu(int id,Inventory inventory,BlueprintSection section,Opening opening){super(TYPE,id);this.playerInventory=inventory;this.section=section;this.opening=opening;this.ghosts=section==null?new SimpleContainer(11):section.getItems();flags.set(0,section!=null&&section.inferredIcon()?1:0);addDataSlots(flags);addStandardInventorySlots(inventory,8,131);
+  for(int i=0;i<11;i++){int slot=i;addSlot(new Slot(ghosts,i,i<9?29+i%3*18:i==9?123:135,i<9?21+i/3*18:i==9?40:57){@Override public boolean mayPlace(ItemStack stack){return false;}@Override public boolean mayPickup(Player player){return false;}@Override public boolean isFake(){return true;}});}
+ }
+ public static void register(){}
+ public Opening opening(){return opening;}
+ public boolean inferredIcon(){return flags.get(0)!=0;}
+ public SimpleContainer ghostItems(){return ghosts;}
+ @Override public boolean stillValid(Player player){return player.getInventory()==playerInventory&&section!=null&&section.blueprint().getId()==opening.entity()&&section.blueprint().getUUID().equals(opening.uuid())&&section.index==opening.section()&&section.canPlayerUse(player);}
+ private void save(){if(!playerInventory.player.level().isClientSide()&&stillValid(playerInventory.player))section.save(ghosts,inferredIcon());}
+ private void changed(int index){if(playerInventory.player.level().isClientSide())return;if(index==9)flags.set(0,0);if(index<9)inferOutput();save();broadcastChanges();}
+ private void inferOutput(){
+  var player=playerInventory.player;var level=player.level();if(level.isClientSide()||!stillValid(player))return;
+  var grid=new ArrayList<ItemStack>(9);for(int i=0;i<9;i++)grid.add(ghosts.getItem(i).copy());var input=CraftingInput.of(3,3,grid);
+  var found=level.getServer().getRecipeManager().getRecipeFor(RecipeType.CRAFTING,input,level);
+  if(found.isPresent()){ghosts.setItem(9,found.get().value().assemble(input));flags.set(0,1);}else if(inferredIcon()){ghosts.setItem(9,ItemStack.EMPTY);flags.set(0,0);}
+ }
+ @Override public void clicked(int index,int button,ContainerInput input,Player player){
+  if(!player.level().isClientSide()&&!stillValid(player))return;
+  if(index>=36&&index<47){if(input==ContainerInput.PICKUP||input==ContainerInput.QUICK_MOVE){ghosts.setItem(index-36,getCarried().copyWithCount(1));changed(index-36);}return;}
+  super.clicked(index,button,input,player);
+ }
+ @Override public ItemStack quickMoveStack(Player player,int index){if(!stillValid(player)||index<0||index>=47)return ItemStack.EMPTY;if(index>=36){ghosts.setItem(index-36,ItemStack.EMPTY);changed(index-36);return ItemStack.EMPTY;}var actual=getSlot(index).getItem();if(actual.isEmpty())return ItemStack.EMPTY;for(int slot=0;slot<11;slot++)if(ghosts.getItem(slot).isEmpty()){ghosts.setItem(slot,actual.copyWithCount(1));changed(slot);break;}return ItemStack.EMPTY;}
+ @Override public boolean canTakeItemForPickAll(ItemStack stack,Slot slot){return slot.container==playerInventory;}
+ @Override public boolean canDragTo(Slot slot){return slot.container==playerInventory;}
+ @Override public boolean clickMenuButton(Player player,int button){if(button!=0||!stillValid(player))return false;ghosts.clearContent();flags.set(0,0);save();broadcastChanges();return true;}
+ public boolean assign(Player player,CraftingRecipe recipe){if(!stillValid(player)||player.level().isClientSide())return false;var snapshot=section.snapshot();var converted=new SimpleContainer(11);for(int i=0;i<11;i++)converted.setItem(i,ghosts.getItem(i).copy());if(!BlueprintIngredients.assignCompleteRecipe(player.level(),converted,recipe)||!stillValid(player)||!snapshot.equals(section.snapshot()))return false;for(int i=0;i<11;i++)ghosts.setItem(i,converted.getItem(i));flags.set(0,0);save();broadcastChanges();return true;}
+ @Override public void removed(Player player){save();super.removed(player);}
 }

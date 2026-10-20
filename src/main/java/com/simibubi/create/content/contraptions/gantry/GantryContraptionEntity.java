@@ -1,243 +1,132 @@
 package com.simibubi.create.content.contraptions.gantry;
 
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllEntityTypes;
-import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
-import com.simibubi.create.content.contraptions.Contraption;
-import com.simibubi.create.content.contraptions.ContraptionCollider;
-import com.simibubi.create.content.contraptions.StructureTransform;
-import com.simibubi.create.content.kinetics.gantry.GantryShaftBlock;
-import com.simibubi.create.content.kinetics.gantry.GantryShaftBlockEntity;
-import com.simibubi.create.foundation.utility.ServerSpeedProvider;
+import com.mojang.serialization.Codec;
 
-import net.createmod.catnip.platform.CatnipServices;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.client.Minecraft;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.util.Mth;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
+import com.simibubi.create.content.contraptions.*;
+import com.simibubi.create.content.kinetics.gantry.*;
+import com.simibubi.create.content.kinetics.transmission.sequencer.SequencePhase;
+import com.simibubi.create.content.kinetics.transmission.sequencer.SequencerInstructions;
+import com.simibubi.create.foundation.utility.*;
+import java.util.Objects;
+import net.fabricmc.fabric.api.networking.v1.*;
+import net.minecraft.core.*;
+import net.minecraft.network.syncher.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.Vec3;
+import org.joml.Quaternionf;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-
+/** A genuine registered carrier. Its carriage BE travels inside it; no stationary controller is invented. */
 public class GantryContraptionEntity extends AbstractContraptionEntity {
-
-	Direction movementAxis;
-	double clientOffsetDiff;
-	double axisMotion;
-
-	public double sequencedOffsetLimit;
-
-	public GantryContraptionEntity(EntityType<?> entityTypeIn, Level worldIn) {
-		super(entityTypeIn, worldIn);
-		sequencedOffsetLimit = -1;
-	}
-
-	public static GantryContraptionEntity create(Level world, Contraption contraption, Direction movementAxis) {
-		GantryContraptionEntity entity = new GantryContraptionEntity(AllEntityTypes.GANTRY_CONTRAPTION.get(), world);
-		entity.setContraption(contraption);
-		entity.movementAxis = movementAxis;
-		return entity;
-	}
-
-	public void limitMovement(double maxOffset) {
-		sequencedOffsetLimit = maxOffset;
-	}
-
-	@Override
-	protected void tickContraption() {
-		if (!(contraption instanceof GantryContraption))
-			return;
-
-		double prevAxisMotion = axisMotion;
-		if (level().isClientSide) {
-			clientOffsetDiff *= .75;
-			updateClientMotion();
-		}
-
-		checkPinionShaft();
-		tickActors();
-		Vec3 movementVec = getDeltaMovement();
-
-		if (ContraptionCollider.collideBlocks(this)) {
-			if (!level().isClientSide)
-				disassemble();
-			return;
-		}
-
-		if (!isStalled() && tickCount > 2) {
-			if (sequencedOffsetLimit >= 0)
-				movementVec = VecHelper.clampComponentWise(movementVec, (float) sequencedOffsetLimit);
-			move(movementVec.x, movementVec.y, movementVec.z);
-			if (sequencedOffsetLimit > 0)
-				sequencedOffsetLimit = Math.max(0, sequencedOffsetLimit - movementVec.length());
-		}
-
-		if (Math.signum(prevAxisMotion) != Math.signum(axisMotion) && prevAxisMotion != 0)
-			contraption.stop(level());
-		if (!level().isClientSide && (prevAxisMotion != axisMotion || tickCount % 3 == 0))
-			sendPacket();
-	}
-
-	@Override
-	public void disassemble() {
-		sequencedOffsetLimit = -1;
-		super.disassemble();
-	}
-
-	protected void checkPinionShaft() {
-		Vec3 movementVec;
-		Direction facing = ((GantryContraption) contraption).getFacing();
-		Vec3 currentPosition = getAnchorVec().add(.5, .5, .5);
-		BlockPos gantryShaftPos = BlockPos.containing(currentPosition).relative(facing.getOpposite());
-
-		BlockEntity be = level().getBlockEntity(gantryShaftPos);
-		if (!(be instanceof GantryShaftBlockEntity gantryShaftBlockEntity) || !AllBlocks.GANTRY_SHAFT.has(be.getBlockState())) {
-			if (!level().isClientSide) {
-				setContraptionMotion(Vec3.ZERO);
-				disassemble();
-			}
-			return;
-		}
-
-		BlockState blockState = be.getBlockState();
-		Direction direction = blockState.getValue(GantryShaftBlock.FACING);
-
-		float pinionMovementSpeed = gantryShaftBlockEntity.getPinionMovementSpeed();
-		if (blockState.getValue(GantryShaftBlock.POWERED) || pinionMovementSpeed == 0) {
-			setContraptionMotion(Vec3.ZERO);
-			if (!level().isClientSide)
-				disassemble();
-			return;
-		}
-
-		if (sequencedOffsetLimit >= 0)
-			pinionMovementSpeed = (float) Mth.clamp(pinionMovementSpeed, -sequencedOffsetLimit, sequencedOffsetLimit);
-		movementVec = Vec3.atLowerCornerOf(direction.getNormal())
-			.scale(pinionMovementSpeed);
-
-		Vec3 nextPosition = currentPosition.add(movementVec);
-		double currentCoord = direction.getAxis()
-			.choose(currentPosition.x, currentPosition.y, currentPosition.z);
-		double nextCoord = direction.getAxis()
-			.choose(nextPosition.x, nextPosition.y, nextPosition.z);
-
-		if ((Mth.floor(currentCoord) + .5 < nextCoord != (pinionMovementSpeed * direction.getAxisDirection()
-			.getStep() < 0)))
-			if (!gantryShaftBlockEntity.canAssembleOn()) {
-				setContraptionMotion(Vec3.ZERO);
-				if (!level().isClientSide)
-					disassemble();
-				return;
-			}
-
-		if (level().isClientSide)
-			return;
-
-		axisMotion = pinionMovementSpeed;
-		setContraptionMotion(movementVec);
-	}
-
-	@Override
-	protected void writeAdditional(CompoundTag compound, HolderLookup.Provider registries, boolean spawnPacket) {
-		NBTHelper.writeEnum(compound, "GantryAxis", movementAxis);
-		if (sequencedOffsetLimit >= 0)
-			compound.putDouble("SequencedOffsetLimit", sequencedOffsetLimit);
-		super.writeAdditional(compound, registries, spawnPacket);
-	}
-
-	@Override
-	protected void readAdditional(CompoundTag compound, boolean spawnData) {
-		movementAxis = NBTHelper.readEnum(compound, "GantryAxis", Direction.class);
-		sequencedOffsetLimit =
-			compound.contains("SequencedOffsetLimit") ? compound.getDouble("SequencedOffsetLimit") : -1;
-		super.readAdditional(compound, spawnData);
-	}
-
-	@Override
-	public Vec3 applyRotation(Vec3 localPos, float partialTicks) {
-		return localPos;
-	}
-
-	@Override
-	public Vec3 reverseRotation(Vec3 localPos, float partialTicks) {
-		return localPos;
-	}
-
-	@Override
-	protected StructureTransform makeStructureTransform() {
-		return new StructureTransform(BlockPos.containing(getAnchorVec().add(.5, .5, .5)), 0, 0, 0);
-	}
-
-	@Override
-	protected float getStalledAngle() {
-		return 0;
-	}
-
-	@Override
-	public void teleportTo(double p_70634_1_, double p_70634_3_, double p_70634_5_) {
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void lerpTo(double pX, double pY, double pZ, float pYRot, float pXRot, int pSteps) {
-	}
-
-	@Override
-	protected void handleStallInformation(double x, double y, double z, float angle) {
-		setPosRaw(x, y, z);
-		clientOffsetDiff = 0;
-	}
-
-	@Override
-	public ContraptionRotationState getRotationState() {
-		return ContraptionRotationState.NONE;
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void applyLocalTransforms(PoseStack matrixStack, float partialTicks) {
-	}
-
-	public void updateClientMotion() {
-		float modifier = movementAxis.getAxisDirection()
-			.getStep();
-		Vec3 motion = Vec3.atLowerCornerOf(movementAxis.getNormal())
-			.scale((axisMotion + clientOffsetDiff * modifier / 2d) * ServerSpeedProvider.get());
-		if (sequencedOffsetLimit >= 0)
-			motion = VecHelper.clampComponentWise(motion, (float) sequencedOffsetLimit);
-		setContraptionMotion(motion);
-	}
-
-	public double getAxisCoord() {
-		Vec3 anchorVec = getAnchorVec();
-		return movementAxis.getAxis()
-			.choose(anchorVec.x, anchorVec.y, anchorVec.z);
-	}
-
-	public void sendPacket() {
-		CatnipServices.NETWORK.sendToClientsTrackingEntity(this,
-				new GantryContraptionUpdatePacket(getId(), getAxisCoord(), axisMotion, sequencedOffsetLimit));
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	public static void handlePacket(GantryContraptionUpdatePacket packet) {
-		Entity entity = Minecraft.getInstance().level.getEntity(packet.entityID());
-		if (!(entity instanceof GantryContraptionEntity ce))
-			return;
-		ce.axisMotion = packet.motion();
-		ce.clientOffsetDiff = packet.coord() - ce.getAxisCoord();
-		ce.sequencedOffsetLimit = packet.sequenceLimit();
-	}
+    private static final EntityDataAccessor<Direction> MOVEMENT_AXIS=SynchedEntityData.defineId(GantryContraptionEntity.class,EntityDataSerializers.DIRECTION);
+    private double axisMotion,clientOffsetDiff;
+    private double sequencedOffsetLimit=-1,rememberedSequenceRemaining=-1;
+    private SequencePhase rememberedSequencePhase;
+    private boolean pendingDisassembly,retryAssemblyAfterRecovery,disassembling;
+    private AssemblyException lastException;
+    public GantryContraptionEntity(EntityType<? extends GantryContraptionEntity> type,Level level){super(type,level);}
+    @Override protected void defineSynchedData(SynchedEntityData.Builder data){super.defineSynchedData(data);data.define(MOVEMENT_AXIS,Direction.EAST);}
+    @Override protected InterpolationHandler createInterpolationHandler(){
+        // NO_OP returns false: native moveOrInterpolateTo would then snap the entity to
+        // every vanilla tracking packet and compete with the source's double predictor.
+        return new InterpolationHandler(){
+            @Override public PositionAndRotation target(){return PositionAndRotation.of(position(),getYRot(),getXRot());}
+            @Override public boolean interpolateTo(PositionPath path,float yaw,float pitch,boolean rotate){return level().isClientSide();}
+            @Override public void interpolate(){}
+            @Override public void applyPredictedMovement(Vec3 movement){}
+            @Override public boolean hasActiveInterpolation(){return false;}
+            @Override public void cancel(){}
+        };
+    }
+    public void setMovementAxis(Direction direction){entityData.set(MOVEMENT_AXIS,Objects.requireNonNull(direction));}
+    public Direction getMovementAxis(){return entityData.get(MOVEMENT_AXIS);}
+    public double getAxisCoord(){return getMovementAxis().getAxis().choose(getX(),getY(),getZ());}
+    public double getSequencedOffsetLimit(){return sequencedOffsetLimit;}
+    public AssemblyException getLastAssemblyException(){return lastException;}
+    @Override public Vec3 applyRotation(Vec3 local,float partial){return local;}
+    @Override public Vec3 reverseRotation(Vec3 local,float partial){return local;}
+    @Override public Quaternionf getOrientationQuaternion(float partial){return new Quaternionf();}
+    @Override public ContraptionRotationState getRotationState(){return new ContraptionRotationState();}
+    @Override protected StructureTransform disassemblyTransform(){return new StructureTransform(BlockPos.containing(getAnchorVec().add(.5,.5,.5)),0,0,0);}
+    @Override public void setContraption(Contraption structure){if(structure!=null&&!(structure instanceof GantryContraption))throw new IllegalArgumentException("Gantry owner requires an actual gantry structure");super.setContraption(structure);}
+    public void initializeDrive(GantryShaftBlockEntity shaft){setMovementAxis(shaft.getBlockState().getValue(GantryShaftBlock.FACING));acceptSequence(shaft);}
+    public void beginAssemblyRecovery(){retryAssemblyAfterRecovery=true;pendingDisassembly=true;setDeltaMovement(Vec3.ZERO);}
+    private void acceptSequence(GantryShaftBlockEntity shaft){
+        var context=shaft.sequenceContext;var phase=shaft.getSequencePhase();
+        if(context!=null&&context.instruction()==SequencerInstructions.TURN_DISTANCE){
+            if(!Objects.equals(rememberedSequencePhase,phase)||rememberedSequenceRemaining<0)rememberedSequenceRemaining=Math.max(0,context.getEffectiveValue(shaft.getTheoreticalSpeed()));
+            rememberedSequencePhase=phase;sequencedOffsetLimit=rememberedSequenceRemaining;
+        }else{if(sequencedOffsetLimit>=0)rememberedSequenceRemaining=sequencedOffsetLimit;sequencedOffsetLimit=-1;}
+    }
+    private Vec3 drive()throws AssemblyException{
+        var structure=(GantryContraption)getContraption();var centre=getAnchorVec().add(.5,.5,.5);var shaftPos=BlockPos.containing(centre).relative(structure.getFacing().getOpposite());
+        if(!LoadedLevelAccess.isLoaded(level(),shaftPos))throw AssemblyException.entitiesNotReady(shaftPos);LoadedEntityAccess.requireReady(level(),shaftPos);
+        var state=LoadedLevelAccess.blockState(level(),shaftPos);
+        if(!(state.getBlock() instanceof GantryShaftBlock)||!(LoadedLevelAccess.blockEntity(level(),shaftPos) instanceof GantryShaftBlockEntity shaft)){pendingDisassembly=true;return Vec3.ZERO;}
+        var direction=state.getValue(GantryShaftBlock.FACING);
+        if(direction!=getMovementAxis()||GantryCarriageBlock.getValidGantryShaftAxis(structure.getBlocks().get(BlockPos.ZERO).state())!=direction.getAxis()){pendingDisassembly=true;return Vec3.ZERO;}
+        acceptSequence(shaft);float speed=shaft.getPinionMovementSpeed();
+        if(state.getValue(GantryShaftBlock.POWERED)||speed==0){pendingDisassembly=true;return Vec3.ZERO;}
+        if(sequencedOffsetLimit>=0)speed=(float)Math.clamp(speed,-sequencedOffsetLimit,sequencedOffsetLimit);
+        var movement=direction.getUnitVec3().scale(speed);double current=direction.getAxis().choose(centre.x,centre.y,centre.z),next=direction.getAxis().choose(centre.x+movement.x,centre.y+movement.y,centre.z+movement.z);
+        if((Math.floor(current)+.5<next)!=(speed*direction.getAxisDirection().getStep()<0))if(!shaft.canAssembleOn()){pendingDisassembly=true;return Vec3.ZERO;}
+        axisMotion=speed;return movement;
+    }
+    @Override protected void tickContraption(){
+        if(!(getContraption() instanceof GantryContraption))return;
+        if(level().isClientSide()){
+            clientOffsetDiff*=.75;tickActors();if(isStalled()||ContraptionAssemblyGraph.isFrozen(this)){setDeltaMovement(Vec3.ZERO);return;}
+            double speed=(axisMotion+clientOffsetDiff*getMovementAxis().getAxisDirection().getStep()/2)*com.simibubi.create.foundation.utility.ServerSpeedProvider.get();
+            if(sequencedOffsetLimit>=0)speed=Math.clamp(speed,-sequencedOffsetLimit,sequencedOffsetLimit);var movement=getMovementAxis().getUnitVec3().scale(speed);setDeltaMovement(movement);
+            if(tickCount>2){setPos(position().add(movement));if(sequencedOffsetLimit>=0)sequencedOffsetLimit=Math.max(0,sequencedOffsetLimit-movement.length());}return;
+        }
+        if(pendingDisassembly||getContraption().getStabilizedSubContraptions().isRecovering()){
+            setDeltaMovement(Vec3.ZERO);var target=getRestorationTransform().apply(BlockPos.ZERO);boolean retry=retryAssemblyAfterRecovery;
+            if(disassemble()&&retry&&LoadedLevelAccess.blockEntity(level(),target) instanceof GantryCarriageBlockEntity carriage)carriage.checkValidGantryShaft();return;
+        }
+        if(ContraptionAssemblyGraph.isFrozen(this)){setDeltaMovement(Vec3.ZERO);axisMotion=0;tickActors();sendMotion();return;}
+        double previous=axisMotion;Vec3 movement;
+        try{movement=drive();lastException=null;}catch(AssemblyException unavailable){lastException=unavailable;axisMotion=0;setDeltaMovement(Vec3.ZERO);if(level().getGameTime()%3==0)sendMotion();return;}
+        if(pendingDisassembly){setDeltaMovement(Vec3.ZERO);axisMotion=0;disassemble();return;}
+        setDeltaMovement(movement);tickActors();
+        if(isStalled()||ContraptionAssemblyGraph.isFrozen(this)){setDeltaMovement(Vec3.ZERO);sendMotion();return;}
+        try{if(ContraptionTerrainCollision.collideBlocksAt(this,position(),movement)){pendingDisassembly=true;setDeltaMovement(Vec3.ZERO);axisMotion=0;disassemble();return;}}
+        catch(AssemblyException unavailable){lastException=unavailable;setDeltaMovement(Vec3.ZERO);axisMotion=0;sendMotion();return;}
+        if(tickCount>2){setPos(position().add(movement));if(sequencedOffsetLimit>=0){sequencedOffsetLimit=Math.max(0,sequencedOffsetLimit-movement.length());rememberedSequenceRemaining=sequencedOffsetLimit;}}
+        if(previous!=0&&Math.signum(previous)!=Math.signum(axisMotion))getContraption().stop(level());
+        if(previous!=axisMotion||tickCount%3==0)sendMotion();
+    }
+    @Override public boolean disassemble(){
+        if(level().isClientSide()||disassembling||getContraption()==null)return false;pendingDisassembly=true;setDeltaMovement(Vec3.ZERO);axisMotion=0;disassembling=true;
+        try{sendMotion();if(!super.disassemble())return false;sequencedOffsetLimit=rememberedSequenceRemaining=-1;rememberedSequencePhase=null;pendingDisassembly=false;return true;}finally{disassembling=false;}
+    }
+    @Override public void remove(RemovalReason reason){if(!level().isClientSide()&&reason.shouldDestroy()&&hasOwnedStructure()&&!disassembling){disassemble();return;}super.remove(reason);}
+    @Override protected void onContraptionStalled(){sendMotion();}
+    public GantryContraptionUpdatePacket motionPacket(){
+        boolean stopped=isStalled()||ContraptionAssemblyGraph.isFrozen(this)||pendingDisassembly||lastException!=null||sequencedOffsetLimit==0;
+        return new GantryContraptionUpdatePacket(getId(),getUUID(),getAxisCoord(),axisMotion,sequencedOffsetLimit,stopped?position():null);
+    }
+    public void sendMotion(){if(!level().isClientSide()&&getContraption()!=null)for(var player:PlayerLookup.tracking(this))ServerPlayNetworking.send(player,motionPacket());}
+    public boolean applyMotion(GantryContraptionUpdatePacket packet){
+        if(!level().isClientSide()||packet.entityId()!=getId()||!packet.owner().equals(getUUID()))return false;axisMotion=packet.stoppedPosition()==null?packet.motion():0;sequencedOffsetLimit=packet.sequenceLimit();
+        if(packet.stoppedPosition()!=null){
+            // The pinned source's stall packet sets an exact XYZ pose and clears prediction.
+            // Keep native STALLED/graph ownership independent; this payload carries pose only.
+            var position=packet.stoppedPosition();setPos(position);xo=position.x;yo=position.y;zo=position.z;clientOffsetDiff=0;setDeltaMovement(Vec3.ZERO);
+        }else clientOffsetDiff=packet.coordinate()-getAxisCoord();
+        return true;
+    }
+    @Override protected void addAdditionalSaveData(ValueOutput out){
+        super.addAdditionalSaveData(out);out.putString("GantryAxis",getMovementAxis().name());out.putDouble("AxisMotion",axisMotion);out.putBoolean("PendingDisassembly",pendingDisassembly);out.putBoolean("RetryAssemblyAfterRecovery",retryAssemblyAfterRecovery);if(sequencedOffsetLimit>=0)out.putDouble("SequencedOffsetLimit",sequencedOffsetLimit);if(rememberedSequencePhase!=null){out.store("SequenceLimitPhase",SequencePhase.CODEC,rememberedSequencePhase);out.putDouble("SequenceLimitRemaining",rememberedSequenceRemaining);}
+    }
+    @Override protected void readAdditionalSaveData(ValueInput in){
+        super.readAdditionalSaveData(in);
+        var axis=in.read("GantryAxis",Codec.either(Codec.STRING,Codec.INT))
+            .map(encoded->encoded.map(GantryContraptionEntity::axisFromName,Direction::from3DDataValue)).orElse(Direction.EAST);
+        setMovementAxis(axis);double motion=in.getDoubleOr("AxisMotion",0);axisMotion=Double.isFinite(motion)?Math.clamp(motion,-.49,.49):0;pendingDisassembly=in.getBooleanOr("PendingDisassembly",false);retryAssemblyAfterRecovery=in.getBooleanOr("RetryAssemblyAfterRecovery",false);double limit=in.getDoubleOr("SequencedOffsetLimit",-1);sequencedOffsetLimit=Double.isFinite(limit)&&limit>=0?limit:-1;rememberedSequencePhase=in.read("SequenceLimitPhase",SequencePhase.CODEC).orElse(null);double remaining=in.getDoubleOr("SequenceLimitRemaining",sequencedOffsetLimit);rememberedSequenceRemaining=Double.isFinite(remaining)&&remaining>=0?remaining:-1;clientOffsetDiff=0;
+    }
+    private static Direction axisFromName(String name){for(var axis:Direction.values())if(axis.name().equalsIgnoreCase(name))return axis;return Direction.EAST;}
 
 }

@@ -1,0 +1,8 @@
+{
+  "parent": "create:block/seat",
+  "textures": {
+    "1": "create:block/seat/top_orange",
+    "2": "create:block/seat/side_orange",
+    "particle": "create:block/seat/top_orange"
+  }
+}

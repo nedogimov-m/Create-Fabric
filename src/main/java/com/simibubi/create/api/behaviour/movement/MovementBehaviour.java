@@ -1,125 +1,49 @@
 package com.simibubi.create.api.behaviour.movement;
 
-import org.jetbrains.annotations.ApiStatus.ScheduledForRemoval;
-import org.jetbrains.annotations.Nullable;
-
 import com.simibubi.create.api.registry.SimpleRegistry;
+import com.simibubi.create.content.contraptions.ContraptionSettings;
 import com.simibubi.create.content.contraptions.behaviour.MovementContext;
-import com.simibubi.create.content.contraptions.render.ActorVisual;
-import com.simibubi.create.content.contraptions.render.ContraptionMatrices;
-import com.simibubi.create.foundation.virtualWorld.VirtualRenderWorld;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-import com.tterrag.registrate.util.nullness.NonNullConsumer;
-
-import dev.engine_room.flywheel.api.visualization.VisualizationContext;
-import net.minecraft.client.renderer.MultiBufferSource;
+import java.util.function.Consumer;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.Vec3;
+import org.jspecify.annotations.Nullable;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.items.ItemHandlerHelper;
-
-/**
- * MovementBehaviors, also known as Actors, provide behavior to blocks mounted on contraptions.
- * Blocks may be associated with a behavior through {@link #REGISTRY}.
- */
+/** Source actor lifecycle. Native client renderers are registered separately from common logic. */
 public interface MovementBehaviour {
-	SimpleRegistry<Block, MovementBehaviour> REGISTRY = SimpleRegistry.create();
-
-	/**
-	 * Creates a consumer that will register a behavior to a block. Useful for Registrate.
-	 */
-	static <B extends Block> NonNullConsumer<? super B> movementBehaviour(MovementBehaviour behaviour) {
-		return b -> REGISTRY.register(b, behaviour);
-	}
-
-	default boolean isActive(MovementContext context) {
-		return !context.disabled;
-	}
-
-	default void tick(MovementContext context) {}
-
-	default void startMoving(MovementContext context) {}
-
-	default void visitNewPosition(MovementContext context, BlockPos pos) {}
-
-	default Vec3 getActiveAreaOffset(MovementContext context) {
-		return Vec3.ZERO;
-	}
-
-	@Nullable
-	default ItemStack canBeDisabledVia(MovementContext context) {
-		Block block = context.state.getBlock();
-		if (block == null)
-			return null;
-		return new ItemStack(block);
-	}
-
-	default void onDisabledByControls(MovementContext context) {
-		cancelStall(context);
-	}
-
-	default boolean mustTickWhileDisabled() {
-		return false;
-	}
-
-	/**
-	 * @deprecated since 6.0.9 - use {@link MovementBehaviour#collectOrDropItem(MovementContext, ItemStack)} instead.
-	 * No behaviours altered, simply a rename to reflect that we do collect items when
-	 * applicable before considering dropping the remainder into the world.
-	 */
-	@ScheduledForRemoval(inVersion = "1.21.1+ Port")
-	@Deprecated(since = "6.0.9", forRemoval = true)
-	default void dropItem(MovementContext context, ItemStack stack) {
-		collectOrDropItem(context, stack);
-	}
-
-	default void collectOrDropItem(MovementContext context, ItemStack stack) {
-		ItemStack remainder;
-		if (AllConfigs.server().kinetics.moveItemsToStorage.get())
-			remainder = ItemHandlerHelper.insertItem(context.contraption.getStorage().getAllItems(), stack, false);
-		else
-			remainder = stack;
-		if (remainder.isEmpty())
-			return;
-
-		// Actors might void items if their positions is undefined
-		Vec3 vec = context.position;
-		if (vec == null)
-			return;
-
-		ItemEntity itemEntity = new ItemEntity(context.world, vec.x, vec.y, vec.z, remainder);
-		itemEntity.setDeltaMovement(context.motion.add(0, 0.5f, 0)
-			.scale(context.world.random.nextFloat() * .3f));
-		context.world.addFreshEntity(itemEntity);
-	}
-
-	default void onSpeedChanged(MovementContext context, Vec3 oldMotion, Vec3 motion) {}
-
-	default void stopMoving(MovementContext context) {}
-
-	default void cancelStall(MovementContext context) {
-		context.stall = false;
-	}
-
-	default void writeExtraData(MovementContext context) {}
-
-	default boolean disableBlockEntityRendering() {
-		return false;
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	default void renderInContraption(MovementContext context, VirtualRenderWorld renderWorld,
-		ContraptionMatrices matrices, MultiBufferSource buffer) {}
-
-	@OnlyIn(Dist.CLIENT)
-	@Nullable
-	default ActorVisual createVisual(VisualizationContext visualizationContext, VirtualRenderWorld simulationWorld,
-		MovementContext movementContext) {
-		return null;
-	}
+    SimpleRegistry<Block,MovementBehaviour> REGISTRY=SimpleRegistry.create();
+    static <B extends Block> Consumer<B> movementBehaviour(MovementBehaviour behaviour){return block->REGISTRY.register(block,behaviour);}
+    default boolean isActive(MovementContext context){return !context.disabled;}
+    default void tick(MovementContext context){}
+    default void startMoving(MovementContext context){}
+    default void visitNewPosition(MovementContext context,BlockPos pos){}
+    default Vec3 getActiveAreaOffset(MovementContext context){return Vec3.ZERO;}
+    default @Nullable ItemStack canBeDisabledVia(MovementContext context){return new ItemStack(context.state.getBlock());}
+    default void onDisabledByControls(MovementContext context){cancelStall(context);}
+    default boolean mustTickWhileDisabled(){return false;}
+    @Deprecated(since="6.0.9",forRemoval=true)
+    default void dropItem(MovementContext context,ItemStack stack){collectOrDropItem(context,stack);}
+    default void collectOrDropItem(MovementContext context,ItemStack stack){
+        if(context.world.isClientSide()||stack.isEmpty())return;
+        var remainder=insertItem(context,stack,ContraptionSettings.moveItemsToStorage);
+        if(remainder.isEmpty()||context.position==null)return;
+        var p=context.position;var item=new ItemEntity(context.world,p.x,p.y,p.z,remainder);
+        item.setDeltaMovement(context.motion.add(0,.5,0).scale(context.world.getRandom().nextFloat()*.3f));context.world.addFreshEntity(item);
+    }
+    static ItemStack insertItem(MovementContext context,ItemStack stack,boolean enabled){
+        if(!enabled||stack.isEmpty())return stack.copy();
+        long inserted;try(var transaction=Transaction.openOuter()){inserted=context.contraption.getStorage().getAllItems().insert(ItemVariant.of(stack),stack.getCount(),transaction);transaction.commit();}
+        return stack.copyWithCount(stack.getCount()-(int)inserted);
+    }
+    default void onSpeedChanged(MovementContext context,Vec3 previous,Vec3 motion){}
+    default void stopMoving(MovementContext context){}
+    default void cancelStall(MovementContext context){context.stall=false;}
+    default void writeExtraData(MovementContext context){}
+    /** Apply visual consequences after a tracked actor-data delta, including while disabled. */
+    default void onDataUpdated(MovementContext context){}
+    default boolean disableBlockEntityRendering(){return false;}
 }

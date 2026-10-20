@@ -1,6 +1,7 @@
 {
-	"parent": "create:block/packager/block",
-	"textures": {
-		"2": "create:block/packager_horizontal_linked"
-	}
+  "parent": "create:block/packager/block",
+  "textures": {
+    "2": "create:block/packager_horizontal_linked",
+    "particle": "create:block/packager_horizontal_linked"
+  }
 }

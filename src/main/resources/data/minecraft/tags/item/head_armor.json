@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    "create:copper_diving_helmet",
+    "create:netherite_diving_helmet",
+    "create:cardboard_helmet"
+  ]
+}

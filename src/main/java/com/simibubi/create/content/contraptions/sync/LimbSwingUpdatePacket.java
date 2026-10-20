@@ -1,43 +1,14 @@
 package com.simibubi.create.content.contraptions.sync;
 
-import com.simibubi.create.AllPackets;
-
-import io.netty.buffer.ByteBuf;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecs;
-import net.createmod.catnip.net.base.ClientboundPacketPayload;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.codec.ByteBufCodecs;
+import com.simibubi.create.Create;
+import java.util.UUID;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.world.entity.Entity;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-
-public record LimbSwingUpdatePacket(int entityId, Vec3 position, float limbSwing) implements ClientboundPacketPayload {
-	public static final StreamCodec<ByteBuf, LimbSwingUpdatePacket> STREAM_CODEC = StreamCodec.composite(
-			ByteBufCodecs.INT, LimbSwingUpdatePacket::entityId,
-			CatnipStreamCodecs.VEC3, LimbSwingUpdatePacket::position,
-			ByteBufCodecs.FLOAT, LimbSwingUpdatePacket::limbSwing,
-	        LimbSwingUpdatePacket::new
-	);
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void handle(LocalPlayer player) {
-		Entity entity = player.clientLevel.getEntity(entityId);
-		if (entity == null)
-			return;
-		CompoundTag data = entity.getPersistentData();
-		data.putInt("LastOverrideLimbSwingUpdate", 0);
-		data.putFloat("OverrideLimbSwing", limbSwing);
-		entity.lerpTo(position.x, position.y, position.z, entity.getYRot(),
-				entity.getXRot(), 2);
-	}
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.LIMBSWING_UPDATE;
-	}
+public record LimbSwingUpdatePacket(int entityId,UUID uuid,Vec3 position,float limbSwing) implements CustomPacketPayload {
+    public static final Type<LimbSwingUpdatePacket> TYPE=new Type<>(Create.asResource("contraption_limb_swing"));
+    public static final StreamCodec<RegistryFriendlyByteBuf,LimbSwingUpdatePacket> CODEC=CustomPacketPayload.codec((packet,buf)->{buf.writeVarInt(packet.entityId);buf.writeUUID(packet.uuid);buf.writeDouble(packet.position.x);buf.writeDouble(packet.position.y);buf.writeDouble(packet.position.z);buf.writeFloat(packet.limbSwing);},buf->new LimbSwingUpdatePacket(buf.readVarInt(),buf.readUUID(),new Vec3(buf.readDouble(),buf.readDouble(),buf.readDouble()),buf.readFloat()));
+    @Override public Type<LimbSwingUpdatePacket> type(){return TYPE;}
 }

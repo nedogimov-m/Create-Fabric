@@ -1,12 +1,10 @@
 package com.simibubi.create.infrastructure.config;
 
 
-import com.simibubi.create.content.logistics.stockTicker.StockKeeperRequestScreen.SearchSyncMode;
 
-import net.createmod.catnip.config.ConfigBase;
-import net.createmod.catnip.config.ui.ConfigAnnotations;
 
-public class CClient extends ConfigBase {
+public class CClient extends NativeConfigBase {
+    @Override protected ConfigScope defaultScope(){return ConfigScope.CLIENT;}
 
 	public final ConfigGroup client = group(0, "client",
 			Comments.client);
@@ -86,6 +84,14 @@ public class CClient extends ConfigBase {
 		return "client";
 	}
 
+	/** Common enum for the source search preference; its optional viewer adapter stays client-owned. */
+	public enum SearchSyncMode implements net.minecraft.util.StringRepresentable {
+		SYNC_BOTH, SYNC_FROM_JEI, SYNC_FROM_STOCK_KEEPER, NONE;
+		public boolean isBothOr(SearchSyncMode mode){return this==SYNC_BOTH||this==mode;}
+		public SearchSyncMode next(){var values=values();return values[(ordinal()+1)%values.length];}
+		@Override public String getSerializedName(){return name().toLowerCase(java.util.Locale.ROOT);}
+	}
+
 	public enum PlacementIndicatorSetting {
 		TEXTURE, TRIANGLE, NONE
 	}
@@ -127,15 +133,15 @@ public class CClient extends ConfigBase {
 		static String overlayCustomColor = "Enable this to use your custom colors for the Goggle- and Hover- Overlay";
 		static String[] overlayBackgroundColor = new String[]{
 				"The custom background color to use for the Goggle- and Hover- Overlays, if enabled",
-				"[in Hex: #AaRrGgBb]", ConfigAnnotations.IntDisplay.HEX.asComment()
+				"[in Hex: #AaRrGgBb]", "[@cui:IntDisplay:#]"
 		};
 		static String[] overlayBorderColorTop = new String[]{
 				"The custom top color of the border gradient to use for the Goggle- and Hover- Overlays, if enabled",
-				"[in Hex: #AaRrGgBb]", ConfigAnnotations.IntDisplay.HEX.asComment()
+				"[in Hex: #AaRrGgBb]", "[@cui:IntDisplay:#]"
 		};
 		static String[] overlayBorderColorBot = new String[]{
 				"The custom bot color of the border gradient to use for the Goggle- and Hover- Overlays, if enabled",
-				"[in Hex: #AaRrGgBb]", ConfigAnnotations.IntDisplay.HEX.asComment()
+				"[in Hex: #AaRrGgBb]", "[@cui:IntDisplay:#]"
 		};
 		static String sound = "Sound settings";
 		static String enableAmbientSounds = "Make cogs rumble and machines clatter.";

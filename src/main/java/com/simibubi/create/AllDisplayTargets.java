@@ -1,41 +1,20 @@
 package com.simibubi.create;
 
 import com.simibubi.create.api.behaviour.display.DisplayTarget;
-import com.simibubi.create.content.redstone.displayLink.target.DisplayBoardTarget;
-import com.simibubi.create.content.redstone.displayLink.target.LecternDisplayTarget;
-import com.simibubi.create.content.redstone.displayLink.target.NixieTubeDisplayTarget;
-import com.simibubi.create.content.redstone.displayLink.target.SignDisplayTarget;
-import com.simibubi.create.foundation.data.CreateRegistrate;
-import com.tterrag.registrate.util.entry.RegistryEntry;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-
+import com.simibubi.create.api.registry.CreateBuiltInRegistries;
+import com.simibubi.create.content.redstone.displayLink.target.*;
 import java.util.Map;
-import java.util.function.Supplier;
+import net.minecraft.core.Registry;
+import net.minecraft.world.level.block.entity.BlockEntityTypes;
 
-public class AllDisplayTargets {
-	private static final CreateRegistrate REGISTRATE = Create.registrate();
-
-	public static final RegistryEntry<DisplayTarget, SignDisplayTarget> SIGN = REGISTRATE.displayTarget("sign", SignDisplayTarget::new)
-		.associate(BlockEntityType.SIGN)
-		.register();
-	public static final RegistryEntry<DisplayTarget, LecternDisplayTarget> LECTERN = REGISTRATE.displayTarget("lectern", LecternDisplayTarget::new)
-		.associate(BlockEntityType.LECTERN)
-		.register();
-
-	public static final RegistryEntry<DisplayTarget, DisplayBoardTarget> DISPLAY_BOARD = simple("display_board", DisplayBoardTarget::new);
-	public static final RegistryEntry<DisplayTarget, NixieTubeDisplayTarget> NIXIE_TUBE = simple("nixie_tube", NixieTubeDisplayTarget::new);
-
-	public static final Map<String, RegistryEntry<DisplayTarget, ? extends DisplayTarget>> LEGACY_NAMES = Map.of(
-		"sign_display_target", SIGN,
-		"lectern_display_target", LECTERN,
-		"display_board_target", DISPLAY_BOARD,
-		"nixie_tube_target", NIXIE_TUBE
-	);
-
-	private static <T extends DisplayTarget> RegistryEntry<DisplayTarget, T> simple(String name, Supplier<T> supplier) {
-		return REGISTRATE.displayTarget(name, supplier).register();
-	}
-
-	public static void register() {
-	}
+/** Real native synced source-compatible target identifiers and actual block/type associations. */
+public final class AllDisplayTargets {
+    public static final SignDisplayTarget SIGN=register("sign",new SignDisplayTarget());
+    public static final LecternDisplayTarget LECTERN=register("lectern",new LecternDisplayTarget());
+    public static final DisplayBoardTarget DISPLAY_BOARD=register("display_board",new DisplayBoardTarget());
+    public static final NixieTubeDisplayTarget NIXIE_TUBE=register("nixie_tube",new NixieTubeDisplayTarget());
+    public static final Map<String,DisplayTarget> LEGACY_NAMES=Map.of("sign_display_target",SIGN,"lectern_display_target",LECTERN,"display_board_target",DISPLAY_BOARD,"nixie_tube_target",NIXIE_TUBE);
+    private static <T extends DisplayTarget>T register(String name,T target){return Registry.register(CreateBuiltInRegistries.DISPLAY_TARGET,Create.asResource(name),target);}
+    private static boolean associated;
+    public static void register(){if(associated)return;associated=true;DisplayTarget.BY_BLOCK_ENTITY.register(BlockEntityTypes.SIGN,SIGN);DisplayTarget.BY_BLOCK_ENTITY.register(BlockEntityTypes.LECTERN,LECTERN);DisplayTarget.BY_BLOCK.register(AllBlocks.DISPLAY_BOARD,DISPLAY_BOARD);for(var block:AllBlocks.NIXIE_TUBES.values())DisplayTarget.BY_BLOCK.register(block,NIXIE_TUBE);}
 }

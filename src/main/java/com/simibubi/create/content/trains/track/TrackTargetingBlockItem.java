@@ -1,259 +1,161 @@
 package com.simibubi.create.content.trains.track;
 
-import java.util.List;
-import java.util.function.BiConsumer;
-
-import org.apache.commons.lang3.mutable.MutableObject;
-
 import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.trains.graph.EdgeData;
 import com.simibubi.create.content.trains.graph.EdgePointType;
-import com.simibubi.create.content.trains.graph.TrackEdge;
-import com.simibubi.create.content.trains.graph.TrackGraphHelper;
-import com.simibubi.create.content.trains.graph.TrackGraphLocation;
-import com.simibubi.create.content.trains.graph.TrackNode;
-import com.simibubi.create.content.trains.signal.TrackEdgePoint;
-import com.simibubi.create.content.trains.track.TrackBlockOutline.BezierPointSelection;
+import com.simibubi.create.content.trains.signal.SignalEdgePoints;
 import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.utility.CreateLang;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-import com.tterrag.registrate.util.nullness.NonNullBiFunction;
-
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.platform.CatnipServices;
-import net.minecraft.ChatFormatting;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction.AxisDirection;
-import net.minecraft.core.component.DataComponents;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.world.InteractionResult;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.fabricmc.fabric.api.entity.FakePlayer;
+import net.minecraft.core.*;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.component.CustomData;
-import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.Level;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.*;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+/**
+ * Source track selection and real native station BlockItem placement; failed placement keeps
+ * selection.
+ */
+public final class TrackTargetingBlockItem extends BlockItem {
+  public static final double STRAIGHT_DISTANCE = 16, CURVE_DISTANCE = 48;
 
-public class TrackTargetingBlockItem extends BlockItem {
+  public interface Target {
+    TrackTargetingBehaviour<?> targeting();
 
-	private EdgePointType<?> type;
+    boolean setTarget(TrackTargetingSelection selection);
+  }
 
-	public static <T extends Block> NonNullBiFunction<? super T, Item.Properties, TrackTargetingBlockItem> ofType(
-		EdgePointType<?> type) {
-		return (b, p) -> new TrackTargetingBlockItem(b, p, type);
-	}
+  private final EdgePointType<?> type;
 
-	public TrackTargetingBlockItem(Block pBlock, Properties pProperties, EdgePointType<?> type) {
-		super(pBlock, pProperties);
-		this.type = type;
-	}
+  public TrackTargetingBlockItem(Block block, Properties properties, EdgePointType<?> type) {
+    super(block, properties);
+    this.type = Objects.requireNonNull(type);
+  }
 
-	@Override
-	public InteractionResult useOn(UseOnContext pContext) {
-		ItemStack stack = pContext.getItemInHand();
-		BlockPos pos = pContext.getClickedPos();
-		Level level = pContext.getLevel();
-		BlockState state = level.getBlockState(pos);
-		Player player = pContext.getPlayer();
+  public EdgePointType<?> getType(ItemStack stack) {
+    return type;
+  }
 
-		if (player == null)
-			return InteractionResult.FAIL;
+  public boolean select(Player player, InteractionHand hand, TrackTargetingSelection selection) {
+    var level = player.level();
+    var stack = player.getItemInHand(hand);
+    if (level.isClientSide()
+        || player.isSpectator()
+        || !player.mayBuild()
+        || stack.getItem() != this
+        || !selection.target().dimension().equals(level.dimension())
+        || !level.mayInteract(player, selection.target().pos())) return false;
+    try {
+      var location = selection.resolve(level);
+      if (location == null
+          || TrackTargetingBehaviour.overlaps(location, type, selection.front(), null))
+        return false;
+    } catch (UnloadedTrackException missing) {
+      return false;
+    }
+    stack.set(AllDataComponents.TRACK_TARGETING_SELECTION, selection);
+    clearOriginalSelection(stack);
+    player.sendOverlayMessage(Component.translatable("create.track_target.set"));
+    return true;
+  }
 
-		if (player.isShiftKeyDown() && stack.has(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS)) {
-			if (level.isClientSide)
-				return InteractionResult.SUCCESS;
-			player.displayClientMessage(CreateLang.translateDirect("track_target.clear"), true);
-			stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS);
-			stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_DIRECTION);
-			stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_BEZIER);
-			AllSoundEvents.CONTROLLER_CLICK.play(level, null, pos, 1, .5f);
-			return InteractionResult.SUCCESS;
-		}
+  @Override
+  public InteractionResult useOn(UseOnContext context) {
+    var player = context.getPlayer();
+    var level = context.getLevel();
+    var stack = context.getItemInHand();
+    var pos = context.getClickedPos();
+    if (player == null
+        || player.isSpectator()
+        || !player.mayBuild()
+        || !player.isWithinBlockInteractionRange(pos, 1)
+        || !LoadedLevelAccess.isLoaded(level, pos)
+        || !level.mayInteract(player, pos)) return InteractionResult.FAIL;
+    if (player.isShiftKeyDown() && (stack.has(AllDataComponents.TRACK_TARGETING_SELECTION)
+        || stack.has(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS))) {
+      if (!level.isClientSide()) {
+        stack.remove(AllDataComponents.TRACK_TARGETING_SELECTION);
+        clearOriginalSelection(stack);
+        player.sendOverlayMessage(Component.translatable("create.track_target.clear"));
+      }
+      return InteractionResult.SUCCESS;
+    }
+    var state = LoadedLevelAccess.blockState(level, pos);
+    if (state.getBlock() instanceof ITrackBlock track) {
+      if (level.isClientSide()) return InteractionResult.SUCCESS;
+      var axes = track.getTrackAxes(level, pos, state);
+      if (axes.size() != 1 || axes.getFirst().lengthSqr() < 1e-12) return InteractionResult.FAIL;
+      var nearest = track.getNearestTrackAxis(level, pos, state, player.getLookAngle());
+      var selected =
+          new TrackTargetingSelection(
+              GlobalPos.of(level.dimension(), pos),
+              nearest.getSecond() == Direction.AxisDirection.POSITIVE,
+              nearest.getFirst(),
+              Optional.empty());
+      return select(player, context.getHand(), selected)
+          ? InteractionResult.SUCCESS
+          : InteractionResult.FAIL;
+    }
+    var selected = selection(stack, level);
+    if (selected == null || !selected.target().dimension().equals(level.dimension()))
+      return InteractionResult.FAIL;
+    var placement = new BlockPlaceContext(context);
+    var placedPos = placement.getClickedPos();
+    if (!LoadedLevelAccess.isLoaded(level, placedPos)
+        || !level.mayInteract(player, placedPos)
+        || !selected
+            .target()
+            .pos()
+            .closerThan(
+                placedPos, selected.curve().isPresent() ? CURVE_DISTANCE : STRAIGHT_DISTANCE))
+      return InteractionResult.FAIL;
+    try {
+      var location = selected.resolve(level);
+      if (location == null
+          || TrackTargetingBehaviour.overlaps(location, type, selected.front(), null))
+        return InteractionResult.FAIL;
+    } catch (UnloadedTrackException missing) {
+      return InteractionResult.FAIL;
+    }
+    var result = super.useOn(context);
+    if (level.isClientSide() || !result.consumesAction()) return result;
+    if (!(LoadedLevelAccess.blockEntity(level, placedPos) instanceof Target station)
+        || station.targeting().pointType() != type)
+      throw new IllegalStateException(
+          "Native targeting item placed no matching concrete point owner BE");
+    if (!station.setTarget(selected))
+      throw new IllegalStateException("Native station target changed during native placement");
+    stack.remove(AllDataComponents.TRACK_TARGETING_SELECTION);
+    clearOriginalSelection(stack);
+    var remaining = player.getItemInHand(context.getHand());
+    if (!remaining.isEmpty()) { remaining.remove(AllDataComponents.TRACK_TARGETING_SELECTION); clearOriginalSelection(remaining); }
+    player.sendOverlayMessage(Component.translatable("create.track_target.success"));
+    if(type==SignalEdgePoints.SIGNAL&&!(player instanceof FakePlayer))
+      AllAdvancements.SIGNAL.awardTo(player);
+    return result;
+  }
 
-		if (state.getBlock() instanceof ITrackBlock track) {
-			if (level.isClientSide)
-				return InteractionResult.SUCCESS;
+  /** Original selection had no dimension or saved axis; it resolved in the actual use world. */
+  public static TrackTargetingSelection selection(ItemStack stack, net.minecraft.world.level.Level level) {
+    var current = stack.get(AllDataComponents.TRACK_TARGETING_SELECTION);
+    if (current != null) return current;
+    var pos = stack.get(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS);
+    if (pos == null || !LoadedLevelAccess.isLoaded(level, pos)) return null;
+    var state = LoadedLevelAccess.blockState(level, pos);
+    if (!(state.getBlock() instanceof ITrackBlock track)) return null;
+    var axes = track.getTrackAxes(level, pos, state);
+    var curve = Optional.ofNullable(stack.get(AllDataComponents.TRACK_TARGETING_ITEM_BEZIER));
+    if (axes.isEmpty() || curve.isEmpty() && axes.size() != 1 || axes.getFirst().lengthSqr() < 1e-12) return null;
+    return new TrackTargetingSelection(GlobalPos.of(level.dimension(), pos),
+        stack.getOrDefault(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_DIRECTION, false), axes.getFirst(), curve);
+  }
 
-			Vec3 lookAngle = player.getLookAngle();
-			boolean front = track.getNearestTrackAxis(level, pos, state, lookAngle)
-				.getSecond() == AxisDirection.POSITIVE;
-			EdgePointType<?> type = getType(stack);
-
-			MutableObject<OverlapResult> result = new MutableObject<>(null);
-			withGraphLocation(level, pos, front, null, type, (overlap, location) -> result.setValue(overlap));
-
-			if (result.getValue().feedback != null) {
-				player.displayClientMessage(CreateLang.translateDirect(result.getValue().feedback)
-					.withStyle(ChatFormatting.RED), true);
-				AllSoundEvents.DENY.play(level, null, pos, .5f, 1);
-				return InteractionResult.FAIL;
-			}
-
-			stack.set(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS, pos);
-			stack.set(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_DIRECTION, front);
-			stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_BEZIER);
-			player.displayClientMessage(CreateLang.translateDirect("track_target.set"), true);
-			AllSoundEvents.CONTROLLER_CLICK.play(level, null, pos, 1, 1);
-			return InteractionResult.SUCCESS;
-		}
-
-		if (!stack.has(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS)) {
-			player.displayClientMessage(CreateLang.translateDirect("track_target.missing")
-				.withStyle(ChatFormatting.RED), true);
-			return InteractionResult.FAIL;
-		}
-
-		CompoundTag blockEntityData = new CompoundTag();
-		blockEntityData.putBoolean("TargetDirection", stack.getOrDefault(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_DIRECTION, false));
-
-		BlockPos selectedPos = stack.get(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS);
-		BlockPos placedPos = pos.relative(pContext.getClickedFace(), state.canBeReplaced() ? 0 : 1);
-
-		boolean bezier = stack.has(AllDataComponents.TRACK_TARGETING_ITEM_BEZIER);
-
-		if (!selectedPos.closerThan(placedPos, bezier ? AllConfigs.server().trains.maxTrackPlacementLength.get() + 16 : 16)) {
-			player.displayClientMessage(CreateLang.translateDirect("track_target.too_far")
-				.withStyle(ChatFormatting.RED), true);
-			return InteractionResult.FAIL;
-		}
-
-		if (bezier) {
-			BezierTrackPointLocation bezierTrackPointLocation =
-				stack.get(AllDataComponents.TRACK_TARGETING_ITEM_BEZIER);
-			CompoundTag bezierNbt = new CompoundTag();
-			bezierNbt.putInt("Segment", bezierTrackPointLocation.segment());
-			bezierNbt.put("Key", NbtUtils.writeBlockPos(bezierTrackPointLocation.curveTarget()
-				.subtract(placedPos)));
-			blockEntityData.put("Bezier", bezierNbt);
-		}
-
-		blockEntityData.put("TargetTrack", NbtUtils.writeBlockPos(selectedPos.subtract(placedPos)));
-		blockEntityData.putString("id", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
-		BlockEntity.addEntityType(blockEntityData, ((IBE<?>) this.getBlock()).getBlockEntityType());
-
-		stack.set(DataComponents.BLOCK_ENTITY_DATA, CustomData.of(blockEntityData));
-		stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS);
-		stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_DIRECTION);
-		stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_BEZIER);
-
-		InteractionResult useOn = super.useOn(pContext);
-		stack.remove(DataComponents.BLOCK_ENTITY_DATA);
-
-		if (level.isClientSide || useOn == InteractionResult.FAIL)
-			return useOn;
-
-		ItemStack itemInHand = player.getItemInHand(pContext.getHand());
-		if (!itemInHand.isEmpty()) {
-			itemInHand.remove(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS);
-			itemInHand.remove(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_DIRECTION);
-			itemInHand.remove(AllDataComponents.TRACK_TARGETING_ITEM_BEZIER);
-		}
-		player.displayClientMessage(CreateLang.translateDirect("track_target.success")
-			.withStyle(ChatFormatting.GREEN), true);
-
-		if (type == EdgePointType.SIGNAL)
-			AllAdvancements.SIGNAL.awardTo(player);
-
-		return useOn;
-	}
-
-	public EdgePointType<?> getType(ItemStack stack) {
-		return type;
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	public boolean useOnCurve(BezierPointSelection selection, ItemStack stack) {
-		Minecraft mc = Minecraft.getInstance();
-		LocalPlayer player = mc.player;
-		TrackBlockEntity be = selection.blockEntity();
-		BezierTrackPointLocation loc = selection.loc();
-		boolean front = player.getLookAngle()
-			.dot(selection.direction()) < 0;
-
-		CatnipServices.NETWORK.sendToServer(new CurvedTrackSelectionPacket(be.getBlockPos(), loc.curveTarget(),
-			front, loc.segment(), player.getInventory().selected));
-		return true;
-	}
-
-	public static enum OverlapResult {
-
-		VALID,
-		OCCUPIED("track_target.occupied"),
-		JUNCTION("track_target.no_junctions"),
-		NO_TRACK("track_target.invalid");
-
-		public String feedback;
-
-		private OverlapResult() {}
-
-		private OverlapResult(String feedback) {
-			this.feedback = feedback;
-		}
-
-	}
-
-	public static void withGraphLocation(Level level, BlockPos pos, boolean front,
-		BezierTrackPointLocation targetBezier, EdgePointType<?> type,
-		BiConsumer<OverlapResult, TrackGraphLocation> callback) {
-
-		BlockState state = level.getBlockState(pos);
-
-		if (!(state.getBlock() instanceof ITrackBlock track)) {
-			callback.accept(OverlapResult.NO_TRACK, null);
-			return;
-		}
-
-		List<Vec3> trackAxes = track.getTrackAxes(level, pos, state);
-		if (targetBezier == null && trackAxes.size() > 1) {
-			callback.accept(OverlapResult.JUNCTION, null);
-			return;
-		}
-
-		AxisDirection targetDirection = front ? AxisDirection.POSITIVE : AxisDirection.NEGATIVE;
-		TrackGraphLocation location =
-			targetBezier != null ? TrackGraphHelper.getBezierGraphLocationAt(level, pos, targetDirection, targetBezier)
-				: TrackGraphHelper.getGraphLocationAt(level, pos, targetDirection, trackAxes.get(0));
-
-		if (location == null) {
-			callback.accept(OverlapResult.NO_TRACK, null);
-			return;
-		}
-
-		Couple<TrackNode> nodes = location.edge.map(location.graph::locateNode);
-		TrackEdge edge = location.graph.getConnection(nodes);
-		if (edge == null)
-			return;
-
-		EdgeData edgeData = edge.getEdgeData();
-		double edgePosition = location.position;
-
-		for (TrackEdgePoint edgePoint : edgeData.getPoints()) {
-			double otherEdgePosition = edgePoint.getLocationOn(edge);
-			double distance = Math.abs(edgePosition - otherEdgePosition);
-			if (distance > .75)
-				continue;
-			if (edgePoint.canCoexistWith(type, front) && distance < .25)
-				continue;
-
-			callback.accept(OverlapResult.OCCUPIED, location);
-			return;
-		}
-
-		callback.accept(OverlapResult.VALID, location);
-	}
-
+  private static void clearOriginalSelection(ItemStack stack) {
+    stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_POS);
+    stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_SELECTED_DIRECTION);
+    stack.remove(AllDataComponents.TRACK_TARGETING_ITEM_BEZIER);
+  }
 }

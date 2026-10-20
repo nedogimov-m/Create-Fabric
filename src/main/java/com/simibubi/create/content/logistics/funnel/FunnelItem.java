@@ -1,54 +1,16 @@
 package com.simibubi.create.content.logistics.funnel;
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.common.util.TriState;
-import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 
-@EventBusSubscriber
-public class FunnelItem extends BlockItem {
-
-	public FunnelItem(Block p_i48527_1_, Properties p_i48527_2_) {
-		super(p_i48527_1_, p_i48527_2_);
-	}
-
-	@SubscribeEvent
-	public static void funnelItemAlwaysPlacesWhenUsed(PlayerInteractEvent.RightClickBlock event) {
-		if (event.getItemStack().getItem() instanceof FunnelItem)
-			event.setUseBlock(TriState.FALSE);
-	}
-
-	@Override
-	protected BlockState getPlacementState(BlockPlaceContext ctx) {
-		Level world = ctx.getLevel();
-		BlockPos pos = ctx.getClickedPos();
-		BlockState state = super.getPlacementState(ctx);
-		if (state == null)
-			return state;
-		if (!(state.getBlock() instanceof FunnelBlock))
-			return state;
-		if (state.getValue(FunnelBlock.FACING)
-			.getAxis()
-			.isVertical())
-			return state;
-
-		Direction direction = state.getValue(FunnelBlock.FACING);
-		FunnelBlock block = (FunnelBlock) getBlock();
-		Block beltFunnelBlock = block.getEquivalentBeltFunnel(world, pos, state)
-			.getBlock();
-		BlockState equivalentBeltFunnel = beltFunnelBlock.getStateForPlacement(ctx)
-			.setValue(BeltFunnelBlock.HORIZONTAL_FACING, direction);
-		if (BeltFunnelBlock.isOnValidBelt(equivalentBeltFunnel, world, pos))
-			return equivalentBeltFunnel;
-
-		return state;
-	}
-
+public final class FunnelItem extends BlockItem {
+    public static void register(){
+        com.simibubi.create.foundation.utility.CoreUseBlockCallbacks.register((player,level,hand,hit)->{
+            if(player.isSpectator()||!player.mayBuild()||!level.mayInteract(player,hit.getBlockPos())||!(player.getItemInHand(hand).getItem() instanceof FunnelItem))return net.minecraft.world.InteractionResult.PASS;
+            return player.getItemInHand(hand).useOn(new net.minecraft.world.item.context.UseOnContext(player,hand,hit));
+        });
+    }
+    public FunnelItem(FunnelBlock block,Properties properties){super(block,properties);}
+    @Override protected BlockState getPlacementState(BlockPlaceContext context){var state=super.getPlacementState(context);if(state==null||!state.getValue(FunnelBlock.FACING).getAxis().isHorizontal()||!BeltFunnelBlock.isOnValidBelt(state,context.getLevel(),context.getClickedPos()))return state;var block=(FunnelBlock)getBlock();var facing=state.getValue(FunnelBlock.FACING);return block.belt().getStateForPlacement(context).setValue(BeltFunnelBlock.HORIZONTAL_FACING,facing).setValue(BeltFunnelBlock.SHAPE,BeltFunnelBlock.getShapeForPosition(context.getLevel(),context.getClickedPos(),facing,state.getValue(FunnelBlock.EXTRACTING)));}
 }

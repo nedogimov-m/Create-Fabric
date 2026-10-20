@@ -1,220 +1,87 @@
 package com.simibubi.create.content.logistics.packagerLink;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Random;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ExecutionException;
-
-import org.apache.commons.lang3.mutable.MutableBoolean;
-import org.jetbrains.annotations.Nullable;
-
-import com.google.common.cache.Cache;
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.Multimap;
+import com.google.common.collect.*;
 import com.simibubi.create.api.packager.InventoryIdentifier;
 import com.simibubi.create.content.logistics.BigItemStack;
-import com.simibubi.create.content.logistics.packager.IdentifiedInventory;
-import com.simibubi.create.content.logistics.packager.InventorySummary;
-import com.simibubi.create.content.logistics.packager.PackagerBlockEntity;
-import com.simibubi.create.content.logistics.packager.PackagingRequest;
-import com.simibubi.create.content.logistics.packagerLink.LogisticallyLinkedBehaviour.RequestType;
+import com.simibubi.create.content.logistics.packager.*;
 import com.simibubi.create.content.logistics.stockTicker.PackageOrderWithCrafts;
-import com.simibubi.create.foundation.utility.TickBasedCache;
-
-import net.createmod.catnip.data.Pair;
+import java.util.*;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import org.apache.commons.lang3.mutable.MutableBoolean;
 
-public class LogisticsManager {
-
-	private static Random r = new Random();
-
-	public static final Cache<UUID, InventorySummary> ACCURATE_SUMMARIES = new TickBasedCache<>(1, false);
-	public static final Cache<UUID, InventorySummary> SUMMARIES = new TickBasedCache<>(20, false);
-
-	public static InventorySummary getSummaryOfNetwork(UUID freqId, boolean accurate) {
-		try {
-			Cache<UUID, InventorySummary> cacheToUse = accurate ? LogisticsManager.ACCURATE_SUMMARIES
-				: LogisticsManager.SUMMARIES;
-			return cacheToUse.get(freqId, () -> createSummaryOfNetwork(freqId));
-		} catch (ExecutionException e) {
-			e.printStackTrace();
-		}
-		return InventorySummary.EMPTY;
-	}
-
-	private static InventorySummary createSummaryOfNetwork(UUID freqId) {
-		InventorySummary summaryOfLinks = new InventorySummary();
-		Set<InventoryIdentifier> processedInventories = new HashSet<>();
-		for (LogisticallyLinkedBehaviour link : LogisticallyLinkedBehaviour.getAllPresent(freqId, false)) {
-
-			// Skip inventories already presented by other links
-			InventoryIdentifier currentInventoryId = getInventoryIdentifierFromLink(link);
-			if (currentInventoryId != null && !processedInventories.add(currentInventoryId))
-				continue;
-
-			InventorySummary summary = link.getSummary(null);
-			if (summary != InventorySummary.EMPTY) {
-				summaryOfLinks.contributingLinks++;
-				summaryOfLinks.add(summary);
-			}
-		}
-
-		return summaryOfLinks;
-	}
-
-	public static int getStockOf(UUID freqId, ItemStack stack, @Nullable IdentifiedInventory ignoredHandler) {
-		int sum = 0;
-		for (LogisticallyLinkedBehaviour link : LogisticallyLinkedBehaviour.getAllPresent(freqId, false))
-			sum += link.getSummary(ignoredHandler)
-				.getCountOf(stack);
-		return sum;
-	}
-
-	public static boolean broadcastPackageRequest(UUID freqId, RequestType type, PackageOrderWithCrafts order,
-												  @Nullable IdentifiedInventory ignoredHandler, String address) {
-		if (order.isEmpty())
-			return false;
-
-		Multimap<PackagerBlockEntity, PackagingRequest> requests = findPackagersForRequest(freqId, order,
-			ignoredHandler, address);
-
-		// Check if packagers have accumulated too many packages already
-		for (PackagerBlockEntity packager : requests.keySet())
-			if (packager.isTooBusyFor(type))
-				return false;
-
-		// Actually perform package creation
-		performPackageRequests(requests);
-		return true;
-	}
-
-	public static Multimap<PackagerBlockEntity, PackagingRequest> findPackagersForRequest(UUID freqId,
-																						  PackageOrderWithCrafts order, @Nullable IdentifiedInventory ignoredHandler, String address) {
-		List<BigItemStack> stacks = new ArrayList<>();
-
-		for (BigItemStack stack : order.stacks())
-			if (!stack.stack.isEmpty() && stack.count > 0)
-				stacks.add(stack);
-
-		Multimap<PackagerBlockEntity, PackagingRequest> requests = HashMultimap.create();
-
-		// Packages need to track their index and successors for successful defrag
-		Iterable<LogisticallyLinkedBehaviour> allAvailableLinks = LogisticallyLinkedBehaviour.getAllPresent(freqId,
-			true);
-
-		// Group links by InventoryIdentifier and randomly select one from each group
-		Map<InventoryIdentifier, List<LogisticallyLinkedBehaviour>> linksByInventory = new HashMap<>();
-		List<LogisticallyLinkedBehaviour> availableLinks = new ArrayList<>();
-
-		// Group links by their inventory identifier
-		for (LogisticallyLinkedBehaviour link : allAvailableLinks) {
-			InventoryIdentifier inventoryId = getInventoryIdentifierFromLink(link);
-			if (inventoryId != null) {
-				linksByInventory.computeIfAbsent(inventoryId, k -> new ArrayList<>()).add(link);
-			} else {
-				// Links without inventory identifier are added directly
-				availableLinks.add(link);
-			}
-		}
-
-		// Randomly select one link from each inventory group
-		for (List<LogisticallyLinkedBehaviour> linkGroup : linksByInventory.values()) {
-			if (!linkGroup.isEmpty()) {
-				LogisticallyLinkedBehaviour selectedLink = linkGroup.get(r.nextInt(linkGroup.size()));
-				availableLinks.add(selectedLink);
-			}
-		}
-
-		List<LogisticallyLinkedBehaviour> usedLinks = new ArrayList<>();
-		MutableBoolean finalLinkTracker = new MutableBoolean(false);
-
-		// First box needs to carry the order specifics for successful defrag
-		PackageOrderWithCrafts context = order;
-
-		// Packages from future orders should not be merged in the packager queue
-		int orderId = r.nextInt();
-
-		for (int i = 0; i < stacks.size(); i++) {
-			BigItemStack entry = stacks.get(i);
-			int remainingCount = entry.count;
-			boolean finalEntry = i == stacks.size() - 1;
-			ItemStack requestedItem = entry.stack;
-
-			for (LogisticallyLinkedBehaviour link : availableLinks) {
-				int usedIndex = usedLinks.indexOf(link);
-				int linkIndex = usedIndex == -1 ? usedLinks.size() : usedIndex;
-				MutableBoolean isFinalLink = new MutableBoolean(false);
-				if (linkIndex == usedLinks.size() - 1)
-					isFinalLink = finalLinkTracker;
-
-				// Only send context and craftingContext with first package
-				Pair<PackagerBlockEntity, PackagingRequest> request = link.processRequest(requestedItem, remainingCount,
-					address, linkIndex, isFinalLink, orderId, context, ignoredHandler);
-				if (request == null)
-					continue;
-
-				requests.put(request.getFirst(), request.getSecond());
-
-				int processedCount = request.getSecond()
-					.getCount();
-				if (processedCount > 0 && usedIndex == -1) {
-					context = null;
-					usedLinks.add(link);
-					finalLinkTracker = isFinalLink;
-				}
-
-				remainingCount -= processedCount;
-				if (remainingCount > 0)
-					continue;
-				if (finalEntry)
-					finalLinkTracker.setTrue();
-				break;
-			}
-		}
-		return requests;
-	}
-
-	@Nullable
-	private static InventoryIdentifier getInventoryIdentifierFromLink(LogisticallyLinkedBehaviour link) {
-
-		if (!(link.blockEntity instanceof PackagerLinkBlockEntity plbe)) {
-			return null;
-		}
-
-		PackagerBlockEntity packager = plbe.getPackager();
-		if (packager == null || !packager.targetInventory.hasInventory()) {
-			return null;
-		}
-
-		IdentifiedInventory identifiedInventory = packager.targetInventory.getIdentifiedInventory();
-		InventoryIdentifier result = identifiedInventory != null ? identifiedInventory.identifier() : null;
-		return result;
-	}
-
-	public static void performPackageRequests(Multimap<PackagerBlockEntity, PackagingRequest> requests) {
-		Map<PackagerBlockEntity, Collection<PackagingRequest>> asMap = requests.asMap();
-		for (Entry<PackagerBlockEntity, Collection<PackagingRequest>> entry : asMap.entrySet()) {
-			ArrayList<PackagingRequest> queuedRequests = new ArrayList<>(entry.getValue());
-			PackagerBlockEntity packager = entry.getKey();
-
-			if (!queuedRequests.isEmpty())
-				packager.flashLink();
-			for (int i = 0; i < 100; i++) {
-				if (queuedRequests.isEmpty())
-					break;
-				packager.attemptToSend(queuedRequests);
-			}
-
-			packager.triggerStockCheck();
-			packager.notifyUpdate();
-		}
-	}
-
+public final class LogisticsManager {
+    record CachedSummary(long tick,InventorySummary summary) {}
+    private static final Random RANDOM = new Random();
+    public static InventorySummary getSummaryOfNetwork(Level level,UUID id,boolean accurate) {
+        if(level.isClientSide())return InventorySummary.EMPTY;
+        if(net.fabricmc.fabric.api.transfer.v1.transaction.Transaction.getLifecycle()!=net.fabricmc.fabric.api.transfer.v1.transaction.Transaction.Lifecycle.NONE)return createSummaryOfNetwork(level,id);
+        var manager=GlobalLogisticsManager.get(level);var cache=accurate?manager.accurateSummaries:manager.summaries;var old=cache.get(id);
+        if(old!=null&&manager.ticks()-old.tick()<(accurate?1:20))return old.summary();
+        var summary=createSummaryOfNetwork(level,id);cache.put(id,new CachedSummary(manager.ticks(),summary));return summary;
+    }
+    private static InventorySummary createSummaryOfNetwork(Level level,UUID id) {
+        var result=new InventorySummary();var seen=new HashSet<InventoryIdentifier>();
+        for(var link:LogisticallyLinkedBehaviour.getAllPresent(level,id,false)){
+            var inventory=getInventoryIdentifierFromLink(link);if(inventory!=null&&!seen.add(inventory))continue;
+            var summary=link.getSummary(null);if(summary==InventorySummary.EMPTY)continue;result.contributingLinks++;result.add(summary);
+        }return result;
+    }
+    public static int getStockOf(Level level,UUID id,ItemStack stack,IdentifiedInventory ignored) {
+        int sum=0;var seen=new HashSet<InventoryIdentifier>();for(var link:LogisticallyLinkedBehaviour.getAllPresent(level,id,false)){var inventory=getInventoryIdentifierFromLink(link);if(inventory!=null&&!seen.add(inventory))continue;sum=(int)Math.min(BigItemStack.INF,(long)sum+link.getSummary(ignored).getCountOf(stack));}return sum;
+    }
+    public static boolean broadcastPackageRequest(Level level,UUID id,LogisticallyLinkedBehaviour.RequestType type,PackageOrderWithCrafts order,IdentifiedInventory ignored,String address) {
+        if(level.isClientSide()||order.isEmpty())return false;
+        var requests=findPackagersForRequest(level,id,order,ignored,address);
+        for(var packager:requests.keySet())if(packager.isTooBusyFor(type))return false;
+        performPackageRequests(requests);GlobalLogisticsManager.get(level).invalidate(id);return true;
+    }
+    /** All requested goods must be boxed in the caller's payment transaction. */
+    public static boolean dispatchPurchase(Level level,UUID id,PackageOrderWithCrafts order,String address,net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext transaction){
+        if(level.isClientSide()||order.isEmpty())return false;
+        var requests=findPackagersForRequest(level,id,order,null,address);var expected=new InventorySummary();var allocated=new InventorySummary();
+        for(var entry:order.stacks())expected.add(entry);for(var request:requests.values())allocated.add(request.item(),request.getCount());
+        for(var entry:expected.getStacksByCount())if(allocated.getCountOf(entry.stack)!=entry.count)return false;
+        for(var packager:requests.keySet())if(packager.isTooBusyFor(LogisticallyLinkedBehaviour.RequestType.PLAYER))return false;
+        try(var nested=transaction.openNested()){
+            for(var entry:requests.asMap().entrySet())if(!entry.getKey().fulfillRequests(new ArrayList<>(entry.getValue()),nested))return false;
+            nested.addOuterCloseCallback(result->{if(result.wasCommitted()){GlobalLogisticsManager.get(level).invalidate(id);for(var packager:requests.keySet()){packager.flashLink();packager.inventoryTracker.reset();packager.notifyUpdate();}}});
+            nested.commit();
+        }
+        return true;
+    }
+    public static Multimap<PackagerBlockEntity,PackagingRequest> findPackagersForRequest(Level level,UUID id,PackageOrderWithCrafts order,IdentifiedInventory ignored,String address) {
+        var stacks=order.stacks().stream().filter(entry->!entry.stack.isEmpty()&&entry.count>0).toList();
+        Multimap<PackagerBlockEntity,PackagingRequest> requests=ArrayListMultimap.create();
+        var groups=new LinkedHashMap<InventoryIdentifier,List<LogisticallyLinkedBehaviour>>();var available=new ArrayList<LogisticallyLinkedBehaviour>();
+        for(var link:LogisticallyLinkedBehaviour.getAllPresent(level,id,true)){var inventory=getInventoryIdentifierFromLink(link);if(inventory==null)available.add(link);else groups.computeIfAbsent(inventory,ignoredId->new ArrayList<>()).add(link);}
+        groups.values().forEach(group->available.add(group.get(RANDOM.nextInt(group.size()))));
+        // Grouping must retain redstone priority between independent inventories.
+        available.sort(Comparator.comparingInt(link->link.redstonePower));
+        var used=new ArrayList<LogisticallyLinkedBehaviour>();var finalTracker=new MutableBoolean(false);PackageOrderWithCrafts context=order;int orderId=RANDOM.nextInt();
+        var reserved=new IdentityHashMap<LogisticallyLinkedBehaviour,InventorySummary>();
+        for(int i=0;i<stacks.size();i++){
+            var entry=stacks.get(i);int remaining=entry.count;
+            for(var link:available){
+                int usedIndex=used.indexOf(link),index=usedIndex<0?used.size():usedIndex;var last=index==used.size()-1?finalTracker:new MutableBoolean(false);
+                var reservation=reserved.computeIfAbsent(link,key->new InventorySummary());int already=reservation.getCountOf(entry.stack);
+                var request=link.processRequest(entry.stack,remaining+already,address,index,last,orderId,context,ignored);if(request==null)continue;
+                int count=Math.min(remaining,Math.max(0,request.getSecond().getCount()-already));if(count==0)continue;request.getSecond().count().setValue(count);reservation.add(entry.stack,count);
+                requests.put(request.getFirst(),request.getSecond());
+                if(usedIndex<0){context=null;used.add(link);finalTracker=last;}remaining-=count;
+                if(remaining>0)continue;if(i==stacks.size()-1)finalTracker.setTrue();break;
+            }
+        }return requests;
+    }
+    private static InventoryIdentifier getInventoryIdentifierFromLink(LogisticallyLinkedBehaviour link) {
+        if(!(link.blockEntity instanceof PackagerLinkBlockEntity entity))return null;var packager=entity.getPackager();if(packager==null)return null;var inventory=packager.getIdentifiedInventory();return inventory==null?null:inventory.identifier();
+    }
+    public static void performPackageRequests(Multimap<PackagerBlockEntity,PackagingRequest> requests) {
+        for(var entry:requests.asMap().entrySet()){
+            var pending=new ArrayList<>(entry.getValue());var packager=entry.getKey();if(!pending.isEmpty())packager.flashLink();
+            for(int i=0;i<100&&!pending.isEmpty();i++)packager.attemptToSend(pending);
+            packager.triggerStockCheck();packager.notifyUpdate();
+        }
+    }
+    private LogisticsManager() {}
 }

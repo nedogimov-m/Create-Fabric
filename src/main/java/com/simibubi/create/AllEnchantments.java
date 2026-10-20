@@ -1,6 +1,6 @@
 package com.simibubi.create;
 
-import net.minecraft.advancements.critereon.ItemPredicate;
+import net.minecraft.advancements.predicates.ItemPredicate;
 import net.minecraft.core.HolderGetter;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.registries.Registries;
@@ -31,7 +31,7 @@ public class AllEnchantments {
 				POTATO_RECOVERY,
 				Enchantment.enchantment(
 						Enchantment.definition(
-								HolderSet.direct(AllItems.POTATO_CANNON),
+								HolderSet.direct(AllItems.POTATO_CANNON.builtInRegistryHolder()),
 								10,
 								3,
 								Enchantment.dynamicCost(15, 15),
@@ -43,7 +43,7 @@ public class AllEnchantments {
 						EnchantmentEffectComponents.AMMO_USE,
 						new SetValue(LevelBasedValue.perLevel(0.0F, 33.3333333333F)),
 						MatchTool.toolMatches(
-								ItemPredicate.Builder.item().of() // TODO - Fix potato recovery
+								ItemPredicate.Builder.item().of(itemHolderGetter) // Original source deliberately uses the empty item predicate.
 						)
 				)
 		);
@@ -53,7 +53,7 @@ public class AllEnchantments {
 				CAPACITY,
 				Enchantment.enchantment(
 						Enchantment.definition(
-								itemHolderGetter.getOrThrow(AllTags.AllItemTags.PRESSURIZED_AIR_SOURCES.tag),
+								itemHolderGetter.getOrThrow(com.simibubi.create.content.equipment.armor.BacktankUtil.PRESSURIZED_AIR_SOURCES),
 								10,
 								3,
 								Enchantment.dynamicCost(15, 15),
@@ -66,7 +66,7 @@ public class AllEnchantments {
 	}
 
 	private static void register(BootstrapContext<Enchantment> context, ResourceKey<Enchantment> key, Enchantment.Builder builder) {
-		context.register(key, builder.build(key.location()));
+		context.register(key, builder.build(key.identifier()));
 	}
 
 }

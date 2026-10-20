@@ -1,364 +1,77 @@
 package com.simibubi.create.content.trains.display;
 
-import static net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED;
-
-import java.util.List;
-import java.util.function.Predicate;
-
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.equipment.clipboard.ClipboardEntry;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
+import com.simibubi.create.*;
 import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.simpleRelays.ICogWheel;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.placement.IPlacementHelper;
-import net.createmod.catnip.placement.PlacementHelpers;
-import net.createmod.catnip.placement.PlacementOffset;
-import net.minecraft.MethodsReturnNonnullByDefault;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.BlockPos.MutableBlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.Direction.AxisDirection;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
+import net.minecraft.sounds.*;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.ItemInteractionResult;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.DyeColor;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.SimpleWaterloggedBlock;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
-import net.minecraft.world.ticks.LevelTickAccess;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.material.*;
+import net.minecraft.world.level.redstone.Orientation;
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
 
-public class FlapDisplayBlock extends HorizontalKineticBlock
-	implements IBE<FlapDisplayBlockEntity>, IWrenchable, ICogWheel, SimpleWaterloggedBlock {
-
-	public static final BooleanProperty UP = BooleanProperty.create("up");
-	public static final BooleanProperty DOWN = BooleanProperty.create("down");
-
-	public FlapDisplayBlock(Properties p_49795_) {
-		super(p_49795_);
-		registerDefaultState(defaultBlockState().setValue(UP, false)
-			.setValue(DOWN, false)
-			.setValue(WATERLOGGED, false));
-	}
-
-	@Override
-	protected boolean areStatesKineticallyEquivalent(BlockState oldState, BlockState newState) {
-		return super.areStatesKineticallyEquivalent(oldState, newState);
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return state.getValue(HORIZONTAL_FACING)
-			.getAxis();
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(UP, DOWN, WATERLOGGED));
-	}
-
-	@Override
-	public SpeedLevel getMinimumRequiredSpeedLevel() {
-		return SpeedLevel.MEDIUM;
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		Direction face = context.getClickedFace();
-		BlockPos clickedPos = context.getClickedPos();
-		BlockPos placedOnPos = clickedPos.relative(face.getOpposite());
-		Level level = context.getLevel();
-		BlockState blockState = level.getBlockState(placedOnPos);
-		BlockState stateForPlacement = defaultBlockState();
-		FluidState ifluidstate = context.getLevel()
-			.getFluidState(context.getClickedPos());
-
-		if ((blockState.getBlock() != this) || (context.getPlayer() != null && context.getPlayer()
-			.isShiftKeyDown()))
-			stateForPlacement = super.getStateForPlacement(context);
-		else {
-			Direction otherFacing = blockState.getValue(HORIZONTAL_FACING);
-			stateForPlacement = stateForPlacement.setValue(HORIZONTAL_FACING, otherFacing);
-		}
-
-		return updateColumn(level, clickedPos,
-			stateForPlacement.setValue(WATERLOGGED, Boolean.valueOf(ifluidstate.getType() == Fluids.WATER)), true);
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (player.isShiftKeyDown())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		IPlacementHelper placementHelper = PlacementHelpers.get(placementHelperId);
-		if (placementHelper.matchesItem(stack))
-			return placementHelper.getOffset(player, level, state, pos, hitResult)
-				.placeInWorld(level, (BlockItem) stack.getItem(), player, hand, hitResult);
-
-		FlapDisplayBlockEntity flapBE = getBlockEntity(level, pos);
-
-		if (flapBE == null)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		flapBE = flapBE.getController();
-		if (flapBE == null)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		double yCoord = hitResult.getLocation()
-			.add(Vec3.atLowerCornerOf(hitResult.getDirection()
-					.getOpposite()
-					.getNormal())
-				.scale(.125f)).y;
-
-		int lineIndex = flapBE.getLineIndexAt(yCoord);
-
-		if (stack.isEmpty()) {
-			if (!flapBE.isSpeedRequirementFulfilled())
-				return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-			flapBE.applyTextManually(lineIndex, null);
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		if (stack.getItem() == Items.GLOW_INK_SAC) {
-			if (!level.isClientSide) {
-				level.playSound(null, pos, SoundEvents.INK_SAC_USE, SoundSource.BLOCKS, 1.0F, 1.0F);
-				flapBE.setGlowing(lineIndex);
-			}
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		boolean display =
-			stack.getItem() == Items.NAME_TAG && stack.has(DataComponents.CUSTOM_NAME) || AllBlocks.CLIPBOARD.isIn(stack);
-		DyeColor dye = DyeColor.getColor(stack);
-
-		if (!display && dye == null)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		if (dye == null && !flapBE.isSpeedRequirementFulfilled())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		if (level.isClientSide)
-			return ItemInteractionResult.SUCCESS;
-
-		Component customName = stack.get(DataComponents.CUSTOM_NAME);
-
-		if (display) {
-			if (AllBlocks.CLIPBOARD.isIn(stack)) {
-				List<ClipboardEntry> entries = ClipboardEntry.getLastViewedEntries(stack);
-				int line = lineIndex;
-				for (ClipboardEntry entry : entries) {
-					for (String string : entry.text.getString()
-						.split("\n")) {
-						flapBE.applyTextManually(line++, Component.literal(string));
-					}
-				}
-				return ItemInteractionResult.SUCCESS;
-			}
-
-			flapBE.applyTextManually(lineIndex, customName);
-		}
-		if (dye != null) {
-			level.playSound(null, pos, SoundEvents.DYE_USE, SoundSource.BLOCKS, 1.0F, 1.0F);
-			flapBE.setColour(lineIndex, dye);
-		}
-
-		return ItemInteractionResult.SUCCESS;
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState pState, BlockGetter pLevel, BlockPos pPos, CollisionContext pContext) {
-		return AllShapes.FLAP_DISPLAY.get(pState.getValue(HORIZONTAL_FACING));
-	}
-
-	@Override
-	public Class<FlapDisplayBlockEntity> getBlockEntityClass() {
-		return FlapDisplayBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends FlapDisplayBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.FLAP_DISPLAY.get();
-	}
-
-	@Override
-	public float getParticleTargetRadius() {
-		return .85f;
-	}
-
-	@Override
-	public float getParticleInitialRadius() {
-		return .75f;
-	}
-
-	private BlockState updateColumn(Level level, BlockPos pos, BlockState state, boolean present) {
-		MutableBlockPos currentPos = new MutableBlockPos();
-		Axis axis = getConnectionAxis(state);
-
-		for (Direction connection : Iterate.directionsInAxis(Axis.Y)) {
-			boolean connect = true;
-
-			Move:
-			for (Direction movement : Iterate.directionsInAxis(axis)) {
-				currentPos.set(pos);
-				for (int i = 0; i < 1000; i++) {
-					if (!level.isLoaded(currentPos))
-						break;
-
-					BlockState other1 = currentPos.equals(pos) ? state : level.getBlockState(currentPos);
-					BlockState other2 = level.getBlockState(currentPos.relative(connection));
-					boolean col1 = canConnect(state, other1);
-					boolean col2 = canConnect(state, other2);
-					currentPos.move(movement);
-
-					if (!col1 && !col2)
-						break;
-					if (col1 && col2)
-						continue;
-
-					connect = false;
-					break Move;
-				}
-			}
-			state = setConnection(state, connection, connect);
-		}
-		return state;
-	}
-
-	@Override
-	public void onPlace(BlockState pState, Level pLevel, BlockPos pPos, BlockState pOldState, boolean pIsMoving) {
-		super.onPlace(pState, pLevel, pPos, pOldState, pIsMoving);
-		if (pOldState.getBlock() == this)
-			return;
-		LevelTickAccess<Block> blockTicks = pLevel.getBlockTicks();
-		if (!blockTicks.hasScheduledTick(pPos, this))
-			pLevel.scheduleTick(pPos, this, 1);
-	}
-
-	@Override
-	public void tick(BlockState pState, ServerLevel pLevel, BlockPos pPos, RandomSource pRandom) {
-		if (pState.getBlock() != this)
-			return;
-		BlockPos belowPos =
-			pPos.relative(Direction.fromAxisAndDirection(getConnectionAxis(pState), AxisDirection.NEGATIVE));
-		BlockState belowState = pLevel.getBlockState(belowPos);
-		if (!canConnect(pState, belowState))
-			KineticBlockEntity.switchToBlockState(pLevel, pPos, updateColumn(pLevel, pPos, pState, true));
-		withBlockEntityDo(pLevel, pPos, FlapDisplayBlockEntity::updateControllerStatus);
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction pDirection, BlockState pNeighborState,
-								  LevelAccessor pLevel, BlockPos pCurrentPos, BlockPos pNeighborPos) {
-		return updatedShapeInner(state, pDirection, pNeighborState, pLevel, pCurrentPos);
-	}
-
-	private BlockState updatedShapeInner(BlockState state, Direction pDirection, BlockState pNeighborState,
-										 LevelAccessor pLevel, BlockPos pCurrentPos) {
-		if (state.getValue(BlockStateProperties.WATERLOGGED))
-			pLevel.scheduleTick(pCurrentPos, Fluids.WATER, Fluids.WATER.getTickDelay(pLevel));
-		if (!canConnect(state, pNeighborState))
-			return setConnection(state, pDirection, false);
-		if (pDirection.getAxis() == getConnectionAxis(state))
-			return withPropertiesOf(pNeighborState).setValue(WATERLOGGED, state.getValue(WATERLOGGED));
-		return setConnection(state, pDirection, getConnection(pNeighborState, pDirection.getOpposite()));
-	}
-
-	@Override
-	public FluidState getFluidState(BlockState state) {
-		return state.getValue(BlockStateProperties.WATERLOGGED) ? Fluids.WATER.getSource(false)
-			: Fluids.EMPTY.defaultFluidState();
-	}
-
-	protected boolean canConnect(BlockState state, BlockState other) {
-		return other.getBlock() == this && state.getValue(HORIZONTAL_FACING) == other.getValue(HORIZONTAL_FACING);
-	}
-
-	protected Axis getConnectionAxis(BlockState state) {
-		return state.getValue(HORIZONTAL_FACING)
-			.getClockWise()
-			.getAxis();
-	}
-
-	public static boolean getConnection(BlockState state, Direction side) {
-		BooleanProperty property = side == Direction.DOWN ? DOWN : side == Direction.UP ? UP : null;
-		return property != null && state.getValue(property);
-	}
-
-	public static BlockState setConnection(BlockState state, Direction side, boolean connect) {
-		BooleanProperty property = side == Direction.DOWN ? DOWN : side == Direction.UP ? UP : null;
-		if (property != null)
-			state = state.setValue(property, connect);
-		return state;
-	}
-
-	@Override
-	public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pIsMoving) {
-		super.onRemove(pState, pLevel, pPos, pNewState, pIsMoving);
-		if (pIsMoving || pNewState.getBlock() == this)
-			return;
-		for (Direction d : Iterate.directionsInAxis(getConnectionAxis(pState))) {
-			BlockPos relative = pPos.relative(d);
-			BlockState adjacent = pLevel.getBlockState(relative);
-			if (canConnect(pState, adjacent))
-				KineticBlockEntity.switchToBlockState(pLevel, relative,
-					updateColumn(pLevel, relative, adjacent, false));
-		}
-	}
-
-	private static final int placementHelperId = PlacementHelpers.register(new PlacementHelper());
-
-	@MethodsReturnNonnullByDefault
-	private static class PlacementHelper implements IPlacementHelper {
-		@Override
-		public Predicate<ItemStack> getItemPredicate() {
-			return AllBlocks.DISPLAY_BOARD::isIn;
-		}
-
-		@Override
-		public Predicate<BlockState> getStatePredicate() {
-			return AllBlocks.DISPLAY_BOARD::has;
-		}
-
-		@Override
-		public PlacementOffset getOffset(Player player, Level world, BlockState state, BlockPos pos,
-										 BlockHitResult ray) {
-			List<Direction> directions = IPlacementHelper.orderedByDistanceExceptAxis(pos, ray.getLocation(),
-				state.getValue(FlapDisplayBlock.HORIZONTAL_FACING)
-					.getAxis(),
-				dir -> world.getBlockState(pos.relative(dir))
-					.canBeReplaced());
-
-			return directions.isEmpty() ? PlacementOffset.fail()
-				: PlacementOffset.success(pos.relative(directions.get(0)), s -> AllBlocks.DISPLAY_BOARD.get()
-				.updateColumn(world, pos.relative(directions.get(0)),
-					s.setValue(HORIZONTAL_FACING, state.getValue(FlapDisplayBlock.HORIZONTAL_FACING)), true));
-		}
-	}
-
+/** Actual display board column/cog/item and multiline Clipboard text interactions. */
+public final class FlapDisplayBlock extends HorizontalKineticBlock implements ICogWheel,SimpleWaterloggedBlock {
+    public static final BooleanProperty UP=BooleanProperty.create("up"),DOWN=BooleanProperty.create("down"),WATERLOGGED=BlockStateProperties.WATERLOGGED;
+    public FlapDisplayBlock(Properties properties){super(properties);registerDefaultState(defaultBlockState().setValue(HORIZONTAL_FACING,Direction.NORTH).setValue(UP,false).setValue(DOWN,false).setValue(WATERLOGGED,false));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){super.createBlockStateDefinition(builder);builder.add(UP,DOWN,WATERLOGGED);}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new FlapDisplayBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity>BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return type==AllBlockEntityTypes.FLAP_DISPLAY?(world,pos,block,entity)->FlapDisplayBlockEntity.tick(world,pos,block,(FlapDisplayBlockEntity)entity):null;}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override public Direction.Axis getRotationAxis(BlockState state){return state.getValue(HORIZONTAL_FACING).getAxis();}
+    @Override public boolean hasShaftTowards(LevelReader level,BlockPos pos,BlockState state,Direction side){return false;}
+    public static Direction.Axis getConnectionAxis(BlockState state){return state.getValue(HORIZONTAL_FACING).getClockWise().getAxis();}
+    public static boolean canConnect(BlockState state,BlockState other){return state.getBlock()instanceof FlapDisplayBlock&&other.getBlock()==state.getBlock()&&state.getValue(HORIZONTAL_FACING)==other.getValue(HORIZONTAL_FACING);}
+    public static boolean getConnection(BlockState state,Direction side){return side==Direction.UP?state.getValue(UP):side==Direction.DOWN&&state.getValue(DOWN);}
+    public static BlockState setConnection(BlockState state,Direction side,boolean connected){return side==Direction.UP?state.setValue(UP,connected):side==Direction.DOWN?state.setValue(DOWN,connected):state;}
+    private static boolean available(LevelReader level,BlockPos pos){return !(level instanceof Level world)||LoadedLevelAccess.isLoaded(world,pos);}
+    /** Source compares whole horizontal row widths. At an unknown frontier preserve both old connection bits. */
+    public static BlockState updateColumn(Level level,BlockPos pos,BlockState state){
+        var result=state;for(var vertical:new Direction[]{Direction.DOWN,Direction.UP}){boolean connected=true;outer:for(var movement:Direction.values()){if(movement.getAxis()!=getConnectionAxis(state))continue;var current=pos;for(int i=0;i<1000;i++){var adjacent=current.relative(vertical);if(!available(level,current)||!available(level,adjacent))return state;var first=current.equals(pos)?state:LoadedLevelAccess.blockState(level,current);var second=LoadedLevelAccess.blockState(level,adjacent);boolean a=canConnect(state,first),b=canConnect(state,second);current=current.relative(movement);if(!a&&!b)break;if(a&&b)continue;connected=false;break outer;}}result=setConnection(result,vertical,connected);}return result;
+    }
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){
+        var pos=context.getClickedPos();var level=context.getLevel();var support=LoadedLevelAccess.blockState(level,pos.relative(context.getClickedFace().getOpposite()));var state=support.getBlock()==this&&(context.getPlayer()==null||!context.getPlayer().isShiftKeyDown())?defaultBlockState().setValue(HORIZONTAL_FACING,support.getValue(HORIZONTAL_FACING)):super.getStateForPlacement(context);return updateColumn(level,pos,state.setValue(WATERLOGGED,LoadedLevelAccess.blockState(level,pos).getFluidState().getType()==Fluids.WATER));
+    }
+    @Override public void onPlace(BlockState state,Level level,BlockPos pos,BlockState previous,boolean moved){super.onPlace(state,level,pos,previous,moved);if(!level.isClientSide()&&(previous.getBlock()!=this||previous.getValue(HORIZONTAL_FACING)!=state.getValue(HORIZONTAL_FACING)))level.scheduleTick(pos,this,1);}
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block neighbor,Orientation orientation,boolean moved){super.neighborChanged(state,level,pos,neighbor,orientation,moved);if(!level.isClientSide()&&!level.getBlockTicks().willTickThisTick(pos,this))level.scheduleTick(pos,this,1);}
+    @Override protected void tick(BlockState state,ServerLevel level,BlockPos pos,RandomSource random){
+        var first=pos.relative(Direction.get(Direction.AxisDirection.NEGATIVE,getConnectionAxis(state)));if(available(level,first)&&!canConnect(state,LoadedLevelAccess.blockState(level,first))){var next=updateColumn(level,pos,state);if(next!=state)level.setBlock(pos,next,Block.UPDATE_ALL);}if(LoadedLevelAccess.blockEntity(level,pos)instanceof FlapDisplayBlockEntity entity)entity.updateControllerStatus();
+    }
+    @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction side,BlockPos next,BlockState neighbor,RandomSource random){
+        if(state.getValue(WATERLOGGED))ticks.scheduleTick(pos,Fluids.WATER,Fluids.WATER.getTickDelay(level));if(!available(level,next))return state;if(!canConnect(state,neighbor))return setConnection(state,side,false);if(side.getAxis()==getConnectionAxis(state))return withPropertiesOf(neighbor).setValue(WATERLOGGED,state.getValue(WATERLOGGED));return setConnection(state,side,getConnection(neighbor,side.getOpposite()));
+    }
+    @Override protected void affectNeighborsAfterRemoval(BlockState state,ServerLevel level,BlockPos pos,boolean moved){
+        super.affectNeighborsAfterRemoval(state,level,pos,moved);if(moved)return;for(var side:Direction.values())if(side.getAxis()==getConnectionAxis(state)){var next=pos.relative(side);if(!available(level,next))continue;var adjacent=LoadedLevelAccess.blockState(level,next);if(canConnect(state,adjacent)){var updated=updateColumn(level,next,adjacent);if(updated!=adjacent)level.setBlock(next,updated,Block.UPDATE_ALL);level.scheduleTick(next,this,1);}}
+    }
+    @Override protected FluidState getFluidState(BlockState state){return state.getValue(WATERLOGGED)?Fluids.WATER.getSource(false):super.getFluidState(state);}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return state.getValue(HORIZONTAL_FACING).getAxis()==Direction.Axis.X?box(3,0,0,13,16,16):box(0,0,3,16,16,13);}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){return interact(stack,state,level,pos,player,hand,hit);}
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){return interact(ItemStack.EMPTY,state,level,pos,player,InteractionHand.MAIN_HAND,hit);}
+    private static InteractionResult interact(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){
+        if(player.isShiftKeyDown()||player.isSpectator()||!level.mayInteract(player,pos))return InteractionResult.PASS;if(stack.is(AllBlocks.DISPLAY_BOARD.asItem()))return assistPlacement(player,hand,level,state,pos,hit);
+        if(!(LoadedLevelAccess.blockEntity(level,pos)instanceof FlapDisplayBlockEntity part))return InteractionResult.PASS;var controller=part.getController();if(controller==null)return InteractionResult.PASS;int line=controller.getLineIndexAt(hit.getLocation().y-hit.getDirection().getStepY()*.125);if(!controller.validLine(line))return InteractionResult.PASS;
+        if(stack.isEmpty()){if(!controller.isSpeedRequirementFulfilled())return InteractionResult.PASS;if(!level.isClientSide())controller.applyTextManually(line,null);return InteractionResult.SUCCESS;}
+        if(stack.is(Items.GLOW_INK_SAC)){if(!level.isClientSide()){level.playSound(null,pos,SoundEvents.INK_SAC_USE,SoundSource.BLOCKS,1,1);controller.setGlowing(line);}return InteractionResult.SUCCESS;}
+        boolean clipboard=stack.is(AllBlocks.CLIPBOARD.asItem());boolean display=stack.is(Items.NAME_TAG)&&stack.has(DataComponents.CUSTOM_NAME)||clipboard;var dye=stack.get(DataComponents.DYE);if(!display&&dye==null||dye==null&&!controller.isSpeedRequirementFulfilled())return InteractionResult.PASS;if(level.isClientSide())return InteractionResult.SUCCESS;
+        if(clipboard){int current=line;for(var entry:com.simibubi.create.content.equipment.clipboard.ClipboardEntry.getLastViewedEntries(stack))for(var text:entry.text.getString().split("\\n"))controller.applyTextManually(current++,net.minecraft.network.chat.Component.literal(text));return InteractionResult.SUCCESS;}
+        if(display)controller.applyTextManually(line,stack.get(DataComponents.CUSTOM_NAME));if(dye!=null){level.playSound(null,pos,SoundEvents.DYE_USE,SoundSource.BLOCKS,1,1);controller.setColour(line,dye);}return InteractionResult.SUCCESS;
+    }
+    /** Source one-step nearest edge helper; native BlockItem.place performs permissions, collision and survival debit. */
+    private static InteractionResult assistPlacement(Player player,InteractionHand hand,Level level,BlockState state,BlockPos pos,BlockHitResult hit){
+        if(!player.mayBuild()||!(player.getItemInHand(hand).getItem()instanceof BlockItem item))return InteractionResult.PASS;var choices=new ArrayList<Direction>();for(var side:Direction.values())if(side.getAxis()!=state.getValue(HORIZONTAL_FACING).getAxis()&&available(level,pos.relative(side))&&LoadedLevelAccess.blockState(level,pos.relative(side)).canBeReplaced())choices.add(side);choices.sort(Comparator.comparingDouble(side->Vec3.atCenterOf(pos).relative(side,.5).distanceToSqr(hit.getLocation())));if(choices.isEmpty())return InteractionResult.PASS;var side=choices.getFirst();var target=pos.relative(side);if(!level.mayInteract(player,target))return InteractionResult.FAIL;var nextHit=new BlockHitResult(Vec3.atCenterOf(pos).relative(side,.5),side,pos,false);return item.place(new BlockPlaceContext(new UseOnContext(player,hand,nextHit)));
+    }
 }

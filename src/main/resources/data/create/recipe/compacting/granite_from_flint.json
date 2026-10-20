@@ -1,0 +1,17 @@
+{
+  "type": "create:compacting",
+  "ingredients": [
+    "minecraft:flint",
+    "minecraft:flint",
+    "minecraft:red_sand",
+    {
+      "fluid": "minecraft:lava",
+      "amount": 8100
+    }
+  ],
+  "results": [
+    {
+      "id": "minecraft:granite"
+    }
+  ]
+}

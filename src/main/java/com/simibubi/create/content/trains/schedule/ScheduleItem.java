@@ -1,32 +1,23 @@
 package com.simibubi.create.content.trains.schedule;
 
-import java.util.List;
-
 import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllMenuTypes;
 import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.contraptions.Contraption;
+import com.simibubi.create.content.trains.TrainAdvancements;
 import com.simibubi.create.content.trains.entity.CarriageContraption;
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
-import com.simibubi.create.content.trains.entity.Train;
 import com.simibubi.create.content.trains.schedule.destination.DestinationInstruction;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
 import com.simibubi.create.foundation.recipe.ItemCopyingRecipe.SupportsItemCopying;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import net.createmod.catnip.data.Couple;
+import java.util.function.Consumer;
+import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.InteractionResultHolder;
-import net.minecraft.world.MenuProvider;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
@@ -34,141 +25,91 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import org.jspecify.annotations.Nullable;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
+/** Actual source schedule component/item, native editor opening and conductor hand-off. */
+public final class ScheduleItem extends Item implements ExtendedMenuProvider<ScheduleMenu.Opening>, SupportsItemCopying {
+    public ScheduleItem(Properties properties) { super(properties); }
 
-public class ScheduleItem extends Item implements MenuProvider, SupportsItemCopying {
+    public static @Nullable Schedule getSchedule(HolderLookup.Provider registries, ItemStack stack) {
+        var tag = stack.get(AllDataComponents.TRAIN_SCHEDULE);
+        return tag == null ? null : Schedule.fromTag(registries, tag.copy());
+    }
 
-	public ScheduleItem(Properties pProperties) {
-		super(pProperties);
-	}
+    @Override public InteractionResult useOn(UseOnContext context) {
+        return context.getPlayer() == null ? InteractionResult.PASS : use(context.getLevel(), context.getPlayer(), context.getHand());
+    }
+    @Override public InteractionResult use(Level level, Player player, InteractionHand hand) {
+        if (player.isShiftKeyDown() || hand != InteractionHand.MAIN_HAND) return InteractionResult.PASS;
+        if (player instanceof ServerPlayer server) server.openMenu(this);
+        return InteractionResult.SUCCESS;
+    }
+    @Override public ScheduleMenu.Opening getScreenOpeningData(ServerPlayer player) {
+        return new ScheduleMenu.Opening(player.getMainHandItem().copy(), player.getInventory().getSelectedSlot());
+    }
+    @Override public @Nullable AbstractContainerMenu createMenu(int id, Inventory inventory, Player player) {
+        return new ScheduleMenu(id, inventory, player.getMainHandItem(), inventory.getSelectedSlot());
+    }
+    @Override public Component getDisplayName() { return Component.translatable("item.create.schedule"); }
+    @Override public DataComponentType<?> getComponentType() { return AllDataComponents.TRAIN_SCHEDULE; }
+    @Override public ItemStack createCopy(ItemStack original, int count) {
+        ItemStack copy = SupportsItemCopying.super.createCopy(original, count);
+        var schedule = original.get(AllDataComponents.TRAIN_SCHEDULE);
+        if (schedule != null) copy.set(AllDataComponents.TRAIN_SCHEDULE, schedule.copy());
+        return copy;
+    }
 
-	@Override
-	public InteractionResult useOn(UseOnContext context) {
-		if (context.getPlayer() == null)
-			return InteractionResult.PASS;
-		return use(context.getLevel(), context.getPlayer(), context.getHand()).getResult();
-	}
+    public InteractionResult handScheduleTo(ItemStack stack, Player player, LivingEntity target, InteractionHand hand) {
+        Schedule schedule = getSchedule(player.registryAccess(), stack);
+        if (schedule == null || target == null) return InteractionResult.PASS;
+        if (!(target.getRootVehicle() instanceof CarriageContraptionEntity entity)) return InteractionResult.PASS;
+        if (player.level().isClientSide()) return InteractionResult.SUCCESS;
+        if (!(entity.getContraption() instanceof CarriageContraption body)) return InteractionResult.SUCCESS;
+        var carriage = entity.getCarriage();
+        var train = carriage == null ? null : carriage.train;
+        if (train == null || train.isRestoring() || !entity.isGloballyManaged()) return InteractionResult.SUCCESS;
+        var seat = body.getSeatOf(target.getUUID());
+        if (seat == null) return InteractionResult.SUCCESS;
+        if (body.conductorSeats.get(seat) == null) {
+            deny(player, "schedule.non_controlling_seat");
+            return InteractionResult.SUCCESS;
+        }
+        if (train.runtime.getSchedule() != null) {
+            deny(player, "schedule.remove_with_empty_hand");
+            return InteractionResult.SUCCESS;
+        }
+        if (schedule.entries.isEmpty()) {
+            deny(player, "schedule.no_stops");
+            return InteractionResult.SUCCESS;
+        }
+        train.runtime.setSchedule(schedule, false);
+        TrainAdvancements.CONDUCTOR.awardTo(player);
+        play(player, AllSoundEvents.CONFIRM);
+        player.sendOverlayMessage(ScheduleText.translate("schedule.applied_to_train").withStyle(ChatFormatting.GREEN));
+        stack.shrink(1);
+        player.setItemInHand(hand, stack.isEmpty() ? ItemStack.EMPTY : stack);
+        return InteractionResult.SUCCESS;
+    }
 
-	@Override
-	public InteractionResultHolder<ItemStack> use(Level world, Player player, InteractionHand hand) {
-		ItemStack heldItem = player.getItemInHand(hand);
-
-		if (!player.isShiftKeyDown() && hand == InteractionHand.MAIN_HAND) {
-			if (!world.isClientSide && player instanceof ServerPlayer)
-				player.openMenu(this, buf -> {
-					ItemStack.STREAM_CODEC.encode(buf, heldItem);
-				});
-			return InteractionResultHolder.success(heldItem);
-		}
-		return InteractionResultHolder.pass(heldItem);
-	}
-
-	public InteractionResult handScheduleTo(ItemStack pStack, Player pPlayer, LivingEntity pInteractionTarget,
-											InteractionHand pUsedHand) {
-		InteractionResult pass = InteractionResult.PASS;
-
-		Schedule schedule = getSchedule(pPlayer.registryAccess(), pStack);
-		if (schedule == null)
-			return pass;
-		if (pInteractionTarget == null)
-			return pass;
-		Entity rootVehicle = pInteractionTarget.getRootVehicle();
-		if (!(rootVehicle instanceof CarriageContraptionEntity entity))
-			return pass;
-		if (pPlayer.level().isClientSide)
-			return InteractionResult.SUCCESS;
-
-		Contraption contraption = entity.getContraption();
-		if (contraption instanceof CarriageContraption cc) {
-
-			Train train = entity.getCarriage().train;
-			if (train == null)
-				return InteractionResult.SUCCESS;
-
-			Integer seatIndex = contraption.getSeatMapping()
-				.get(pInteractionTarget.getUUID());
-			if (seatIndex == null)
-				return InteractionResult.SUCCESS;
-			BlockPos seatPos = contraption.getSeats()
-				.get(seatIndex);
-			Couple<Boolean> directions = cc.conductorSeats.get(seatPos);
-			if (directions == null) {
-				pPlayer.displayClientMessage(CreateLang.translateDirect("schedule.non_controlling_seat"), true);
-				AllSoundEvents.DENY.playOnServer(pPlayer.level(), pPlayer.blockPosition(), 1, 1);
-				return InteractionResult.SUCCESS;
-			}
-
-			if (train.runtime.getSchedule() != null) {
-				AllSoundEvents.DENY.playOnServer(pPlayer.level(), pPlayer.blockPosition(), 1, 1);
-				pPlayer.displayClientMessage(CreateLang.translateDirect("schedule.remove_with_empty_hand"), true);
-				return InteractionResult.SUCCESS;
-			}
-
-			if (schedule.entries.isEmpty()) {
-				AllSoundEvents.DENY.playOnServer(pPlayer.level(), pPlayer.blockPosition(), 1, 1);
-				pPlayer.displayClientMessage(CreateLang.translateDirect("schedule.no_stops"), true);
-				return InteractionResult.SUCCESS;
-			}
-
-			train.runtime.setSchedule(schedule, false);
-			AllAdvancements.CONDUCTOR.awardTo(pPlayer);
-			AllSoundEvents.CONFIRM.playOnServer(pPlayer.level(), pPlayer.blockPosition(), 1, 1);
-			pPlayer.displayClientMessage(CreateLang.translateDirect("schedule.applied_to_train")
-				.withStyle(ChatFormatting.GREEN), true);
-			pStack.shrink(1);
-			pPlayer.setItemInHand(pUsedHand, pStack.isEmpty() ? ItemStack.EMPTY : pStack);
-		}
-
-		return InteractionResult.SUCCESS;
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flagIn) {
-		Schedule schedule = getSchedule(context.registries(), stack);
-		if (schedule == null || schedule.entries.isEmpty())
-			return;
-
-		MutableComponent caret = Component.literal("> ").withStyle(ChatFormatting.GRAY);
-		MutableComponent arrow = Component.literal("-> ").withStyle(ChatFormatting.GRAY);
-
-		List<ScheduleEntry> entries = schedule.entries;
-		for (int i = 0; i < entries.size(); i++) {
-			boolean current = i == schedule.savedProgress && schedule.entries.size() > 1;
-			ScheduleEntry entry = entries.get(i);
-			if (!(entry.instruction instanceof DestinationInstruction destination))
-				continue;
-			ChatFormatting format = current ? ChatFormatting.YELLOW : ChatFormatting.GOLD;
-			MutableComponent prefix = current ? arrow : caret;
-			tooltip.add(prefix.copy()
-				.append(Component.literal(destination.getFilter()).withStyle(format)));
-		}
-	}
-
-	public static Schedule getSchedule(HolderLookup.Provider registries, ItemStack pStack) {
-		if (!pStack.has(AllDataComponents.TRAIN_SCHEDULE))
-			return null;
-		return Schedule.fromTag(registries, pStack.get(AllDataComponents.TRAIN_SCHEDULE));
-	}
-
-	@Override
-	public AbstractContainerMenu createMenu(int id, Inventory inv, Player player) {
-		ItemStack heldItem = player.getMainHandItem();
-		return new ScheduleMenu(AllMenuTypes.SCHEDULE.get(), id, inv, heldItem);
-	}
-
-	@Override
-	public Component getDisplayName() {
-		return getDescription();
-	}
-
-	@Override
-	public DataComponentType<?> getComponentType() {
-		return AllDataComponents.TRAIN_SCHEDULE;
-	}
-
+    public static void play(Player player, SoundEvent sound) {
+        player.level().playSound(null, player.blockPosition(), sound, SoundSource.PLAYERS, 1, 1);
+    }
+    public static void deny(Player player, String key) {
+        play(player, AllSoundEvents.DENY);
+        player.sendOverlayMessage(ScheduleText.translate(key));
+    }
+    @Override public void appendHoverText(ItemStack stack, TooltipContext context, TooltipDisplay display,
+                                          Consumer<Component> lines, TooltipFlag flag) {
+        Schedule schedule = getSchedule(context.registries(), stack);
+        if (schedule == null || schedule.entries.isEmpty()) return;
+        for (int i = 0; i < schedule.entries.size(); i++) {
+            if (!(schedule.entries.get(i).instruction instanceof DestinationInstruction destination)) continue;
+            boolean current = i == schedule.savedProgress && schedule.entries.size() > 1;
+            lines.accept(Component.literal(current ? "-> " : "> ").withStyle(ChatFormatting.GRAY)
+                    .append(Component.literal(destination.getFilter()).withStyle(current ? ChatFormatting.YELLOW : ChatFormatting.GOLD)));
+        }
+    }
 }

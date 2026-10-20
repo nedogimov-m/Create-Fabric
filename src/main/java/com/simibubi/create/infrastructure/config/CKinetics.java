@@ -2,9 +2,8 @@ package com.simibubi.create.infrastructure.config;
 
 import com.simibubi.create.api.contraption.ContraptionMovementSetting;
 
-import net.createmod.catnip.config.ConfigBase;
 
-public class CKinetics extends ConfigBase {
+public class CKinetics extends NativeConfigBase {
 
 	public final ConfigBool disableStress = b(false, "disableStress", Comments.disableStress);
 	public final ConfigInt maxBeltLength = i(20, 5, "maxBeltLength", Comments.maxBeltLength);

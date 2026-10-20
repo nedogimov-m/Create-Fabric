@@ -1,261 +1,242 @@
 package com.simibubi.create.content.trains.station;
 
-import java.lang.ref.WeakReference;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Map.Entry;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.Create;
-import com.simibubi.create.content.logistics.box.PackageItem;
-import com.simibubi.create.content.logistics.packagePort.postbox.PostboxBlockEntity;
-import com.simibubi.create.compat.computercraft.events.PackageEvent;
-import com.simibubi.create.content.trains.entity.Carriage;
-import com.simibubi.create.content.trains.entity.Train;
-import com.simibubi.create.content.trains.graph.DimensionPalette;
-import com.simibubi.create.content.trains.graph.TrackNode;
-import com.simibubi.create.content.trains.signal.SingleBlockEntityEdgePoint;
-
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.nbt.Tag;
-import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.simibubi.create.content.trains.graph.*;
+import com.simibubi.create.content.trains.signal.*;
+import java.util.*;
+import net.minecraft.core.*;
+import net.minecraft.nbt.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
 
-import net.neoforged.neoforge.items.IItemHandler;
-import net.neoforged.neoforge.items.IItemHandlerModifiable;
-import net.neoforged.neoforge.items.ItemHandlerHelper;
-import net.neoforged.neoforge.server.ServerLifecycleHooks;
+/**
+ * Actual world-owned station graph point. No reservation exists until real Train custody exists.
+ */
+public final class GlobalStation extends SingleBlockEntityEdgePoint {
+  public record Port(BlockPos pos, GlobalPackagePort data) {
+    public static final Codec<Port> CODEC =
+        RecordCodecBuilder.create(
+            i ->
+                i.group(
+                        BlockPos.CODEC.fieldOf("Pos").forGetter(Port::pos),
+                        GlobalPackagePort.CODEC.fieldOf("Data").forGetter(Port::data))
+                    .apply(i, Port::new));
 
-public class GlobalStation extends SingleBlockEntityEdgePoint {
+    public Port {
+      pos = pos.immutable();
+      data = data.copy();
+    }
+  }
 
-	public String name;
-	public WeakReference<Train> nearestTrain;
-	public boolean assembling;
+  public static final Codec<GlobalStation> CODEC =
+      RecordCodecBuilder.create(
+          i ->
+              i.group(
+                      TrackEdgePoint.baseCodec(GlobalStation::new)
+                          .fieldOf("Point")
+                          .forGetter(p -> p),
+                      GlobalPos.CODEC.fieldOf("Owner").forGetter(GlobalStation::owner),
+                      Codec.string(0, 256).fieldOf("Name").forGetter(p -> p.name),
+                      Codec.BOOL.fieldOf("Assembling").forGetter(p -> p.assembling),
+                      Port.CODEC.listOf().fieldOf("Ports").forGetter(GlobalStation::ports))
+                  .apply(
+                      i,
+                      (point, owner, name, assembling, ports) -> {
+                        point.restoreOwner(owner);
+                        point.name = name;
+                        point.assembling = assembling;
+                        point.restorePorts(ports);
+                        return point;
+                      }));
+  private java.lang.ref.WeakReference<com.simibubi.create.content.trains.entity.Train> nearestTrain=new java.lang.ref.WeakReference<>(null);
+  private String name = "Track Station";
+  private boolean assembling;
+  private final Map<BlockPos, GlobalPackagePort> connectedPorts = new LinkedHashMap<>();
 
-	public Map<BlockPos, GlobalPackagePort> connectedPorts;
+  public String name() {
+    return name;
+  }
 
-	public GlobalStation() {
-		name = "Track Station";
-		nearestTrain = new WeakReference<>(null);
-		connectedPorts = new HashMap<>();
-	}
+  public boolean assembling() {
+    return assembling;
+  }
 
-	@Override
-	public void blockEntityAdded(BlockEntity blockEntity, boolean front) {
-		super.blockEntityAdded(blockEntity, front);
-		BlockState state = blockEntity.getBlockState();
-		assembling =
-			state != null && state.hasProperty(StationBlock.ASSEMBLING) && state.getValue(StationBlock.ASSEMBLING);
-	}
+  public List<Port> ports() {
+    return connectedPorts.entrySet().stream().map(e -> new Port(e.getKey(), e.getValue())).toList();
+  }
 
-	@Override
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean migration, DimensionPalette dimensions) {
-		super.read(nbt, registries, migration, dimensions);
-		name = nbt.getString("Name");
-		assembling = nbt.getBoolean("Assembling");
-		nearestTrain = new WeakReference<>(null);
+  private void restorePorts(List<Port> ports) {
+    var fresh = new LinkedHashMap<BlockPos, GlobalPackagePort>();
+    for (var port : ports)
+      if (fresh.putIfAbsent(port.pos, port.data.copy()) != null)
+        throw new IllegalArgumentException("Duplicate actual station port position");
+    connectedPorts.clear();
+    connectedPorts.putAll(fresh);
+    connectedPorts.values().forEach(port->port.bind(this));
+  }
 
-		connectedPorts.clear();
-		ListTag portList = nbt.getList("Ports", Tag.TAG_COMPOUND);
-		NBTHelper.iterateCompoundList(portList, c -> {
-			GlobalPackagePort port = new GlobalPackagePort();
-			port.address = c.getString("Address");
-			port.offlineBuffer.deserializeNBT(registries, c.getCompound("OfflineBuffer"));
-			port.primed = c.getBoolean("Primed");
-			connectedPorts.put(NBTHelper.readBlockPos(c, "Pos"), port);
-		});
-	}
+  public boolean ownedBy(StationBlockEntity station) {
+    return station.getLevel() != null
+        && owner().equals(GlobalPos.of(station.getLevel().dimension(), station.getBlockPos()))
+        && id.equals(station.targeting().id());
+  }
 
-	@Override
-	public void read(FriendlyByteBuf buffer, DimensionPalette dimensions) {
-		super.read(buffer, dimensions);
-		name = buffer.readUtf();
-		assembling = buffer.readBoolean();
-		if (buffer.readBoolean())
-			blockEntityPos = buffer.readBlockPos();
-	}
+  public void configure(StationBlockEntity station, String name, boolean assembling) {
+    if (!ownedBy(station)) throw new IllegalArgumentException("Foreign native station point owner");
+    if (name.length() > 256) throw new IllegalArgumentException("Station name too long");
+    if (this.name.equals(name) && this.assembling == assembling) return;
+    this.name = name;
+    this.assembling = assembling;
+    if (graph() != null) graph().markDirty();
+  }
 
-	@Override
-	public void write(CompoundTag nbt, HolderLookup.Provider registries, DimensionPalette dimensions) {
-		super.write(nbt, registries, dimensions);
-		nbt.putString("Name", name);
-		nbt.putBoolean("Assembling", assembling);
+  @Override
+  public void blockEntityAdded(BlockEntity entity, boolean front) {
+    if (!(entity instanceof StationBlockEntity station) || !id.equals(station.targeting().id()))
+      throw new IllegalArgumentException("Actual station BE/point ID required");
+    super.blockEntityAdded(entity, front);
+    assembling = station.isAssembling();
+  }
 
-		nbt.put("Ports", NBTHelper.writeCompoundList(connectedPorts.entrySet(), e -> {
-			CompoundTag c = new CompoundTag();
-			c.putString("Address", e.getValue().address);
-			c.put("OfflineBuffer", e.getValue().offlineBuffer.serializeNBT(registries));
-			c.putBoolean("Primed", e.getValue().primed);
-			c.put("Pos", NbtUtils.writeBlockPos(e.getKey()));
-			return c;
-		}));
-	}
+  public boolean canApproachFrom(TrackNode node) {
+    return isPrimary(node) && !assembling;
+  }
 
-	@Override
-	public void write(FriendlyByteBuf buffer, DimensionPalette dimensions) {
-		super.write(buffer, dimensions);
-		buffer.writeUtf(name);
-		buffer.writeBoolean(assembling);
-		buffer.writeBoolean(blockEntityPos != null);
-		if (blockEntityPos != null)
-			buffer.writeBlockPos(blockEntityPos);
-	}
+  @Override
+  public boolean canNavigateVia(TrackNode node) {
+    return !assembling;
+  }
 
-	public boolean canApproachFrom(TrackNode side) {
-		return isPrimary(side) && !assembling;
-	}
+  public void reserveFor(com.simibubi.create.content.trains.entity.Train train){
+    requireActualTrain(train);
+    if(train.isRestoring())return;
+    var nearest=getNearestTrain();
+    if(nearest==null||nearest.navigation.distanceToDestination>train.navigation.distanceToDestination)
+      nearestTrain=new java.lang.ref.WeakReference<>(train);
+  }
 
-	@Override
-	public boolean canNavigateVia(TrackNode side) {
-		return super.canNavigateVia(side) && !assembling;
-	}
+  private void requireActualTrain(com.simibubi.create.content.trains.entity.Train train){
+    if(graph()==null||graph().manager()==null||train.graph!=graph()||train.trafficManager()==null
+        ||train.trafficManager().get(train.id)!=train||train.trafficManager().server()!=graph().manager().server())
+      throw new IllegalArgumentException("Native station reservation requires its exact real server Train");
+  }
 
-	public void reserveFor(Train train) {
-		Train nearestTrain = getNearestTrain();
-		if (nearestTrain == null
-			|| nearestTrain.navigation.distanceToDestination > train.navigation.distanceToDestination)
-			this.nearestTrain = new WeakReference<>(train);
-	}
+  public void cancelReservation(com.simibubi.create.content.trains.entity.Train train){
+    if(nearestTrain.get()==train)nearestTrain=new java.lang.ref.WeakReference<>(null);
+  }
+  public void trainDeparted(com.simibubi.create.content.trains.entity.Train train){cancelReservation(train);}
+  public com.simibubi.create.content.trains.entity.Train getNearestTrain(){
+    var train=nearestTrain.get();
+    if(train==null)return null;
+    if(train.isRestoring()||train.trafficManager()==null||train.trafficManager().get(train.id)!=train||train.graph!=graph()){
+      nearestTrain=new java.lang.ref.WeakReference<>(null);
+      return null;
+    }
+    return train;
+  }
+  public com.simibubi.create.content.trains.entity.Train getPresentTrain(){
+    var train=getNearestTrain();
+    return train!=null&&train.getCurrentStation()==this?train:null;
+  }
+  public com.simibubi.create.content.trains.entity.Train getImminentTrain(){
+    var train=getNearestTrain();
+    if(train==null||train.getCurrentStation()==this)return train;
+    return train.navigation.isActive()&&train.navigation.distanceToDestination<=30?train:null;
+  }
 
-	public void cancelReservation(Train train) {
-		if (nearestTrain.get() == train)
-			nearestTrain = new WeakReference<>(null);
-	}
+  public void attachPackagePort(com.simibubi.create.content.logistics.packagePort.postbox.PostboxBlockEntity box){
+    if(box.getLevel()==null||box.getLevel().isClientSide()||!box.getLevel().dimension().equals(getBlockEntityDimension())
+        ||!box.targets(this))throw new IllegalArgumentException("Actual native postbox/station target required");
+    var port=connectedPorts.get(box.getBlockPos());
+    if(port==null){port=new GlobalPackagePort(box.addressFilter,box.items(),false);connectedPorts.put(box.getBlockPos(),port);if(graph()!=null)graph().markDirty();}
+    port.bind(this);
+    box.bind(this);
+    port.restoreOfflineBuffer(box);
+    if(!port.address().equals(box.addressFilter))port.configureAddress(box.addressFilter);
+  }
 
-	public void trainDeparted(Train train) {
-		cancelReservation(train);
-	}
+  public void removePackagePort(com.simibubi.create.content.logistics.packagePort.postbox.PostboxBlockEntity box){
+    if(!box.targets(this))return;
+    var removed=connectedPorts.remove(box.getBlockPos());
+    if(removed!=null&&graph()!=null)graph().markDirty();
+    box.unbind(this);
+  }
+  public void savePostboxBuffer(com.simibubi.create.content.logistics.packagePort.postbox.PostboxBlockEntity box){
+    var port=connectedPorts.get(box.getBlockPos());
+    if(port==null||!box.targets(this)||box.getLevel()==null||!box.getLevel().dimension().equals(getBlockEntityDimension()))return;
+    port.saveOfflineBuffer(box.items());
+  }
 
-	@Nullable
-	public Train getPresentTrain() {
-		Train nearestTrain = getNearestTrain();
-		if (nearestTrain == null || nearestTrain.getCurrentStation() != this)
-			return null;
-		return nearestTrain;
-	}
+  public void runMailTransfer(){
+    var train=getPresentTrain();
+    if(train==null||connectedPorts.isEmpty())return;
+    requireActualTrain(train);
+    var world=train.manager().server().getLevel(getBlockEntityDimension());
+    for(var carriage:train.carriages){
+      var cargo=carriage.storage.getAllItems();
+      if(cargo==null)continue;
+      for(var entry:connectedPorts.entrySet()){
+        var port=entry.getValue();
+        var found=world==null?null:com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(world,entry.getKey());
+        var box=found instanceof com.simibubi.create.content.logistics.packagePort.postbox.PostboxBlockEntity actual&&actual.isBoundTo(this)?actual:null;
+        var inventory=box==null?port.storage():box.inventory.storage;
+        boolean sent=transferPackages(inventory,cargo,item->!com.simibubi.create.content.logistics.box.PackageItem.matchAddress(item,port.address()));
+        boolean received=transferPackages(cargo,inventory,item->com.simibubi.create.content.logistics.box.PackageItem.matchAddress(item,port.address()));
+        if(!sent&&!received)continue;
+        if(box==null)port.prime();else box.spawnParticles();
+        graph().markDirty();
+      }
+    }
+  }
 
-	@Nullable
-	public Train getImminentTrain() {
-		Train nearestTrain = getNearestTrain();
-		if (nearestTrain == null)
-			return nearestTrain;
-		if (nearestTrain.getCurrentStation() == this)
-			return nearestTrain;
-		if (!nearestTrain.navigation.isActive())
-			return null;
-		if (nearestTrain.navigation.distanceToDestination > 30)
-			return null;
-		return nearestTrain;
-	}
+  private static boolean transferPackages(net.fabricmc.fabric.api.transfer.v1.storage.Storage<net.fabricmc.fabric.api.transfer.v1.item.ItemVariant> source,
+      net.fabricmc.fabric.api.transfer.v1.storage.Storage<net.fabricmc.fabric.api.transfer.v1.item.ItemVariant> destination,
+      java.util.function.Predicate<net.minecraft.world.item.ItemStack> predicate){
+    boolean moved=false;
+    for(var slot:source){
+      if(slot.isResourceBlank()||slot.getAmount()<1)continue;
+      var item=slot.getResource();
+      if(!com.simibubi.create.content.logistics.box.PackageItem.isPackage(item.toStack(1))||!predicate.test(item.toStack(1)))continue;
+      try(var transaction=net.fabricmc.fabric.api.transfer.v1.transaction.Transaction.openOuter()){
+        if(slot.extract(item,1,transaction)!=1||destination.insert(item,1,transaction)!=1)continue;
+        transaction.commit();moved=true;
+      }
+    }
+    return moved;
+  }
 
-	@Nullable
-	public Train getNearestTrain() {
-		return this.nearestTrain.get();
-	}
+  @Override public void tick(TrackGraph graph,boolean preTrains){}
 
-	public void runMailTransfer() {
-		Train train = getPresentTrain();
-		if (train == null || connectedPorts.isEmpty())
-			return;
 
-		MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-		Level level = server.getLevel(getBlockEntityDimension());
+  @Override
+  public void read(
+      CompoundTag tag,
+      HolderLookup.Provider registries,
+      boolean migration,
+      DimensionPalette dimensions) {
+    super.read(tag, registries, migration, dimensions);
+    name = tag.getStringOr("Name", "Track Station");
+    assembling = tag.getBooleanOr("Assembling", false);
+    restorePorts(
+        tag.contains("Ports")
+            ? tag.read(
+                    "Ports",
+                    Port.CODEC.listOf(),
+                    registries.createSerializationContext(NbtOps.INSTANCE))
+                .orElseThrow()
+            : List.of());
+  }
 
-		for (Carriage carriage : train.carriages) {
-			IItemHandlerModifiable carriageInventory = carriage.storage.getAllItems();
-			if (carriageInventory == null)
-				continue;
-
-			// Import from station
-			for (Entry<BlockPos, GlobalPackagePort> entry : connectedPorts.entrySet()) {
-				GlobalPackagePort port = entry.getValue();
-				BlockPos pos = entry.getKey();
-				PostboxBlockEntity box = null;
-
-				IItemHandlerModifiable postboxInventory = port.offlineBuffer;
-				if (level != null && level.isLoaded(pos)
-					&& level.getBlockEntity(pos) instanceof PostboxBlockEntity ppbe) {
-					postboxInventory = ppbe.inventory;
-					box = ppbe;
-				}
-
-				for (int slot = 0; slot < postboxInventory.getSlots(); slot++) {
-					ItemStack stack = postboxInventory.getStackInSlot(slot);
-					if (!PackageItem.isPackage(stack))
-						continue;
-					if (PackageItem.matchAddress(stack, port.address))
-						continue;
-
-					ItemStack result = ItemHandlerHelper.insertItemStacked(carriageInventory, stack, false);
-					if (box != null)
-						box.computerBehaviour.prepareComputerEvent(new PackageEvent(stack, "package_sent"));
-					if (!result.isEmpty())
-						continue;
-
-					postboxInventory.setStackInSlot(slot, ItemStack.EMPTY);
-
-					if (box == null) {
-						port.primed = true;
-					} else {
-						box.spawnParticles();
-					}
-
-					Create.RAILWAYS.markTracksDirty();
-				}
-			}
-
-			// Export to station
-			for (int slot = 0; slot < carriageInventory.getSlots(); slot++) {
-				ItemStack stack = carriageInventory.getStackInSlot(slot);
-				if (!PackageItem.isPackage(stack))
-					continue;
-
-				for (Entry<BlockPos, GlobalPackagePort> entry : connectedPorts.entrySet()) {
-					GlobalPackagePort port = entry.getValue();
-					BlockPos pos = entry.getKey();
-					PostboxBlockEntity box = null;
-
-					if (!PackageItem.matchAddress(stack, port.address))
-						continue;
-
-					IItemHandler postboxInventory = port.offlineBuffer;
-					if (level != null && level.isLoaded(pos)
-						&& level.getBlockEntity(pos) instanceof PostboxBlockEntity ppbe) {
-						postboxInventory = ppbe.inventory;
-						box = ppbe;
-					}
-
-					ItemStack result = ItemHandlerHelper.insertItemStacked(postboxInventory, stack, false);
-					if (box != null)
-						box.computerBehaviour.prepareComputerEvent(new PackageEvent(stack, "package_received"));
-					if (!result.isEmpty())
-						continue;
-
-					carriageInventory.setStackInSlot(slot, ItemStack.EMPTY);
-
-					if (box == null) {
-						port.primed = true;
-					} else {
-						box.spawnParticles();
-					}
-
-					Create.RAILWAYS.markTracksDirty();
-
-					break;
-				}
-			}
-
-		}
-	}
-
+  @Override
+  public void write(
+      CompoundTag tag, HolderLookup.Provider registries, DimensionPalette dimensions) {
+    super.write(tag, registries, dimensions);
+    tag.putString("Name", name);
+    tag.putBoolean("Assembling", assembling);
+    tag.store(
+        "Ports",
+        Port.CODEC.listOf(),
+        registries.createSerializationContext(NbtOps.INSTANCE),
+        ports());
+  }
 }

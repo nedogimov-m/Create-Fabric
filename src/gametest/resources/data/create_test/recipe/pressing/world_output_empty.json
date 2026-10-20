@@ -1,0 +1,7 @@
+{
+  "type": "create:pressing",
+  "ingredients": ["minecraft:potato"],
+  "results": [
+    {"id": "minecraft:diamond", "chance": 0.0}
+  ]
+}

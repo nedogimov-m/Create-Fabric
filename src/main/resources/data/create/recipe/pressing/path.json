@@ -1,0 +1,28 @@
+{
+  "type": "create:pressing",
+  "ingredients": [
+    [
+      "minecraft:dirt",
+      "minecraft:coarse_dirt",
+      "minecraft:rooted_dirt",
+      "minecraft:mycelium",
+      "minecraft:podzol"
+    ]
+  ],
+  "results": [
+    {
+      "id": "minecraft:dirt_path"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:not",
+      "value": {
+        "condition": "fabric:all_mods_loaded",
+        "values": [
+          "environmental"
+        ]
+      }
+    }
+  ]
+}

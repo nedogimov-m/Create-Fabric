@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/precision_mechanism",
+    "particle": "create:item/precision_mechanism"
+  }
+}

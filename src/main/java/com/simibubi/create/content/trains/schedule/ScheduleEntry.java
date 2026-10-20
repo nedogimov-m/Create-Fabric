@@ -6,8 +6,7 @@ import java.util.List;
 import com.simibubi.create.content.trains.schedule.condition.ScheduleWaitCondition;
 import com.simibubi.create.content.trains.schedule.destination.ScheduleInstruction;
 
-import net.createmod.catnip.nbt.NBTHelper;
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
+import com.simibubi.create.content.trains.schedule.ScheduleSerialization;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -18,7 +17,7 @@ import net.minecraft.network.codec.StreamCodec;
 public class ScheduleEntry {
 	public static final StreamCodec<RegistryFriendlyByteBuf, ScheduleEntry> STREAM_CODEC = StreamCodec.composite(
 			ScheduleInstruction.STREAM_CODEC, entry -> entry.instruction,
-			CatnipStreamCodecBuilders.list(CatnipStreamCodecBuilders.list(ScheduleWaitCondition.STREAM_CODEC)), entry -> entry.conditions,
+			ScheduleWaitCondition.STREAM_CODEC.apply(net.minecraft.network.codec.ByteBufCodecs.list()).apply(net.minecraft.network.codec.ByteBufCodecs.list()), entry -> entry.conditions,
 			ScheduleEntry::new
 	);
 
@@ -45,19 +44,19 @@ public class ScheduleEntry {
 		if (!instruction.supportsConditions())
 			return tag;
 		for (List<ScheduleWaitCondition> column : conditions)
-			outer.add(NBTHelper.writeCompoundList(column, t -> t.write(registries)));
+			outer.add(ScheduleSerialization.writeCompoundList(column, t -> t.write(registries)));
 		tag.put("Conditions", outer);
 		return tag;
 	}
 
 	public static ScheduleEntry fromTag(HolderLookup.Provider registries, CompoundTag tag) {
 		ScheduleEntry entry = new ScheduleEntry();
-		entry.instruction = ScheduleInstruction.fromTag(registries, tag.getCompound("Instruction"));
+		entry.instruction = ScheduleInstruction.fromTag(registries, tag.getCompoundOrEmpty("Instruction"));
 		entry.conditions = new ArrayList<>();
 		if (entry.instruction.supportsConditions())
-			for (Tag t : tag.getList("Conditions", Tag.TAG_LIST))
+			for (Tag t : tag.getListOrEmpty("Conditions"))
 				if (t instanceof ListTag list)
-					entry.conditions.add(NBTHelper.readCompoundList(list, conditionTag -> ScheduleWaitCondition.fromTag(registries, conditionTag)));
+					entry.conditions.add(ScheduleSerialization.readCompoundList(list, conditionTag -> ScheduleWaitCondition.fromTag(registries, conditionTag)));
 		return entry;
 	}
 

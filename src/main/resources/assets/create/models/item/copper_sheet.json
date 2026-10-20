@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "create:item/copper_sheet",
+    "particle": "create:item/copper_sheet"
+  }
+}

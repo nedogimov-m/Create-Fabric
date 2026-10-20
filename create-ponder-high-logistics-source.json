@@ -1,0 +1,40 @@
+{
+  "createCommit": "ac0c444d9828da3453ae8cc65338e8de063286fb",
+  "compile": "UNCOMPILED",
+  "runtime": "UNRUN",
+  "newCompleteFamilies": [
+    "FrogAndConveyorScenes",
+    "PostboxScenes",
+    "PackagerScenes",
+    "StockLinkScenes",
+    "StockTickerScenes",
+    "RequesterAndShopScenes",
+    "RepackagerScenes",
+    "TableClothScenes",
+    "FactoryGaugeScenes"
+  ],
+  "completeSourceHelpers": [
+    "PonderHilo"
+  ],
+  "cumulativeFamilies": 50,
+  "remainingRegistrationRecords": 0,
+  "nativeRegistryOwners": "Native Block/Item ItemStack constructors, colored Map.values and root direct TrackMaterial suppliers mapping; no remaining asStack/getDefaultState calls",
+  "sourceTransfers": "Committed native Fabric lookup/storage transaction preserves same original stack/amount; component-aware native Basin event ItemStack codec; actual native WiFi particle",
+  "actualOwners": "Canonical packager animation/box, table request/price, postbox flag, actual factory receivePulse and source explicit results retained",
+  "virtualConveyor": "Two current local virtual endpoints share actual connection IDs; source departure moves same canonical parcel with refusal rollback; actual native travel uses real shared Ponder scene clock; ordinary native paid operations unchanged",
+  "virtualFrog": "Only source virtual depositing export through actual registered local target; ordinary native server suffix and ordinary client animation retained",
+  "nativeParrot": "Source-specific wrench/parrot uses detached native ItemStackRenderState/entity state; exact source location/interpolation/yaw, y1.5pivot, timed sin sway, Y90/X90/Z90, scale1.5, offset(-.1,.2,-.6), GROUND, flap2; submit reads no scene/world",
+  "clock": "Common VirtualLevelClock implemented by actual PonderLevel simulationTicks, consumed only for marked virtual conveyor; native getGameTime is untouched",
+  "optionalProbe": "Authentic PonderVirtualConveyorOwnershipTest supplied UNREGISTERED/UNRUN until root integrates entrypoint",
+  "limitations": [
+    "All179source registrations authored; this is not a runnable/complete runtime claim",
+    "Java compilation/typing/overloads/access/linkage unvalidated by this worker",
+    "Full registry scene execution, real native frames, seek/replay, old structure NBT decode and nonzero-anchor restoration unrun",
+    "Vulkan shader/frame/pixel parity unverified"
+  ],
+  "newSourceRegistrationRecords": 16,
+  "newDistinctSourcePrograms": 15,
+  "cumulativeSourceRegistrationRecords": 179,
+  "cumulativeDistinctSourcePrograms": 167,
+  "countDefinition": "179 means exact pinned addStoryBoard AST source registration records;167 means unique source(family,method). forComponents/colors/TrackMaterial expand native component bindings. Actual runtime binding/program-key counts remain unmeasured."
+}

@@ -1,0 +1,12 @@
+{
+  "type": "create:item_application",
+  "ingredients": [
+    "create:cardboard_block",
+    "#c:strings"
+  ],
+  "results": [
+    {
+      "id": "create:bound_cardboard_block"
+    }
+  ]
+}

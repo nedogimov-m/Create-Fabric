@@ -2,7 +2,7 @@ package com.simibubi.create.content.redstone.displayLink.source;
 
 import java.util.UUID;
 
-import com.simibubi.create.Create;
+import com.simibubi.create.content.trains.TrainManager;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
 import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
 import com.simibubi.create.content.trains.entity.Train;
@@ -23,8 +23,9 @@ public class ObservedTrainNameSource extends SingleLineDisplaySource {
 		UUID currentTrain = observer.getCurrentTrain();
 		if (currentTrain == null)
 			return EMPTY_LINE;
-		Train train = Create.RAILWAYS.trains.get(currentTrain);
-		if (train == null)
+		if (context.level().getServer() == null) return EMPTY_LINE;
+		Train train = TrainManager.get(context.level().getServer()).get(currentTrain);
+		if (train == null || train.isRestoring())
 			return EMPTY_LINE;
 		return train.name.copy();
 	}

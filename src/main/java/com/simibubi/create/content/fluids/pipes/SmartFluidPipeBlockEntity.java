@@ -1,103 +1,27 @@
 package com.simibubi.create.content.fluids.pipes;
 
-import java.util.List;
-
-import com.mojang.blaze3d.vertex.PoseStack;
-import com.simibubi.create.content.fluids.FluidPropagator;
-import com.simibubi.create.content.fluids.pipes.StraightPipeBlockEntity.StraightPipeFluidTransportBehaviour;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
-
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.createmod.catnip.math.AngleHelper;
-import net.createmod.catnip.math.VecHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
+import com.simibubi.create.AllBlockEntityTypes;
+import com.simibubi.create.content.fluids.*;
+import com.simibubi.create.foundation.fluid.*;
+import net.minecraft.core.*;
 import net.minecraft.world.Clearable;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.AttachFace;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.*;
 
-import net.neoforged.neoforge.fluids.FluidStack;
-
-public class SmartFluidPipeBlockEntity extends SmartBlockEntity implements Clearable {
-	private FilteringBehaviour filter;
-
-	public SmartFluidPipeBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(new SmartPipeBehaviour(this));
-		behaviours.add(filter = new FilteringBehaviour(this, new SmartPipeFilterSlot()).forFluids()
-			.withCallback(this::onFilterChanged));
-		registerAwardables(behaviours, FluidPropagator.getSharedTriggers());
-	}
-
-	@Override
-	public void clearContent() {
-		filter.setFilter(ItemStack.EMPTY);
-	}
-
-	private void onFilterChanged(ItemStack newFilter) {
-		if (!level.isClientSide)
-			FluidPropagator.propagateChangedPipe(level, worldPosition, getBlockState());
-	}
-
-	class SmartPipeBehaviour extends StraightPipeFluidTransportBehaviour {
-		public SmartPipeBehaviour(SmartBlockEntity be) {
-			super(be);
-		}
-
-		@Override
-		public boolean canPullFluidFrom(FluidStack fluid, BlockState state, Direction direction) {
-			if (fluid.isEmpty() || filter != null && filter.test(fluid))
-				return super.canPullFluidFrom(fluid, state, direction);
-			return false;
-		}
-
-		@Override
-		public boolean canHaveFlowToward(BlockState state, Direction direction) {
-			return state.getBlock() instanceof SmartFluidPipeBlock
-				&& SmartFluidPipeBlock.getPipeAxis(state) == direction.getAxis();
-		}
-	}
-
-	static class SmartPipeFilterSlot extends ValueBoxTransform {
-		@Override
-		public Vec3 getLocalOffset(LevelAccessor level, BlockPos pos, BlockState state) {
-			AttachFace face = state.getValue(SmartFluidPipeBlock.FACE);
-			float y = face == AttachFace.CEILING ? 0.55f : face == AttachFace.WALL ? 11.4f : 15.45f;
-			float z = face == AttachFace.CEILING ? 4.6f : face == AttachFace.WALL ? 0.55f : 4.625f;
-			return VecHelper.rotateCentered(VecHelper.voxelSpace(8, y, z), angleY(state), Axis.Y);
-		}
-
-		@Override
-		public float getScale() {
-			return super.getScale() * 1.02f;
-		}
-
-		@Override
-		public void rotate(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms) {
-			AttachFace face = state.getValue(SmartFluidPipeBlock.FACE);
-			TransformStack.of(ms)
-				.rotateYDegrees(angleY(state))
-				.rotateXDegrees(face == AttachFace.CEILING ? -45 : 45);
-		}
-
-		protected float angleY(BlockState state) {
-			AttachFace face = state.getValue(SmartFluidPipeBlock.FACE);
-			float horizontalAngle = AngleHelper.horizontalAngle(state.getValue(SmartFluidPipeBlock.FACING));
-			if (face == AttachFace.WALL)
-				horizontalAngle += 180;
-			return horizontalAngle;
-		}
-	}
+public final class SmartFluidPipeBlockEntity extends FluidPipeBlockEntity implements Clearable {
+    private final FluidFilter filter=new FluidFilter();
+    public SmartFluidPipeBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.SMART_FLUID_PIPE,pos,state);}
+    @Override protected FluidTransportBehaviour createTransport(){return new FluidTransportBehaviour(this){
+        @Override public boolean canHaveFlowToward(BlockState state,Direction side){return state.getBlock() instanceof SmartFluidPipeBlock&&SmartFluidPipeBlock.getPipeAxis(state)==side.getAxis();}
+        @Override public boolean canPullFluidFrom(FluidStack fluid,BlockState state,Direction side){return fluid.isEmpty()||filter!=null&&filter.test(level,fluid);}
+    };}
+    public ItemStack getFilter(){return filter.getFilter();}
+    public boolean setFilter(ItemStack stack){
+        if(!filter.setFilter(stack))return false;setChanged();updateNetwork();if(level!=null&&!level.isClientSide()){FluidPropagator.propagateChangedPipe(level,worldPosition,getBlockState());transport().sync();}return true;
+    }
+    public boolean test(FluidStack fluid){return filter.test(level,fluid);}
+    @Override public void clearContent(){setFilter(ItemStack.EMPTY);}
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);filter.save(out);}
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);filter.load(in);}
 }

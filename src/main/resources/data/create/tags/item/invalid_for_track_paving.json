@@ -1,0 +1,15 @@
+{
+  "values": [
+    "create:wooden_bracket",
+    "create:metal_bracket",
+    {
+      "id": "create:wooden_bracket",
+      "required": false
+    },
+    {
+      "id": "create:metal_bracket",
+      "required": false
+    }
+  ],
+  "replace": false
+}

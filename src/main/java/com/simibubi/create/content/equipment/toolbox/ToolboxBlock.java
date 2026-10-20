@@ -1,201 +1,51 @@
 package com.simibubi.create.content.equipment.toolbox;
 
-import static net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED;
-
-import java.util.Optional;
-
-import org.jetbrains.annotations.NotNull;
-
-import com.mojang.serialization.MapCodec;
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.item.ItemHelper;
-import com.simibubi.create.foundation.utility.BlockHelper;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import com.simibubi.create.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.fabricmc.fabric.api.entity.FakePlayer;
+import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.ItemInteractionResult;
+import net.minecraft.util.*;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.DyeColor;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.HorizontalDirectionalBlock;
-import net.minecraft.world.level.block.SimpleWaterloggedBlock;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.material.*;
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
 
-import net.neoforged.neoforge.common.util.FakePlayer;
-
-public class ToolboxBlock extends HorizontalDirectionalBlock implements SimpleWaterloggedBlock, IBE<ToolboxBlockEntity> {
-
-	protected final DyeColor color;
-
-	public static final MapCodec<ToolboxBlock> CODEC = simpleCodec(p -> new ToolboxBlock(p, DyeColor.WHITE));
-
-	public ToolboxBlock(Properties properties, DyeColor color) {
-		super(properties);
-		this.color = color;
-		registerDefaultState(defaultBlockState().setValue(BlockStateProperties.WATERLOGGED, false));
-	}
-
-	@Override
-	public FluidState getFluidState(BlockState state) {
-		return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : Fluids.EMPTY.defaultFluidState();
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(WATERLOGGED)
-			.add(FACING));
-	}
-
-	@Override
-	public void setPlacedBy(Level worldIn, BlockPos pos, BlockState state, LivingEntity placer, ItemStack stack) {
-		super.setPlacedBy(worldIn, pos, state, placer, stack);
-		if (worldIn.isClientSide)
-			return;
-		if (stack == null)
-			return;
-		withBlockEntityDo(worldIn, pos, be -> {
-			be.readInventory(stack.get(AllDataComponents.TOOLBOX_INVENTORY));
-			if (stack.has(AllDataComponents.TOOLBOX_UUID))
-				be.setUniqueId(stack.get(AllDataComponents.TOOLBOX_UUID));
-			if (stack.has(DataComponents.CUSTOM_NAME))
-				be.setCustomName(stack.getHoverName());
-		});
-	}
-
-	@Override
-	public void onRemove(BlockState state, Level world, BlockPos pos, BlockState newState, boolean moving) {
-		if (state.hasBlockEntity() && (!newState.hasBlockEntity() || !(newState.getBlock() instanceof ToolboxBlock)))
-			world.removeBlockEntity(pos);
-	}
-
-	@Override
-	public void attack(BlockState state, Level world, BlockPos pos, Player player) {
-		if (player instanceof FakePlayer)
-			return;
-		if (world.isClientSide)
-			return;
-		withBlockEntityDo(world, pos, ToolboxBlockEntity::unequipTracked);
-		if (world instanceof ServerLevel) {
-			ItemStack cloneItemStack = getCloneItemStack(world, pos, state);
-			withBlockEntityDo(world, pos, i -> {
-				cloneItemStack.applyComponents(i.collectComponents());
-			});
-			world.destroyBlock(pos, false);
-			if (world.getBlockState(pos) != state)
-				player.getInventory().placeItemBackInInventory(cloneItemStack);
-		}
-	}
-
-	@Override
-	public ItemStack getCloneItemStack(LevelReader level, BlockPos pos, BlockState state) {
-		ItemStack item = new ItemStack(this);
-		Optional<ToolboxBlockEntity> blockEntityOptional = getBlockEntityOptional(level, pos);
-
-		blockEntityOptional.map(tb ->
-			item.set(AllDataComponents.TOOLBOX_INVENTORY, tb.inventory));
-
-		blockEntityOptional.map(ToolboxBlockEntity::getUniqueId)
-			.ifPresent(uid -> item.set(AllDataComponents.TOOLBOX_UUID, uid));
-		blockEntityOptional.map(ToolboxBlockEntity::getCustomName)
-			.ifPresent(name -> item.set(DataComponents.CUSTOM_NAME, name));
-		return item;
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction direction, BlockState neighbourState, LevelAccessor world,
-								  BlockPos pos, BlockPos neighbourPos) {
-		if (state.getValue(WATERLOGGED))
-			world.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(world));
-		return state;
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter world, BlockPos pos, CollisionContext context) {
-		return AllShapes.TOOLBOX.get(state.getValue(FACING));
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (player == null || player.isCrouching())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		DyeColor color = DyeColor.getColor(stack);
-		if (color != null && color != this.color) {
-			if (level.isClientSide)
-				return ItemInteractionResult.SUCCESS;
-			BlockState newState = BlockHelper.copyProperties(state, AllBlocks.TOOLBOXES.get(color)
-				.getDefaultState());
-			level.setBlockAndUpdate(pos, newState);
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		if (player instanceof FakePlayer)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		if (level.isClientSide)
-			return ItemInteractionResult.SUCCESS;
-
-		withBlockEntityDo(level, pos,
-			toolbox -> player.openMenu(toolbox, toolbox::sendToMenu));
-		return ItemInteractionResult.SUCCESS;
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		FluidState ifluidstate = context.getLevel()
-			.getFluidState(context.getClickedPos());
-		return super.getStateForPlacement(context).setValue(FACING, context.getHorizontalDirection()
-				.getOpposite())
-			.setValue(WATERLOGGED, Boolean.valueOf(ifluidstate.getType() == Fluids.WATER));
-	}
-
-	@Override
-	public Class<ToolboxBlockEntity> getBlockEntityClass() {
-		return ToolboxBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends ToolboxBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.TOOLBOX.get();
-	}
-
-	public DyeColor getColor() {
-		return color;
-	}
-
-	@Override
-	public boolean hasAnalogOutputSignal(BlockState pState) {
-		return true;
-	}
-
-	@Override
-	public int getAnalogOutputSignal(BlockState pState, Level pLevel, BlockPos pPos) {
-		return ItemHelper.calcRedstoneFromBlockEntity(this, pLevel, pPos);
-	}
-
-	@Override
-	protected @NotNull MapCodec<? extends HorizontalDirectionalBlock> codec() {
-		return CODEC;
-	}
+public final class ToolboxBlock extends BaseEntityBlock implements SimpleWaterloggedBlock {
+    public static final EnumProperty<Direction> FACING=BlockStateProperties.HORIZONTAL_FACING;
+    public static final BooleanProperty WATERLOGGED=BlockStateProperties.WATERLOGGED;
+    private final DyeColor color;
+    public ToolboxBlock(Properties properties,DyeColor color){super(properties);this.color=color;registerDefaultState(defaultBlockState().setValue(FACING,Direction.NORTH).setValue(WATERLOGGED,false));}
+    public DyeColor getColor(){return color;}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(FACING,WATERLOGGED);}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new ToolboxBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity>BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.TOOLBOX,ToolboxBlockEntity::tick);}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){return defaultBlockState().setValue(FACING,context.getHorizontalDirection().getOpposite()).setValue(WATERLOGGED,context.getLevel().getFluidState(context.getClickedPos()).getType()==Fluids.WATER);}
+    @Override protected FluidState getFluidState(BlockState state){return state.getValue(WATERLOGGED)?Fluids.WATER.getSource(false):Fluids.EMPTY.defaultFluidState();}
+    @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction direction,BlockPos otherPos,BlockState other,RandomSource random){if(state.getValue(WATERLOGGED))ticks.scheduleTick(pos,Fluids.WATER,Fluids.WATER.getTickDelay(level));return state;}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return state.getValue(FACING).getAxis()==Direction.Axis.Z?Block.box(1,0,4,15,9,12):Block.box(4,0,1,12,9,15);}
+    @Override protected BlockState rotate(BlockState state,Rotation rotation){return state.setValue(FACING,rotation.rotate(state.getValue(FACING)));}
+    @Override protected BlockState mirror(BlockState state,Mirror mirror){return state.rotate(mirror.getRotation(state.getValue(FACING)));}
+    @Override protected boolean shouldChangedStateKeepBlockEntity(BlockState replacement){return replacement.getBlock() instanceof ToolboxBlock;}
+    @Override public void setPlacedBy(Level level,BlockPos pos,BlockState state,LivingEntity placer,ItemStack item){super.setPlacedBy(level,pos,state,placer,item);if(!level.isClientSide()&&LoadedLevelAccess.blockEntity(level,pos) instanceof ToolboxBlockEntity box){box.readInventory(item.get(AllDataComponents.TOOLBOX_INVENTORY));box.setUniqueId(item.get(AllDataComponents.TOOLBOX_UUID));if(item.has(DataComponents.CUSTOM_NAME))box.setCustomName(item.getHoverName());box.notifyUpdate();}}
+    @Override protected InteractionResult useItemOn(ItemStack held,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){if(player.isCrouching()||player.isSpectator()||!level.mayInteract(player,pos))return InteractionResult.PASS;DyeColor requested=dyeColor(held);if(requested!=null&&requested!=color){if(!level.isClientSide()){var replacement=AllBlocks.TOOLBOXES.get(requested).defaultBlockState().setValue(FACING,state.getValue(FACING)).setValue(WATERLOGGED,state.getValue(WATERLOGGED));level.setBlockAndUpdate(pos,replacement);if(LoadedLevelAccess.blockEntity(level,pos) instanceof ToolboxBlockEntity box)box.notifyUpdate();}return InteractionResult.SUCCESS;}if(player instanceof FakePlayer)return InteractionResult.PASS;if(!level.isClientSide()&&LoadedLevelAccess.blockEntity(level,pos) instanceof ToolboxBlockEntity box)player.openMenu(box);return InteractionResult.SUCCESS;}
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){return useItemOn(ItemStack.EMPTY,state,level,pos,player,InteractionHand.MAIN_HAND,hit);}
+    @Override protected void attack(BlockState state,Level level,BlockPos pos,Player player){if(level.isClientSide()||player instanceof FakePlayer||player.isSpectator()||!player.mayBuild()||!level.mayInteract(player,pos))return;if(!(LoadedLevelAccess.blockEntity(level,pos) instanceof ToolboxBlockEntity box))return;box.unequipTracked();ItemStack item=getCloneItemStack(level,pos,state,true);if(level.destroyBlock(pos,false)&&!(level.getBlockState(pos).getBlock() instanceof ToolboxBlock))player.getInventory().placeItemBackInInventory(item,Prediction.SERVER_ONLY);}
+    @Override protected ItemStack getCloneItemStack(LevelReader level,BlockPos pos,BlockState state,boolean includeData){ItemStack stack=new ItemStack(this);if(level.getBlockEntity(pos) instanceof ToolboxBlockEntity box)stack.applyComponents(box.collectComponents());return stack;}
+    @Override protected boolean hasAnalogOutputSignal(BlockState state){return true;}
+    @Override protected int getAnalogOutputSignal(BlockState state,Level level,BlockPos pos,Direction side){return LoadedLevelAccess.blockEntity(level,pos) instanceof ToolboxBlockEntity box?AbstractContainerMenu.getRedstoneSignalFromContainer(box.inventory.asContainer()):0;}
+    /** Native26.3 dye semantics use the actual DYE data component, including addon dyes. */
+    public static DyeColor dyeColor(ItemStack stack){return stack.get(DataComponents.DYE);}
 }

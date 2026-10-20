@@ -18,7 +18,7 @@ import com.simibubi.create.content.trains.schedule.destination.DestinationInstru
 import com.simibubi.create.content.trains.schedule.destination.ScheduleInstruction;
 import com.simibubi.create.content.trains.station.GlobalStation;
 
-import net.createmod.catnip.nbt.NBTHelper;
+import com.simibubi.create.content.trains.schedule.ScheduleSerialization;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -71,6 +71,7 @@ public class ScheduleRuntime {
 	public void destinationReached() {
 		if (state != State.IN_TRANSIT)
 			return;
+		markDirty();
 		state = State.POST_TRANSIT;
 		conditionProgress.clear();
 		conditionContext.clear();
@@ -97,6 +98,7 @@ public class ScheduleRuntime {
 	public void transitInterrupted() {
 		if (schedule == null || state != State.IN_TRANSIT)
 			return;
+		markDirty();
 		state = State.PRE_TRANSIT;
 		cooldown = 0;
 	}
@@ -108,6 +110,7 @@ public class ScheduleRuntime {
 			return;
 		if (train.derailed)
 			return;
+		markDirty();
 		if (train.navigation.destination != null) {
 			ticksInTransit++;
 			return;
@@ -174,7 +177,7 @@ public class ScheduleRuntime {
 
 			CompoundTag tag = conditionContext.get(i);
 			ScheduleWaitCondition condition = list.get(progress);
-			int prevVersion = tag.getInt("StatusVersion");
+			int prevVersion = tag.getIntOr("StatusVersion", 0);
 
 			if (condition.tickCompletion(level, train, tag)) {
 				conditionContext.set(i, new CompoundTag());
@@ -182,7 +185,7 @@ public class ScheduleRuntime {
 				displayLinkUpdateRequested |= i == 0;
 			}
 
-			displayLinkUpdateRequested |= i == 0 && prevVersion != tag.getInt("StatusVersion");
+			displayLinkUpdateRequested |= i == 0 && prevVersion != tag.getIntOr("StatusVersion", 0);
 		}
 
 		for (Carriage carriage : train.carriages)
@@ -199,6 +202,9 @@ public class ScheduleRuntime {
 	}
 
 	public void setSchedule(Schedule schedule, boolean auto) {
+		Objects.requireNonNull(schedule);
+		if (schedule.entries.isEmpty()) throw new IllegalArgumentException("Actual train schedules require at least one instruction");
+		markDirty();
 		reset();
 		this.schedule = schedule;
 		currentEntry = Mth.clamp(schedule.savedProgress, 0, schedule.entries.size() - 1);
@@ -215,9 +221,15 @@ public class ScheduleRuntime {
 	}
 
 	public void discardSchedule() {
+		markDirty();
 		train.navigation.cancelNavigation();
 		reset();
 	}
+
+    private void markDirty() {
+        var owner = train.trafficManager();
+        if (owner != null) owner.markDirty();
+    }
 
 	private void reset() {
 		paused = true;
@@ -242,7 +254,7 @@ public class ScheduleRuntime {
 		if (state == State.POST_TRANSIT || current >= entryCount) {
 			GlobalStation currentStation = train.getCurrentStation();
 			if (currentStation != null)
-				predictions.add(createPrediction(current, currentStation.name, currentTitle, 0));
+				predictions.add(createPrediction(current, currentStation.name(), currentTitle, 0));
 			int departureTime = estimateStayDuration(current);
 			if (departureTime == INVALID)
 				accumulatedTime = INVALID;
@@ -266,7 +278,7 @@ public class ScheduleRuntime {
 				}
 
 				accumulatedTime += timeRemaining;
-				predictions.add(createPrediction(current, destination.name, currentTitle, accumulatedTime));
+				predictions.add(createPrediction(current, destination.name(), currentTitle, accumulatedTime));
 
 				int departureTime = estimateStayDuration(current);
 				if (departureTime != INVALID)
@@ -388,27 +400,27 @@ public class ScheduleRuntime {
 		tag.putBoolean("Completed", completed);
 		if (schedule != null)
 			tag.put("Schedule", schedule.write(registries));
-		NBTHelper.writeEnum(tag, "State", state);
-		tag.putIntArray("ConditionProgress", conditionProgress);
-		tag.put("ConditionContext", NBTHelper.writeCompoundList(conditionContext, CompoundTag::copy));
-		tag.putIntArray("TransitTimes", predictionTicks);
+		ScheduleSerialization.writeEnum(tag, "State", state);
+		tag.putIntArray("ConditionProgress", conditionProgress.stream().mapToInt(Integer::intValue).toArray());
+		tag.put("ConditionContext", ScheduleSerialization.writeCompoundList(conditionContext, CompoundTag::copy));
+		tag.putIntArray("TransitTimes", predictionTicks.stream().mapToInt(Integer::intValue).toArray());
 		return tag;
 	}
 
 	public void read(HolderLookup.Provider registries, CompoundTag tag) {
 		reset();
-		paused = tag.getBoolean("Paused");
-		completed = tag.getBoolean("Completed");
-		isAutoSchedule = tag.getBoolean("AutoSchedule");
-		currentEntry = Math.max(0, tag.getInt("CurrentEntry"));
+		paused = tag.getBooleanOr("Paused", false);
+		completed = tag.getBooleanOr("Completed", false);
+		isAutoSchedule = tag.getBooleanOr("AutoSchedule", false);
+		currentEntry = Math.max(0, tag.getIntOr("CurrentEntry", 0));
 		if (tag.contains("Schedule"))
-			schedule = Schedule.fromTag(registries, tag.getCompound("Schedule"));
-		state = NBTHelper.readEnum(tag, "State", State.class);
-		for (int i : tag.getIntArray("ConditionProgress"))
+			schedule = Schedule.fromTag(registries, tag.getCompoundOrEmpty("Schedule"));
+		state = ScheduleSerialization.readEnum(tag, "State", State.class);
+		for (int i : tag.getIntArray("ConditionProgress").orElseGet(() -> new int[0]))
 			conditionProgress.add(i);
-		NBTHelper.iterateCompoundList(tag.getList("ConditionContext", Tag.TAG_COMPOUND), conditionContext::add);
+		ScheduleSerialization.iterateCompoundList(tag.getListOrEmpty("ConditionContext"), conditionContext::add);
 
-		int[] readTransits = tag.getIntArray("TransitTimes");
+		int[] readTransits = tag.getIntArray("TransitTimes").orElseGet(() -> new int[0]);
 		if (schedule != null) {
 			schedule.entries.forEach($ -> predictionTicks.add(TBD));
 			if (readTransits.length == schedule.entries.size())
@@ -420,7 +432,7 @@ public class ScheduleRuntime {
 	public ItemStack returnSchedule(HolderLookup.Provider registries) {
 		if (schedule == null)
 			return ItemStack.EMPTY;
-		ItemStack stack = AllItems.SCHEDULE.asStack();
+		ItemStack stack = new ItemStack(AllItems.SCHEDULE);
 		schedule.savedProgress = currentEntry;
 		stack.set(AllDataComponents.TRAIN_SCHEDULE, schedule.write(registries));
 		stack = isAutoSchedule ? ItemStack.EMPTY : stack;

@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/cube_all",
+  "textures": {
+    "all": "create:block/shadow_steel_casing",
+    "particle": "create:block/shadow_steel_casing"
+  }
+}

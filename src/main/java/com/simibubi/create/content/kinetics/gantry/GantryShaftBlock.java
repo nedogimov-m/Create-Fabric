@@ -1,322 +1,90 @@
 package com.simibubi.create.content.kinetics.gantry;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Predicate;
-
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
+import com.simibubi.create.content.kinetics.KineticNetworks;
 import com.simibubi.create.content.kinetics.base.DirectionalKineticBlock;
-import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.placement.PoleHelper;
-
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.lang.Lang;
-import net.createmod.catnip.placement.IPlacementHelper;
-import net.createmod.catnip.placement.PlacementHelpers;
-import net.createmod.catnip.placement.PlacementOffset;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.util.StringRepresentable;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
+import com.simibubi.create.foundation.utility.LoadedEntityAccess;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.*;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.RenderShape;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.block.state.properties.EnumProperty;
-import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
 import net.minecraft.world.level.pathfinder.PathComputationType;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.redstone.Orientation;
+import net.minecraft.world.phys.*;
+import net.minecraft.world.phys.shapes.*;
 
-public class GantryShaftBlock extends DirectionalKineticBlock implements IBE<GantryShaftBlockEntity> {
-
-	public static final Property<Part> PART = EnumProperty.create("part", Part.class);
-	public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
-
-	private static final int placementHelperId = PlacementHelpers.register(new PlacementHelper());
-
-	public enum Part implements StringRepresentable {
-		START, MIDDLE, END, SINGLE;
-
-		@Override
-		public String getSerializedName() {
-			return Lang.asId(name());
-		}
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(PART, POWERED));
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		IPlacementHelper placementHelper = PlacementHelpers.get(placementHelperId);
-		if (!placementHelper.matchesItem(stack))
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-
-		return placementHelper.getOffset(player, level, state, pos, hitResult)
-			.placeInWorld(level, ((BlockItem) stack.getItem()), player, hand, hitResult);
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter p_220053_2_, BlockPos p_220053_3_,
-		CollisionContext p_220053_4_) {
-		return AllShapes.EIGHT_VOXEL_POLE.get(state.getValue(FACING)
-			.getAxis());
-	}
-
-	@Override
-	public RenderShape getRenderShape(BlockState state) {
-		return RenderShape.ENTITYBLOCK_ANIMATED;
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction direction, BlockState neighbour, LevelAccessor world,
-		BlockPos pos, BlockPos neighbourPos) {
-		Direction facing = state.getValue(FACING);
-		Axis axis = facing.getAxis();
-		if (direction.getAxis() != axis)
-			return state;
-		boolean connect = AllBlocks.GANTRY_SHAFT.has(neighbour) && neighbour.getValue(FACING) == facing;
-
-		Part part = state.getValue(PART);
-		if (direction.getAxisDirection() == facing.getAxisDirection()) {
-			if (connect) {
-				if (part == Part.END)
-					part = Part.MIDDLE;
-				if (part == Part.SINGLE)
-					part = Part.START;
-			} else {
-				if (part == Part.MIDDLE)
-					part = Part.END;
-				if (part == Part.START)
-					part = Part.SINGLE;
-			}
-		} else {
-			if (connect) {
-				if (part == Part.START)
-					part = Part.MIDDLE;
-				if (part == Part.SINGLE)
-					part = Part.END;
-			} else {
-				if (part == Part.MIDDLE)
-					part = Part.START;
-				if (part == Part.END)
-					part = Part.SINGLE;
-			}
-		}
-
-		return state.setValue(PART, part);
-	}
-
-	public GantryShaftBlock(Properties properties) {
-		super(properties);
-		registerDefaultState(defaultBlockState().setValue(POWERED, false)
-			.setValue(PART, Part.SINGLE));
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		BlockState state = super.getStateForPlacement(context);
-		BlockPos pos = context.getClickedPos();
-		Level world = context.getLevel();
-		Direction face = context.getClickedFace();
-
-		BlockState neighbour = world.getBlockState(pos.relative(state.getValue(FACING)
-			.getOpposite()));
-
-		BlockState clickedState =
-			AllBlocks.GANTRY_SHAFT.has(neighbour) ? neighbour : world.getBlockState(pos.relative(face.getOpposite()));
-
-		if (AllBlocks.GANTRY_SHAFT.has(clickedState) && clickedState.getValue(FACING)
-			.getAxis() == state.getValue(FACING)
-				.getAxis()) {
-			Direction facing = clickedState.getValue(FACING);
-			state = state.setValue(FACING, context.getPlayer() == null || !context.getPlayer()
-				.isShiftKeyDown() ? facing : facing.getOpposite());
-		}
-
-		return state.setValue(POWERED, shouldBePowered(state, world, pos));
-	}
-
-	@Override
-	public InteractionResult onWrenched(BlockState state, UseOnContext context) {
-		InteractionResult onWrenched = super.onWrenched(state, context);
-		if (onWrenched.consumesAction()) {
-			BlockPos pos = context.getClickedPos();
-			Level world = context.getLevel();
-			neighborChanged(world.getBlockState(pos), world, pos, state.getBlock(), pos, false);
-		}
-		return onWrenched;
-	}
-
-	@Override
-	public void onPlace(BlockState state, Level worldIn, BlockPos pos, BlockState oldState, boolean isMoving) {
-		super.onPlace(state, worldIn, pos, oldState, isMoving);
-
-		if (!worldIn.isClientSide() && oldState.is(AllBlocks.GANTRY_SHAFT.get())) {
-			Part oldPart = oldState.getValue(PART), part = state.getValue(PART);
-			if ((oldPart != Part.MIDDLE && part == Part.MIDDLE) || (oldPart == Part.SINGLE && part != Part.SINGLE)) {
-				BlockEntity be = worldIn.getBlockEntity(pos);
-				if (be instanceof GantryShaftBlockEntity)
-					((GantryShaftBlockEntity) be).checkAttachedCarriageBlocks();
-			}
-		}
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level worldIn, BlockPos pos, Block p_220069_4_, BlockPos p_220069_5_,
-		boolean p_220069_6_) {
-		if (worldIn.isClientSide)
-			return;
-		boolean previouslyPowered = state.getValue(POWERED);
-		boolean shouldPower = worldIn.hasNeighborSignal(pos); // shouldBePowered(state, worldIn, pos);
-
-		if (!previouslyPowered && !shouldPower && shouldBePowered(state, worldIn, pos)) {
-			worldIn.setBlock(pos, state.setValue(POWERED, true), Block.UPDATE_ALL);
-			return;
-		}
-
-		if (previouslyPowered == shouldPower)
-			return;
-
-		// Collect affected gantry shafts
-		List<BlockPos> toUpdate = new ArrayList<>();
-		Direction facing = state.getValue(FACING);
-		Axis axis = facing.getAxis();
-		for (Direction d : Iterate.directionsInAxis(axis)) {
-			BlockPos currentPos = pos.relative(d);
-			while (true) {
-				if (!worldIn.isLoaded(currentPos))
-					break;
-				BlockState currentState = worldIn.getBlockState(currentPos);
-				if (!(currentState.getBlock() instanceof GantryShaftBlock))
-					break;
-				if (currentState.getValue(FACING) != facing)
-					break;
-				if (!shouldPower && currentState.getValue(POWERED) && worldIn.hasNeighborSignal(currentPos))
-					return;
-				if (currentState.getValue(POWERED) == shouldPower)
-					break;
-				toUpdate.add(currentPos);
-				currentPos = currentPos.relative(d);
-			}
-		}
-
-		toUpdate.add(pos);
-		for (BlockPos blockPos : toUpdate) {
-			BlockState blockState = worldIn.getBlockState(blockPos);
-			BlockEntity be = worldIn.getBlockEntity(blockPos);
-			if (be instanceof KineticBlockEntity)
-				((KineticBlockEntity) be).detachKinetics();
-			if (blockState.getBlock() instanceof GantryShaftBlock)
-				worldIn.setBlock(blockPos, blockState.setValue(POWERED, shouldPower), Block.UPDATE_CLIENTS);
-		}
-	}
-
-	protected boolean shouldBePowered(BlockState state, Level worldIn, BlockPos pos) {
-		boolean shouldPower = worldIn.hasNeighborSignal(pos);
-
-		Direction facing = state.getValue(FACING);
-		for (Direction d : Iterate.directionsInAxis(facing.getAxis())) {
-			BlockPos neighbourPos = pos.relative(d);
-			if (!worldIn.isLoaded(neighbourPos))
-				continue;
-			BlockState neighbourState = worldIn.getBlockState(neighbourPos);
-			if (!(neighbourState.getBlock() instanceof GantryShaftBlock))
-				continue;
-			if (neighbourState.getValue(FACING) != facing)
-				continue;
-			shouldPower |= neighbourState.getValue(POWERED);
-		}
-
-		return shouldPower;
-	}
-
-	@Override
-	public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-		return face.getAxis() == state.getValue(FACING)
-			.getAxis();
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return state.getValue(FACING)
-			.getAxis();
-	}
-
-	@Override
-	protected boolean areStatesKineticallyEquivalent(BlockState oldState, BlockState newState) {
-		return super.areStatesKineticallyEquivalent(oldState, newState)
-			&& oldState.getValue(POWERED) == newState.getValue(POWERED);
-	}
-
-	@Override
-	public float getParticleTargetRadius() {
-		return .35f;
-	}
-
-	@Override
-	public float getParticleInitialRadius() {
-		return .25f;
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	public static class PlacementHelper extends PoleHelper<Direction> {
-
-		public PlacementHelper() {
-			super(AllBlocks.GANTRY_SHAFT::has, s -> s.getValue(FACING)
-				.getAxis(), FACING);
-		}
-
-		@Override
-		public Predicate<ItemStack> getItemPredicate() {
-			return AllBlocks.GANTRY_SHAFT::isIn;
-		}
-
-		@Override
-		public PlacementOffset getOffset(Player player, Level world, BlockState state, BlockPos pos,
-			BlockHitResult ray) {
-			PlacementOffset offset = super.getOffset(player, world, state, pos, ray);
-			offset.withTransform(offset.getTransform()
-				.andThen(s -> s.setValue(POWERED, state.getValue(POWERED))));
-			return offset;
-		}
-	}
-
-	@Override
-	public Class<GantryShaftBlockEntity> getBlockEntityClass() {
-		return GantryShaftBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends GantryShaftBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.GANTRY_SHAFT.get();
-	}
-
+public class GantryShaftBlock extends DirectionalKineticBlock {
+    public enum Part implements StringRepresentable{START,MIDDLE,END,SINGLE;@Override public String getSerializedName(){return name().toLowerCase(Locale.ROOT);}}
+    public static final EnumProperty<Part> PART=EnumProperty.create("part",Part.class);
+    public static final BooleanProperty POWERED=BlockStateProperties.POWERED;
+    public GantryShaftBlock(Properties p){super(p.strength(1.5f,6).sound(SoundType.STONE).forceSolidOn());registerDefaultState(defaultBlockState().setValue(FACING,Direction.UP).setValue(PART,Part.SINGLE).setValue(POWERED,false));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){super.createBlockStateDefinition(builder.add(PART,POWERED));}
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){return switch(state.getValue(FACING).getAxis()){case X->box(0,4,4,16,12,12);case Y->box(4,0,4,12,16,12);case Z->box(4,4,0,12,12,16);};}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.INVISIBLE;}
+    @Override protected boolean isPathfindable(BlockState state,PathComputationType type){return false;}
+    @Override public Direction.Axis getRotationAxis(BlockState state){return state.getValue(FACING).getAxis();}
+    @Override public boolean hasShaftTowards(LevelReader level,BlockPos pos,BlockState state,Direction side){return side.getAxis()==getRotationAxis(state);}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new GantryShaftBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity>BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.GANTRY_SHAFT,com.simibubi.create.content.kinetics.base.KineticBlockEntity::tick);}
+    private static boolean matches(BlockState state,Direction facing){return state.getBlock() instanceof GantryShaftBlock&&state.getValue(FACING)==facing;}
+    @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction side,BlockPos otherPos,BlockState other,RandomSource random){
+        var facing=state.getValue(FACING);if(side.getAxis()!=facing.getAxis())return state;boolean connect=matches(other,facing);var part=state.getValue(PART);
+        if(side.getAxisDirection()==facing.getAxisDirection())part=switch(part){case END->connect?Part.MIDDLE:part;case SINGLE->connect?Part.START:part;case MIDDLE->connect?part:Part.END;case START->connect?part:Part.SINGLE;};
+        else part=switch(part){case START->connect?Part.MIDDLE:part;case SINGLE->connect?Part.END:part;case MIDDLE->connect?part:Part.START;case END->connect?part:Part.SINGLE;};
+        return state.setValue(PART,part);
+    }
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){
+        var state=super.getStateForPlacement(context);var level=context.getLevel();var pos=context.getClickedPos();var back=LoadedLevelAccess.blockState(level,pos.relative(state.getValue(FACING).getOpposite()));var clicked=back.getBlock() instanceof GantryShaftBlock?back:LoadedLevelAccess.blockState(level,pos.relative(context.getClickedFace().getOpposite()));
+        if(clicked.getBlock() instanceof GantryShaftBlock&&clicked.getValue(FACING).getAxis()==state.getValue(FACING).getAxis())state=state.setValue(FACING,context.getPlayer()!=null&&context.getPlayer().isShiftKeyDown()?clicked.getValue(FACING).getOpposite():clicked.getValue(FACING));
+        boolean powered=LoadedLevelAccess.getBestNeighborSignal(level,pos)>0;for(var side:new Direction[]{state.getValue(FACING),state.getValue(FACING).getOpposite()}){var adjacent=LoadedLevelAccess.blockState(level,pos.relative(side));powered|=matches(adjacent,state.getValue(FACING))&&adjacent.getValue(POWERED);}
+        return state.setValue(POWERED,powered);
+    }
+    @Override public void onPlace(BlockState state,Level level,BlockPos pos,BlockState old,boolean moved){
+        super.onPlace(state,level,pos,old,moved);if(level.isClientSide())return;
+        if(old.getBlock()==this&&((old.getValue(PART)!=Part.MIDDLE&&state.getValue(PART)==Part.MIDDLE)||(old.getValue(PART)==Part.SINGLE&&state.getValue(PART)!=Part.SINGLE))&&LoadedLevelAccess.blockEntity(level,pos) instanceof GantryShaftBlockEntity shaft)shaft.checkAttachedCarriageBlocks();
+        if(old.getBlock()!=this&&level instanceof ServerLevel server)server.scheduleTick(pos,this,1);
+    }
+    /** Collect the visible, identically oriented chain before its first native state mutation. */
+    public void refreshPower(ServerLevel level,BlockPos pos){
+        if(!LoadedLevelAccess.isLoaded(level,pos)||!(LoadedLevelAccess.blockState(level,pos).getBlock() instanceof GantryShaftBlock))return;
+        var facing=LoadedLevelAccess.blockState(level,pos).getValue(FACING);var positions=new ArrayList<BlockPos>();positions.add(pos.immutable());
+        for(var direction:new Direction[]{facing,facing.getOpposite()}){
+            var previous=LoadedLevelAccess.blockState(level,pos);
+            for(var next=pos.relative(direction);;next=next.relative(direction)){
+                if(!LoadedLevelAccess.isLoaded(level,next)){
+                    var part=previous.getValue(PART);boolean continues=direction==facing?part==Part.START||part==Part.MIDDLE:part==Part.END||part==Part.MIDDLE;
+                    if(continues){level.scheduleTick(pos,this,3);return;}
+                    break;
+                }
+                var adjacent=LoadedLevelAccess.blockState(level,next);if(!matches(adjacent,facing))break;positions.add(next.immutable());previous=adjacent;
+            }
+        }
+        boolean powered=false;for(var next:positions){if(!LoadedEntityAccess.isReady(level,next)){level.scheduleTick(pos,this,3);return;}powered|=LoadedLevelAccess.getBestNeighborSignal(level,next)>0;}
+        boolean changed=false;for(var next:positions){var state=LoadedLevelAccess.blockState(level,next);if(state.getValue(POWERED)!=powered){changed=true;level.setBlock(next,state.setValue(POWERED,powered),Block.UPDATE_CLIENTS);}}
+        KineticNetworks.markDirty(level);
+        // The native solver preserves equal RPM across a mode-only change; source detach/reattach
+        // used to trigger this check. Explicitly queue after the whole rack is unpowered.
+        if(changed&&!powered)for(var next:positions)if(LoadedLevelAccess.blockEntity(level,next) instanceof GantryShaftBlockEntity shaft)shaft.checkAttachedCarriageBlocks();
+    }
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block neighbor,Orientation orientation,boolean moved){super.neighborChanged(state,level,pos,neighbor,orientation,moved);if(level instanceof ServerLevel server)refreshPower(server,pos);}
+    @Override protected void tick(BlockState state,ServerLevel level,BlockPos pos,RandomSource random){refreshPower(level,pos);}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){
+        if(player.isShiftKeyDown()||player.isSpectator()||!player.mayBuild()||!(stack.getItem() instanceof BlockItem item)||item.getBlock()!=this)return InteractionResult.TRY_WITH_EMPTY_HAND;
+        var axis=state.getValue(FACING).getAxis();var preferred=hit.getDirection();if(preferred.getAxis()!=axis){var offset=hit.getLocation().subtract(Vec3.atCenterOf(pos));preferred=Direction.get(axis.choose(offset.x,offset.y,offset.z)>=0?Direction.AxisDirection.POSITIVE:Direction.AxisDirection.NEGATIVE,axis);}
+        for(var direction:new Direction[]{preferred,preferred.getOpposite()})for(int distance=1;distance<=16;distance++){
+            var target=pos.relative(direction,distance);if(!LoadedLevelAccess.isLoaded(level,target))break;var other=LoadedLevelAccess.blockState(level,target);if(other.getBlock()==this&&other.getValue(FACING).getAxis()==axis)continue;if(!other.canBeReplaced()||!level.mayInteract(player,target)||!player.mayUseItemAt(target,direction,stack))break;
+            var support=target.relative(direction.getOpposite());var result=item.place(new BlockPlaceContext(new UseOnContext(player,hand,new BlockHitResult(Vec3.atCenterOf(support).add(direction.getUnitVec3().scale(.5)),direction,support,false))));
+            if(result.consumesAction()&&!level.isClientSide()){var placed=LoadedLevelAccess.blockState(level,target);if(placed.getBlock()==this)level.setBlockAndUpdate(target,placed.setValue(FACING,state.getValue(FACING)).setValue(POWERED,state.getValue(POWERED)));}return result;
+        }return InteractionResult.TRY_WITH_EMPTY_HAND;
+    }
 }

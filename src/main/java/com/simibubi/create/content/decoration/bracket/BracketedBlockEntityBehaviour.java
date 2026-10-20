@@ -1,142 +1,43 @@
 package com.simibubi.create.content.decoration.bracket;
 
-import java.util.function.Predicate;
-
-import org.jetbrains.annotations.Nullable;
-
+import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.contraptions.StructureTransform;
+import com.simibubi.create.content.fluids.FluidPropagator;
+import com.simibubi.create.content.fluids.pipes.FluidPipeBlockEntity;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.schematics.requirement.ItemRequirement;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.LevelEvent;
+import com.simibubi.create.foundation.blockEntity.behaviour.*;
+import java.util.function.Predicate;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.storage.*;
 
-public class BracketedBlockEntityBehaviour extends BlockEntityBehaviour {
-
-	public static final BehaviourType<BracketedBlockEntityBehaviour> TYPE = new BehaviourType<>();
-
-	private BlockState bracket;
-	private boolean reRender;
-
-	private Predicate<BlockState> pred;
-
-	public BracketedBlockEntityBehaviour(SmartBlockEntity be) {
-		this(be, state -> true);
-	}
-
-	public BracketedBlockEntityBehaviour(SmartBlockEntity be, Predicate<BlockState> pred) {
-		super(be);
-		this.pred = pred;
-	}
-
-	@Override
-	public BehaviourType<?> getType() {
-		return TYPE;
-	}
-
-	public void applyBracket(BlockState state) {
-		this.bracket = state;
-		reRender = true;
-		blockEntity.notifyUpdate();
-		Level world = getWorld();
-		if (world.isClientSide)
-			return;
-		blockEntity.getBlockState()
-			.updateNeighbourShapes(world, getPos(), 3);
-	}
-
-	public void transformBracket(StructureTransform transform) {
-		if (isBracketPresent()) {
-			BlockState transformedBracket = transform.apply(bracket);
-			applyBracket(transformedBracket);
-		}
-	}
-
-	@Nullable
-	public BlockState removeBracket(boolean inOnReplacedContext) {
-		if (bracket == null) {
-			return null;
-		}
-
-		BlockState removed = this.bracket;
-		Level world = getWorld();
-		if (!world.isClientSide)
-			world.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK, getPos(), Block.getId(bracket));
-		this.bracket = null;
-		reRender = true;
-		if (inOnReplacedContext) {
-			blockEntity.sendData();
-			return removed;
-		}
-		blockEntity.notifyUpdate();
-		if (world.isClientSide)
-			return removed;
-		blockEntity.getBlockState()
-			.updateNeighbourShapes(world, getPos(), 3);
-		return removed;
-	}
-
-	public boolean isBracketPresent() {
-		return bracket != null;
-	}
-
-	public boolean isBracketValid(BlockState bracketState) {
-		return bracketState.getBlock() instanceof BracketBlock;
-	}
-
-	@Nullable
-	public BlockState getBracket() {
-		return bracket;
-	}
-
-	public boolean canHaveBracket() {
-		return pred.test(blockEntity.getBlockState());
-	}
-
-	@Override
-	public ItemRequirement getRequiredItems() {
-		if (!isBracketPresent()) {
-			return ItemRequirement.NONE;
-		}
-		return ItemRequirement.of(bracket, null);
-	}
-
-	@Override
-	public boolean isSafeNBT() {
-		return true;
-	}
-
-	@Override
-	public void write(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		if (isBracketPresent() && isBracketValid(bracket)) {
-			nbt.put("Bracket", NbtUtils.writeBlockState(bracket));
-		}
-		if (clientPacket && reRender) {
-			NBTHelper.putMarker(nbt, "Redraw");
-			reRender = false;
-		}
-		super.write(nbt, registries, clientPacket);
-	}
-
-	@Override
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		if (nbt.contains("Bracket")) {
-			bracket = null;
-			BlockState readBlockState = NbtUtils.readBlockState(blockEntity.blockHolderGetter(), nbt.getCompound("Bracket"));
-			if (isBracketValid(readBlockState))
-				bracket = readBlockState;
-		}
-		if (clientPacket && nbt.contains("Redraw"))
-			getWorld().sendBlockUpdated(getPos(), blockEntity.getBlockState(), blockEntity.getBlockState(), 16);
-		super.read(nbt, registries, clientPacket);
-	}
-
+/** One actual source bracket state, persisted with the host and resolved to the cached component. */
+public final class BracketedBlockEntityBehaviour extends BlockEntityBehaviour {
+    public static final BehaviourType<BracketedBlockEntityBehaviour> TYPE=new BehaviourType<BracketedBlockEntityBehaviour>().withFallback(be ->
+        be instanceof KineticBlockEntity kinetic?kinetic.bracketBehaviour():be instanceof FluidPipeBlockEntity pipe?pipe.bracketBehaviour():null);
+    private final Predicate<BlockState> predicate;
+    private BlockState bracket;
+    public BracketedBlockEntityBehaviour(BlockEntity owner,Predicate<BlockState> predicate){super(owner);this.predicate=predicate;}
+    @Override public BehaviourType<?> getType(){return TYPE;}
+    public static boolean eligiblePipe(BlockState state){return (state.is(AllBlocks.FLUID_PIPE)||state.is(AllBlocks.GLASS_FLUID_PIPE))&&FluidPropagator.getStraightPipeAxis(state)!=null;}
+    public boolean canHaveBracket(){return predicate.test(blockEntity.getBlockState());}
+    public boolean isBracketPresent(){return bracket!=null;}
+    public BlockState getBracket(){return bracket;}
+    public boolean isBracketValid(BlockState state){return state!=null&&state.getBlock() instanceof BracketBlock;}
+    public void applyBracket(BlockState state){if(!isBracketValid(state))throw new IllegalArgumentException("Invalid bracket state");bracket=state;changed();notifyNeighbors();}
+    public BlockState removeBracket(boolean replacing){
+        var previous=bracket;if(previous==null)return null;bracket=null;
+        var level=getWorld();if(level!=null&&!level.isClientSide())level.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK,getPos(),Block.getId(previous));
+        changed();if(!replacing)notifyNeighbors();return previous;
+    }
+    private void notifyNeighbors(){var level=getWorld();if(level!=null&&!level.isClientSide())blockEntity.getBlockState().updateNeighbourShapes(level,getPos(),Block.UPDATE_ALL);}
+    public void dropBracket(){var level=getWorld();if(level==null||level.isClientSide())return;var removed=removeBracket(true);if(removed!=null)Block.popResource(level,getPos(),new ItemStack(removed.getBlock()));}
+    public void transformBracket(StructureTransform transform){if(bracket!=null){bracket=transform.apply(bracket);changed();}}
+    @Override public ItemRequirement getRequiredItems(){return bracket==null?ItemRequirement.NONE:ItemRequirement.of(bracket,null);}
+    @Override public boolean isSafeNBT(){return true;}
+    @Override public void write(ValueOutput output){if(isBracketValid(bracket))output.store("Bracket",BlockState.CODEC,bracket);}
+    @Override public void read(ValueInput input){bracket=input.read("Bracket",BlockState.CODEC).filter(this::isBracketValid).orElse(null);}
 }

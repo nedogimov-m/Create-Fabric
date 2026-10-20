@@ -1,0 +1,7 @@
+{
+  "parent": "create:block/table_cloth/block",
+  "textures": {
+    "0": "create:block/table_cloth/brown",
+    "particle": "create:block/table_cloth/brown"
+  }
+}

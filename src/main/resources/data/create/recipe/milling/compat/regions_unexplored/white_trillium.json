@@ -1,0 +1,29 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "regions_unexplored:white_trillium"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "count": 2,
+      "id": "minecraft:light_gray_dye"
+    },
+    {
+      "chance": 0.2,
+      "id": "minecraft:white_dye"
+    },
+    {
+      "chance": 0.05,
+      "id": "minecraft:yellow_dye"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "regions_unexplored"
+      ]
+    }
+  ]
+}

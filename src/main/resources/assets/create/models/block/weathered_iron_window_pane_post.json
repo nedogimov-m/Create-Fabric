@@ -1,0 +1,8 @@
+{
+  "parent": "create:block/connected_glass_pane/post",
+  "textures": {
+    "edge": "create:block/palettes/weathered_iron_window_pane_top",
+    "pane": "create:block/palettes/weathered_iron_window",
+    "particle": "create:block/palettes/weathered_iron_window_pane_top"
+  }
+}

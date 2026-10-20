@@ -1,173 +1,58 @@
 package com.simibubi.create.content.trains.track;
 
-import static com.simibubi.create.content.trains.track.TrackMaterialFactory.make;
-
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Supplier;
-
-
-import net.createmod.catnip.platform.CatnipServices;
-
-import org.jetbrains.annotations.Nullable;
-
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.DataResult;
 import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllPartialModels;
 import com.simibubi.create.Create;
-import com.tterrag.registrate.util.nullness.NonNullSupplier;
-
-import dev.engine_room.flywheel.lib.model.baked.PartialModel;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
+import java.util.*;
+import java.util.function.Supplier;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.*;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockBehaviour;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
-public class TrackMaterial {
-	public static final Map<ResourceLocation, TrackMaterial> ALL = new HashMap<>();
-
-	public static final TrackMaterial ANDESITE = make(Create.asResource("andesite"))
-			.lang("Andesite")
-			.block(NonNullSupplier.lazy(() -> AllBlocks.TRACK))
-			.particle(Create.asResource("block/palettes/stone_types/polished/andesite_cut_polished"))
-			.defaultModels()
-			.build();
-
-	public final ResourceLocation id;
-	public final String langName;
-	public final NonNullSupplier<NonNullSupplier<? extends TrackBlock>> trackBlock;
-	public final Ingredient sleeperIngredient;
-	public final Ingredient railsIngredient;
-	public final ResourceLocation particle;
-	public final TrackType trackType;
-
-	@Nullable
-	private final TrackMaterial.TrackType.TrackBlockFactory customFactory;
-
-	@OnlyIn(Dist.CLIENT)
-	protected TrackModelHolder modelHolder;
-
-	@OnlyIn(Dist.CLIENT)
-	public TrackModelHolder getModelHolder() {
-		return modelHolder;
-	}
-
-	public TrackMaterial(ResourceLocation id, String langName, NonNullSupplier<NonNullSupplier<? extends TrackBlock>> trackBlock,
-						 ResourceLocation particle, Ingredient sleeperIngredient, Ingredient railsIngredient,
-						 TrackType trackType, Supplier<Supplier<TrackModelHolder>> modelHolder) {
-		this(id, langName, trackBlock, particle, sleeperIngredient, railsIngredient, trackType, modelHolder, null);
-	}
-
-	public TrackMaterial(ResourceLocation id, String langName, NonNullSupplier<NonNullSupplier<? extends TrackBlock>> trackBlock,
-						 ResourceLocation particle, Ingredient sleeperIngredient, Ingredient railsIngredient,
-						 TrackType trackType, Supplier<Supplier<TrackModelHolder>> modelHolder,
-						 @Nullable TrackType.TrackBlockFactory customFactory) {
-		this.id = id;
-		this.langName = langName;
-		this.trackBlock = trackBlock;
-		this.sleeperIngredient = sleeperIngredient;
-		this.railsIngredient = railsIngredient;
-		this.particle = particle;
-		this.trackType = trackType;
-		this.customFactory = customFactory;
-		if (CatnipServices.PLATFORM.getEnv().isClient())
-			this.modelHolder = modelHolder.get().get();
-		ALL.put(this.id, this);
-	}
-
-	public NonNullSupplier<? extends TrackBlock> getBlockSupplier() {
-		return this.trackBlock.get();
-	}
-
-	public TrackBlock getBlock() {
-		return getBlockSupplier().get();
-	}
-
-	public ItemStack asStack() {
-		return asStack(1);
-	}
-
-	public ItemStack asStack(int count) {
-		return new ItemStack(getBlock(), count);
-	}
-
-	public TrackBlock createBlock(BlockBehaviour.Properties properties) {
-		return (this.customFactory != null ? this.customFactory : this.trackType.factory)
-				.create(properties, this);
-	}
-
-	public boolean isFromMod(String modId) {
-		return this.id.getNamespace().equals(modId);
-	}
-
-	public static List<TrackMaterial> allFromMod(String modid) {
-		return ALL.values().stream().filter(tm -> tm.isFromMod(modid)).toList();
-	}
-
-	public static List<NonNullSupplier<? extends Block>> allBlocksFromMod(String modid) {
-		List<NonNullSupplier<? extends Block>> list = new ArrayList<>();
-		for (TrackMaterial material : allFromMod(modid)) {
-			list.add(material.getBlockSupplier());
-		}
-		return list;
-	}
-
-	public static List<NonNullSupplier<? extends Block>> allBlocks() {
-		List<NonNullSupplier<? extends Block>> list = new ArrayList<>();
-		for (TrackMaterial material : ALL.values()) {
-			list.add(material.getBlockSupplier());
-		}
-		return list;
-	}
-
-	public String resourceName() {
-		return this.id.getPath();
-	}
-
-	public static TrackMaterial deserialize(String serializedName) {
-		if (serializedName.isBlank()) // Data migrating from 0.5
-			return ANDESITE;
-
-		ResourceLocation id = ResourceLocation.tryParse(serializedName);
-		if (ALL.containsKey(id))
-			return ALL.get(id);
-
-		Create.LOGGER.error("Failed to locate serialized track material: " + serializedName);
-		return ANDESITE;
-	}
-
-	public static class TrackType {
-		@FunctionalInterface
-		public interface TrackBlockFactory {
-			TrackBlock create(BlockBehaviour.Properties properties, TrackMaterial material);
-		}
-
-		public static final TrackType STANDARD = new TrackType(Create.asResource("standard"), TrackBlock::new);
-
-		public final ResourceLocation id;
-		protected final TrackBlockFactory factory;
-
-		public TrackType(ResourceLocation id, TrackBlockFactory factory) {
-			this.id = id;
-			this.factory = factory;
-		}
-	}
-
-	public static TrackMaterial fromItem(Item item) {
-		if (item instanceof BlockItem blockItem && blockItem.getBlock() instanceof ITrackBlock trackBlock)
-			return trackBlock.getMaterial();
-		return TrackMaterial.ANDESITE;
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	public record TrackModelHolder(PartialModel tie, PartialModel leftSegment, PartialModel rightSegment) {
-		static final TrackModelHolder DEFAULT = new TrackModelHolder(AllPartialModels.TRACK_TIE,
-			AllPartialModels.TRACK_SEGMENT_LEFT, AllPartialModels.TRACK_SEGMENT_RIGHT);
-	}
+/** Common physical material registry. Client partial models live in TrackModels. */
+public final class TrackMaterial {
+    public static final Map<Identifier,TrackMaterial> ALL = new LinkedHashMap<>();
+    public static final TrackMaterial ANDESITE = TrackMaterialFactory.make(Create.asResource("andesite"))
+        .lang("Andesite").block(() -> () -> AllBlocks.TRACK)
+        .particle(Create.asResource("block/palettes/stone_types/polished/andesite_cut_polished")).build();
+    /** Unknown material is an error in persistent geometry, never a silent rail replacement. */
+    public static final Codec<TrackMaterial> CODEC = Identifier.CODEC.comapFlatMap(id -> {
+        var material=ALL.get(id);return material==null?DataResult.error(()->"Unknown track material "+id):DataResult.success(material);
+    }, material->material.id);
+    public final Identifier id,particle;
+    public final String langName;
+    public final Supplier<? extends Supplier<? extends TrackBlock>> trackBlock;
+    /** Native Ingredient has no EMPTY. Empty means recipe generation was disabled. Suppliers resolve tags after reload. */
+    public final Supplier<Optional<Ingredient>> sleeperIngredient,railsIngredient;
+    public final TrackType trackType;
+    private final TrackType.TrackBlockFactory customFactory;
+    public TrackMaterial(Identifier id,String langName,Supplier<? extends Supplier<? extends TrackBlock>> block,Identifier particle,
+            Supplier<Optional<Ingredient>> sleepers,Supplier<Optional<Ingredient>> rails,TrackType type,TrackType.TrackBlockFactory customFactory) {
+        this.id=Objects.requireNonNull(id);this.langName=Objects.requireNonNull(langName);trackBlock=Objects.requireNonNull(block);
+        this.particle=Objects.requireNonNull(particle);sleeperIngredient=sleepers;railsIngredient=rails;trackType=Objects.requireNonNull(type);this.customFactory=customFactory;
+        if(ALL.putIfAbsent(id,this)!=null)throw new IllegalArgumentException("Duplicate track material "+id);
+    }
+    public Supplier<? extends TrackBlock> getBlockSupplier(){return trackBlock.get();}
+    public TrackBlock getBlock(){return getBlockSupplier().get();}
+    public ItemStack asStack(){return asStack(1);}
+    public ItemStack asStack(int count){return new ItemStack(getBlock(),count);}
+    public TrackBlock createBlock(BlockBehaviour.Properties properties){return (customFactory==null?trackType.factory:customFactory).create(properties,this);}
+    public boolean isFromMod(String id){return this.id.getNamespace().equals(id);}
+    public static List<TrackMaterial> allFromMod(String id){return ALL.values().stream().filter(m->m.isFromMod(id)).toList();}
+    public static List<Supplier<? extends Block>> allBlocksFromMod(String id){return allFromMod(id).stream().<Supplier<? extends Block>>map(TrackMaterial::getBlockSupplier).toList();}
+    public static List<Supplier<? extends Block>> allBlocks(){return ALL.values().stream().<Supplier<? extends Block>>map(TrackMaterial::getBlockSupplier).toList();}
+    public String resourceName(){return id.getPath();}
+    public static TrackMaterial fromId(Identifier id){return ALL.get(id);}
+    /** Legacy 0.5 blank material only; unknown modern ids must remain a load error. */
+    public static TrackMaterial deserialize(String name){if(name.isBlank())return ANDESITE;var material=fromId(Identifier.parse(name));if(material==null)throw new IllegalArgumentException("Unknown track material "+name);return material;}
+    public static TrackMaterial fromItem(Item item){return item instanceof BlockItem block&&block.getBlock() instanceof ITrackBlock track?track.getMaterial():ANDESITE;}
+    public static final class TrackType {
+        @FunctionalInterface public interface TrackBlockFactory{TrackBlock create(BlockBehaviour.Properties properties,TrackMaterial material);}
+        public static final TrackType STANDARD=new TrackType(Create.asResource("standard"),TrackBlock::new);
+        public final Identifier id;protected final TrackBlockFactory factory;
+        public TrackType(Identifier id,TrackBlockFactory factory){this.id=Objects.requireNonNull(id);this.factory=Objects.requireNonNull(factory);}
+    }
 }

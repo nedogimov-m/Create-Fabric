@@ -1,0 +1,11 @@
+{
+  "type": "create:haunting",
+  "ingredients": [
+    "#minecraft:dirt"
+  ],
+  "results": [
+    {
+      "id": "minecraft:soul_soil"
+    }
+  ]
+}

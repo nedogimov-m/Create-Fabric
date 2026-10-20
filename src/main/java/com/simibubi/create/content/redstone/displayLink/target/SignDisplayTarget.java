@@ -1,54 +1,19 @@
 package com.simibubi.create.content.redstone.displayLink.target;
 
-import java.util.List;
-
 import com.simibubi.create.api.behaviour.display.DisplayTarget;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
+import java.util.List;
+import net.minecraft.network.chat.*;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.*;
 
-import net.createmod.catnip.data.Couple;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.SignBlockEntity;
-import net.minecraft.world.level.block.entity.SignText;
-
-public class SignDisplayTarget extends DisplayTarget {
-
-	@Override
-	public void acceptText(int line, List<MutableComponent> text, DisplayLinkContext context) {
-		BlockEntity be = context.getTargetBlockEntity();
-		if (!(be instanceof SignBlockEntity sign))
-			return;
-
-		boolean changed = false;
-		Couple<SignText> signText = Couple.createWithContext(sign::getText);
-		for (int i = 0; i < text.size() && i + line < 4; i++) {
-			if (i == 0)
-				reserve(i + line, sign, context);
-			if (i > 0 && isReserved(i + line, sign, context))
-				break;
-
-			final int iFinal = i;
-			String content = text.get(iFinal).getString(sign.getMaxTextLineWidth());
-			signText = signText.map(st -> st.setMessage(iFinal + line, Component.literal(content)));
-			changed = true;
-		}
-
-		if (changed) {
-			signText.forEachWithContext(sign::setText);
-			context.level()
-				.sendBlockUpdated(context.getTargetPos(), sign.getBlockState(), sign.getBlockState(), 2);
-		}
-	}
-
-	@Override
-	public DisplayTargetStats provideStats(DisplayLinkContext context) {
-		return new DisplayTargetStats(4, 15, this);
-	}
-
-	@Override
-	public boolean requiresComponentSanitization() {
-		return true;
-	}
-
+/** Native FRONT/BACK SignTextSlot and immutable SignText updates preserve real color/glow/wax state. */
+public final class SignDisplayTarget extends DisplayTarget {
+    @Override public void acceptText(int line,List<MutableComponent> text,DisplayLinkContext context){
+        if(line<0||line>=4||!(context.getTargetBlockEntity()instanceof SignBlockEntity sign))return;var front=sign.getText(SignTextSlot.FRONT).asMutable();var back=sign.getText(SignTextSlot.BACK).asMutable();boolean changed=false;
+        for(int offset=0;offset<text.size()&&line+offset<4;offset++){int row=line+offset;if(offset==0)reserve(row,sign,context);else if(isReserved(row,sign,context))break;var value=Component.literal(text.get(offset).getString(sign.getMaxTextLineWidth()));front.setLine(row,value);back.setLine(row,value.copy());changed=true;}
+        if(changed){sign.setText(front.asImmutable(),SignTextSlot.FRONT);sign.setText(back.asImmutable(),SignTextSlot.BACK);sign.setChanged();context.level().sendBlockUpdated(context.getTargetPos(),sign.getBlockState(),sign.getBlockState(),Block.UPDATE_CLIENTS);}
+    }
+    @Override public DisplayTargetStats provideStats(DisplayLinkContext context){return new DisplayTargetStats(context.getTargetBlockEntity()instanceof SignBlockEntity?4:0,15,this);}
+    @Override public boolean requiresComponentSanitization(){return true;}
 }

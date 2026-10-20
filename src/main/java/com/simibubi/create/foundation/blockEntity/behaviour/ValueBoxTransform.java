@@ -4,10 +4,10 @@ import java.util.function.Function;
 
 import org.apache.commons.lang3.tuple.Pair;
 
-import com.mojang.blaze3d.vertex.PoseStack;
+import org.joml.Matrix4f;
 
-import dev.engine_room.flywheel.lib.transform.TransformStack;
-import net.createmod.catnip.math.VecHelper;
+
+
 import net.createmod.catnip.math.AngleHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -23,7 +23,7 @@ public abstract class ValueBoxTransform {
 
 	public abstract Vec3 getLocalOffset(LevelAccessor level, BlockPos pos, BlockState state);
 
-	public abstract void rotate(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms);
+	public abstract void rotate(LevelAccessor level, BlockPos pos, BlockState state, Matrix4f ms);
 
 	public boolean testHit(LevelAccessor level, BlockPos pos, BlockState state, Vec3 localHit) {
 		Vec3 offset = getLocalOffset(level, pos, state);
@@ -32,11 +32,11 @@ public abstract class ValueBoxTransform {
 		return localHit.distanceTo(offset) < scale / 2;
 	}
 
-	public void transform(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms) {
+	public void transform(LevelAccessor level, BlockPos pos, BlockState state, Matrix4f ms) {
 		Vec3 position = getLocalOffset(level, pos, state);
 		if (position == null)
 			return;
-		ms.translate(position.x, position.y, position.z);
+		ms.translate((float)position.x, (float)position.y, (float)position.z);
 		rotate(level, pos, state, ms);
 		ms.scale(scale, scale, scale);
 	}
@@ -55,7 +55,7 @@ public abstract class ValueBoxTransform {
 			yRot = AngleHelper.horizontalAngle(state.getValue(BlockStateProperties.FACING));
 		if (state.hasProperty(BlockStateProperties.HORIZONTAL_FACING))
 			yRot = AngleHelper.horizontalAngle(state.getValue(BlockStateProperties.HORIZONTAL_FACING));
-		return VecHelper.rotateCentered(vec, yRot, Axis.Y);
+		return rotateCentered(vec, yRot, Axis.Y);
 	}
 
 	public float getScale() {
@@ -65,6 +65,19 @@ public abstract class ValueBoxTransform {
 	public float getFontScale() {
 		return 1 / 64f;
 	}
+
+    /** Same source vector math without resolving client-only Catnip utility classes. */
+    protected static Vec3 rotateCentered(Vec3 vector,double degrees,Axis axis) {
+        if(degrees==0)return vector;
+        var shifted=vector.subtract(.5,.5,.5);float radians=(float)(degrees/180f*Math.PI);
+        double sin=net.minecraft.util.Mth.sin(radians),cos=net.minecraft.util.Mth.cos(radians);
+        double x=shifted.x,y=shifted.y,z=shifted.z;
+        return (switch(axis) {
+            case X -> new Vec3(x,y*cos-z*sin,z*cos+y*sin);
+            case Y -> new Vec3(x*cos+z*sin,y,z*cos-x*sin);
+            case Z -> new Vec3(x*cos-y*sin,y*cos+x*sin,z);
+        }).add(.5,.5,.5);
+    }
 
 	public static abstract class Dual extends ValueBoxTransform {
 
@@ -104,20 +117,18 @@ public abstract class ValueBoxTransform {
 		@Override
 		public Vec3 getLocalOffset(LevelAccessor level, BlockPos pos, BlockState state) {
 			Vec3 location = getSouthLocation();
-			location = VecHelper.rotateCentered(location, AngleHelper.horizontalAngle(getSide()), Axis.Y);
-			location = VecHelper.rotateCentered(location, AngleHelper.verticalAngle(getSide()), Axis.X);
+			location = rotateCentered(location, AngleHelper.horizontalAngle(getSide()), Axis.Y);
+			location = rotateCentered(location, AngleHelper.verticalAngle(getSide()), Axis.X);
 			return location;
 		}
 
 		protected abstract Vec3 getSouthLocation();
 
 		@Override
-		public void rotate(LevelAccessor level, BlockPos pos, BlockState state, PoseStack ms) {
+		public void rotate(LevelAccessor level, BlockPos pos, BlockState state, Matrix4f ms) {
 			float yRot = AngleHelper.horizontalAngle(getSide()) + 180;
 			float xRot = getSide() == Direction.UP ? 90 : getSide() == Direction.DOWN ? 270 : 0;
-			TransformStack.of(ms)
-				.rotateYDegrees(yRot)
-				.rotateXDegrees(xRot);
+            ms.rotateY(AngleHelper.rad(yRot)).rotateX(AngleHelper.rad(xRot));
 		}
 
 		@Override

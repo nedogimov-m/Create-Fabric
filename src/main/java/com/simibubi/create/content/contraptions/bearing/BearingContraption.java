@@ -1,106 +1,34 @@
 package com.simibubi.create.content.contraptions.bearing;
 
+import com.simibubi.create.*;
+import com.simibubi.create.api.contraption.ContraptionType;
+import com.simibubi.create.content.contraptions.*;
+import net.minecraft.core.*;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
 import org.apache.commons.lang3.tuple.Pair;
 
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllContraptionTypes;
-import com.simibubi.create.AllTags.AllBlockTags;
-import com.simibubi.create.api.contraption.ContraptionType;
-import com.simibubi.create.content.contraptions.AssemblyException;
-import com.simibubi.create.content.contraptions.Contraption;
-import com.simibubi.create.content.decoration.copycat.CopycatBlockEntity;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
-
 public class BearingContraption extends Contraption {
-
-	protected int sailBlocks;
-	protected Direction facing;
-
-	private boolean isWindmill;
-
-	public BearingContraption() {}
-
-	public BearingContraption(boolean isWindmill, Direction facing) {
-		this.isWindmill = isWindmill;
-		this.facing = facing;
-	}
-
-	@Override
-	public boolean assemble(Level world, BlockPos pos) throws AssemblyException {
-		BlockPos offset = pos.relative(facing);
-		if (!searchMovedStructure(world, offset, null))
-			return false;
-		startMoving(world);
-		expandBoundsAroundAxis(facing.getAxis());
-		if (isWindmill && sailBlocks < AllConfigs.server().kinetics.minimumWindmillSails.get())
-			throw AssemblyException.notEnoughSails(sailBlocks);
-		if (blocks.isEmpty())
-			return false;
-		return true;
-	}
-
-	@Override
-	public ContraptionType getType() {
-		return AllContraptionTypes.BEARING.value();
-	}
-
-	@Override
-	protected boolean isAnchoringBlockAt(BlockPos pos) {
-		return pos.equals(anchor.relative(facing.getOpposite()));
-	}
-
-	@Override
-	public void addBlock(Level level, BlockPos pos, Pair<StructureBlockInfo, BlockEntity> capture) {
-		BlockPos localPos = pos.subtract(anchor);
-		if (!getBlocks().containsKey(localPos) && AllBlockTags.WINDMILL_SAILS.matches(getSailBlock(capture)))
-			sailBlocks++;
-		super.addBlock(level, pos, capture);
-	}
-
-	private BlockState getSailBlock(Pair<StructureBlockInfo, BlockEntity> capture) {
-		BlockState state = capture.getKey().state();
-		if (AllBlocks.COPYCAT_PANEL.has(state) && capture.getRight() instanceof CopycatBlockEntity cbe)
-			return cbe.getMaterial();
-		return state;
-	}
-
-	@Override
-	public CompoundTag writeNBT(HolderLookup.Provider registries, boolean spawnPacket) {
-		CompoundTag tag = super.writeNBT(registries, spawnPacket);
-		tag.putInt("Sails", sailBlocks);
-		tag.putInt("Facing", facing.get3DDataValue());
-		return tag;
-	}
-
-	@Override
-	public void readNBT(Level world, CompoundTag tag, boolean spawnData) {
-		sailBlocks = tag.getInt("Sails");
-		facing = Direction.from3DDataValue(tag.getInt("Facing"));
-		super.readNBT(world, tag, spawnData);
-	}
-
-	public int getSailBlocks() {
-		return sailBlocks;
-	}
-
-	public Direction getFacing() {
-		return facing;
-	}
-
-	@Override
-	public boolean canBeStabilized(Direction facing, BlockPos localPos) {
-		if (facing.getOpposite() == this.facing && BlockPos.ZERO.equals(localPos))
-			return false;
-		return facing.getAxis() == this.facing.getAxis();
-	}
-
+    public static final TagKey<Block> WINDMILL_SAILS=TagKey.create(Registries.BLOCK,Create.asResource("windmill_sails"));
+    protected int sailBlocks;
+    protected Direction facing=Direction.UP;
+    private boolean windmill;
+    public BearingContraption(){}
+    public BearingContraption(boolean windmill,Direction facing){this.windmill=windmill;this.facing=facing;}
+    @Override public boolean assemble(Level level,BlockPos bearing)throws AssemblyException{
+        sailBlocks=0;if(!searchMovedStructure(level,bearing.relative(facing),null))return false;startMoving(level);expandBoundsAroundAxis(facing.getAxis());if(windmill&&sailBlocks<ContraptionSettings.minimumWindmillSails)throw AssemblyException.notEnoughSails(sailBlocks);return !blocks.isEmpty();
+    }
+    @Override protected boolean isAnchoringBlockAt(BlockPos pos){return pos.equals(anchor.relative(facing.getOpposite()));}
+    @Override public ContraptionType getType(){return AllContraptionTypes.BEARING.value();}
+    @Override public void addBlock(Level level,BlockPos pos,Pair<StructureBlockInfo,BlockEntity> capture){if(!blocks.containsKey(pos.subtract(anchor))&&capture.getLeft().state().is(WINDMILL_SAILS))sailBlocks++;super.addBlock(level,pos,capture);}
+    public int getSailBlocks(){return sailBlocks;}
+    public Direction getFacing(){return facing;}
+    @Override public boolean canBeStabilized(Direction direction,BlockPos localPos){return !(direction.getOpposite()==facing&&localPos.equals(BlockPos.ZERO))&&direction.getAxis()==facing.getAxis();}
+    @Override public CompoundTag writeNBT(HolderLookup.Provider registries,boolean spawnData){var data=super.writeNBT(registries,spawnData);data.putInt("Sails",sailBlocks);data.putInt("Facing",facing.get3DDataValue());return data;}
+    @Override public void readNBT(Level level,CompoundTag data,boolean spawnData){sailBlocks=data.getIntOr("Sails",0);facing=Direction.from3DDataValue(data.getIntOr("Facing",Direction.UP.get3DDataValue()));super.readNBT(level,data,spawnData);}
 }

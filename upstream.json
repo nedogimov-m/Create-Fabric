@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/Creators-of-Create/Create",
+  "tag": "mc1.21.1-6.0.10",
+  "commit": "ac0c444d9828da3453ae8cc65338e8de063286fb",
+  "sourceMinecraft": "1.21.1",
+  "sourceLoader": "NeoForge",
+  "targetMinecraft": "26.3",
+  "targetLoader": "Fabric 0.19.5",
+  "fabricApi": "0.163.0+26.3",
+  "verifiedAt": "2026-10-17",
+  "versionSources": [
+    "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+    "https://meta.fabricmc.net/v2/versions/game",
+    "https://meta.fabricmc.net/v2/versions/loader",
+    "https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/maven-metadata.xml"
+  ]
+}

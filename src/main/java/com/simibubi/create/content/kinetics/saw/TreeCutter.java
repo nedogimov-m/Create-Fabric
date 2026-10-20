@@ -1,65 +1,33 @@
 package com.simibubi.create.content.kinetics.saw;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.function.BiConsumer;
-import java.util.function.Consumer;
-import java.util.function.Predicate;
-
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.AllTags;
-import com.simibubi.create.AllTags.AllBlockTags;
-import com.simibubi.create.compat.Mods;
-import com.simibubi.create.compat.dynamictrees.DynamicTree;
-import com.simibubi.create.foundation.utility.AbstractBlockBreakQueue;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.tags.BlockTags;
-import net.minecraft.world.entity.player.Player;
+import com.simibubi.create.Create;
+import com.simibubi.create.foundation.utility.BlockHelper;
+import net.minecraft.core.*;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.*;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.BambooStalkBlock;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.CactusBlock;
-import net.minecraft.world.level.block.ChorusFlowerBlock;
-import net.minecraft.world.level.block.ChorusPlantBlock;
-import net.minecraft.world.level.block.KelpBlock;
-import net.minecraft.world.level.block.KelpPlantBlock;
-import net.minecraft.world.level.block.LeavesBlock;
-import net.minecraft.world.level.block.SugarCaneBlock;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.IntegerProperty;
-import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.level.block.state.properties.*;
+import java.util.*;
+import java.util.function.*;
 
-public class TreeCutter {
-
-	public static final Tree NO_TREE =
-		new Tree(Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
-
-	public static boolean canDynamicTreeCutFrom(Block startBlock) {
-		return Mods.DYNAMICTREES.runIfInstalled(() -> () -> DynamicTree.isDynamicBranch(startBlock))
-			.orElse(false);
-	}
-
-	@NotNull
-	public static Optional<AbstractBlockBreakQueue> findDynamicTree(Block startBlock, BlockPos pos) {
-		if (canDynamicTreeCutFrom(startBlock))
-			return Mods.DYNAMICTREES.runIfInstalled(() -> () -> new DynamicTree(pos));
-		return Optional.empty();
-	}
-
+/** Tree topology and leaf-distance rules from the pinned Create source. Never loads chunks. */
+public final class TreeCutter {
+    private static final TagKey<Block> ROOTS = TagKey.create(Registries.BLOCK, Create.asResource("roots"));
+    private static final TagKey<Block> SLIMY_LOGS = TagKey.create(Registries.BLOCK, Create.asResource("slimy_logs"));
+    private static final TagKey<Block> TREE_ATTACHMENTS = TagKey.create(Registries.BLOCK, Create.asResource("tree_attachments"));
+    public static final Tree NO_TREE = new Tree(List.of(), List.of(), List.of());
+    private static final class UnloadedTreeChunk extends RuntimeException {}
+    private static BlockState stateAt(BlockGetter reader, BlockPos pos) {
+        if (reader instanceof Level level && !level.isLoaded(pos)) throw new UnloadedTreeChunk();
+        return reader.getBlockState(pos);
+    }
+    public static Tree findTree(BlockGetter reader, BlockPos pos, BlockState brokenState) {
+        try { return findTreeLoaded(reader, pos, brokenState); } catch (UnloadedTreeChunk ignored) { return NO_TREE; }
+    }
 	/**
 	 * Finds a tree at the given pos. Block at the position should be air
 	 *
@@ -67,8 +35,7 @@ public class TreeCutter {
 	 * @param pos         position that the saw cut at
 	 * @param brokenState block state what was broken by the saw
 	 */
-	@NotNull
-	public static Tree findTree(@Nullable BlockGetter reader, BlockPos pos, BlockState brokenState) {
+	private static Tree findTreeLoaded(BlockGetter reader, BlockPos pos, BlockState brokenState) {
 		if (reader == null)
 			return NO_TREE;
 
@@ -78,7 +45,7 @@ public class TreeCutter {
 		Set<BlockPos> visited = new HashSet<>();
 		List<BlockPos> frontier = new LinkedList<>();
 
-		BlockState stateAbove = reader.getBlockState(pos.above());
+		BlockState stateAbove = stateAt(reader, pos.above());
 		// Bamboo, Sugar Cane, Cactus
 		if (isVerticalPlant(brokenState)) {
 			if (!isVerticalPlant(stateAbove))
@@ -87,7 +54,7 @@ public class TreeCutter {
 			logs.add(pos.above());
 			for (int i = 1; i < reader.getHeight(); i++) {
 				BlockPos current = pos.above(i);
-				if (!isVerticalPlant(reader.getBlockState(current)))
+				if (!isVerticalPlant(stateAt(reader, current)))
 					break;
 				logs.add(current);
 			}
@@ -105,11 +72,11 @@ public class TreeCutter {
 				BlockPos current = frontier.remove(0);
 				visited.add(current);
 				logs.add(current);
-				for (Direction direction : Iterate.directions) {
+				for (Direction direction : Direction.values()) {
 					BlockPos offset = current.relative(direction);
 					if (visited.contains(offset))
 						continue;
-					if (!isChorus(reader.getBlockState(offset)))
+					if (!isChorus(stateAt(reader, offset)))
 						continue;
 					frontier.add(offset);
 				}
@@ -124,7 +91,7 @@ public class TreeCutter {
 
 		visited.add(pos);
 		BlockPos.betweenClosedStream(pos.offset(-1, 0, -1), pos.offset(1, 1, 1))
-			.forEach(p -> frontier.add(new BlockPos(p)));
+			.forEach(p -> frontier.add(p.immutable()));
 
 		// Find all logs & roots
 		boolean hasRoots = false;
@@ -133,13 +100,13 @@ public class TreeCutter {
 			if (!visited.add(currentPos))
 				continue;
 
-			BlockState currentState = reader.getBlockState(currentPos);
+			BlockState currentState = stateAt(reader, currentPos);
 			if (isRoot(currentState))
 				hasRoots = true;
 			else if (!isLog(currentState))
 				continue;
 			logs.add(currentPos);
-			forNeighbours(currentPos, visited, SearchDirection.UP, p -> frontier.add(new BlockPos(p)));
+			forNeighbours(currentPos, visited, SearchDirection.UP, p -> frontier.add(p.immutable()));
 		}
 
 		visited.clear();
@@ -151,7 +118,7 @@ public class TreeCutter {
 			while (!frontier.isEmpty()) {
 				BlockPos currentPos = frontier.remove(0);
 
-				BlockState currentState = reader.getBlockState(currentPos);
+				BlockState currentState = stateAt(reader, currentPos);
 				if (!isRoot(currentState))
 					continue;
 				if (!oldLogs.contains(currentPos))
@@ -172,15 +139,15 @@ public class TreeCutter {
 		while (!frontier.isEmpty()) {
 			BlockPos prevPos = frontier.remove(0);
 
-			BlockState prevState = reader.getBlockState(prevPos);
+			BlockState prevState = stateAt(reader, prevPos);
 			int prevLeafDistance = isLeaf(prevState) ? getLeafDistance(prevState) : 0;
 
 			forNeighbours(prevPos, visited, SearchDirection.BOTH, currentPos -> {
-				BlockState state = reader.getBlockState(currentPos);
+				BlockState state = stateAt(reader, currentPos);
 				BlockPos subtract = currentPos.subtract(pos);
 				BlockPos currentPosImmutable = currentPos.immutable();
 
-				if (AllBlockTags.TREE_ATTACHMENTS.matches(state)) {
+				if (state.is(TREE_ATTACHMENTS)) {
 					attachments.add(currentPosImmutable);
 					visited.add(currentPosImmutable);
 					return;
@@ -206,8 +173,7 @@ public class TreeCutter {
 
 	private static int getLeafDistance(BlockState state) {
 		IntegerProperty distanceProperty = LeavesBlock.DISTANCE;
-		for (Property<?> property : state.getValues()
-			.keySet())
+		for (Property<?> property : state.getProperties())
 			if (property instanceof IntegerProperty ip && property.getName()
 				.equals("distance"))
 				distanceProperty = ip;
@@ -253,15 +219,15 @@ public class TreeCutter {
 			visited.add(currentPos);
 			boolean lowerLayer = currentPos.getY() == posY;
 
-			BlockState currentState = reader.getBlockState(currentPos);
-			BlockState belowState = reader.getBlockState(belowPos);
+			BlockState currentState = stateAt(reader, currentPos);
+			BlockState belowState = stateAt(reader, belowPos);
 
 			if (!isLog(currentState) && !isRoot(currentState))
 				continue;
 			if (!lowerLayer && !pos.equals(belowPos) && (isLog(belowState) || isRoot(belowState)))
 				return false;
 
-			for (Direction direction : Iterate.directions) {
+			for (Direction direction : Direction.values()) {
 				if (direction == Direction.DOWN)
 					continue;
 				if (direction == Direction.UP && !lowerLayer)
@@ -297,11 +263,11 @@ public class TreeCutter {
 	}
 
 	public static boolean isRoot(BlockState state) {
-		return AllBlockTags.ROOTS.matches(state);
+		return state.is(ROOTS);
 	}
 
 	public static boolean isLog(BlockState state) {
-		return state.is(BlockTags.LOGS) || AllTags.AllBlockTags.SLIMY_LOGS.matches(state)
+		return state.is(BlockTags.LOGS) || state.is(SLIMY_LOGS)
 			|| state.is(Blocks.MUSHROOM_STEM);
 	}
 
@@ -316,29 +282,28 @@ public class TreeCutter {
 	}
 
 	private static boolean isLeaf(BlockState state) {
-		for (Property<?> property : state.getValues().keySet())
+		for (Property<?> property : state.getProperties())
 			if (property instanceof IntegerProperty && property.getName().equals("distance") && property != BlockStateProperties.STABILITY_DISTANCE)
 				return true;
 		return false;
 	}
 
-	public static class Tree extends AbstractBlockBreakQueue {
-		private final List<BlockPos> logs;
-		private final List<BlockPos> leaves;
-		private final List<BlockPos> attachments;
-
-		public Tree(List<BlockPos> logs, List<BlockPos> leaves, List<BlockPos> attachments) {
-			this.logs = logs;
-			this.leaves = leaves;
-			this.attachments = attachments;
-		}
-
-		@Override
-		public void destroyBlocks(Level world, ItemStack toDamage, @Nullable Player playerEntity,
-								  BiConsumer<BlockPos, ItemStack> drop) {
-			attachments.forEach(makeCallbackFor(world, 1 / 32f, toDamage, playerEntity, drop));
-			logs.forEach(makeCallbackFor(world, 1 / 2f, toDamage, playerEntity, drop));
-			leaves.forEach(makeCallbackFor(world, 1 / 8f, toDamage, playerEntity, drop));
-		}
-	}
+    public static final class Tree {
+        public final List<BlockPos> logs, leaves, attachments;
+        public Tree(List<BlockPos> logs, List<BlockPos> leaves, List<BlockPos> attachments) {
+            this.logs = List.copyOf(new LinkedHashSet<>(logs)); this.leaves = List.copyOf(new LinkedHashSet<>(leaves)); this.attachments = List.copyOf(new LinkedHashSet<>(attachments));
+        }
+        public void destroyBlocks(ServerLevel level, BiConsumer<BlockPos, ItemStack> drop) {
+            for (var pos : attachments) destroy(level, pos, 1f / 32, drop);
+            for (var pos : logs) destroy(level, pos, 0.5f, drop);
+            for (var pos : leaves) destroy(level, pos, 0.125f, drop);
+        }
+        private static void destroy(ServerLevel level, BlockPos pos, float chance, BiConsumer<BlockPos, ItemStack> drop) {
+            if (!level.isLoaded(pos)) return;
+            var state = level.getBlockState(pos);
+            if (!com.simibubi.create.content.kinetics.base.BlockBreakingKineticBlockEntity.isBreakable(state, state.getDestroySpeed(level, pos))) return;
+            BlockHelper.destroyBlock(level, pos, chance, stack -> drop.accept(pos, stack));
+        }
+    }
+    private TreeCutter() {}
 }

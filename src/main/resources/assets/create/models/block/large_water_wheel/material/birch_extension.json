@@ -1,0 +1,8 @@
+{
+  "parent": "create:block/large_water_wheel/block_extension",
+  "textures": {
+    "planks": "minecraft:block/birch_planks",
+    "log": "minecraft:block/birch_log",
+    "log_top": "minecraft:block/birch_log_top"
+  }
+}

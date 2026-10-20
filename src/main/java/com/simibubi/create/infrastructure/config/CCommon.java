@@ -1,9 +1,9 @@
 package com.simibubi.create.infrastructure.config;
 
 
-import net.createmod.catnip.config.ConfigBase;
 
-public class CCommon extends ConfigBase {
+public class CCommon extends NativeConfigBase {
+    @Override protected ConfigScope defaultScope(){return ConfigScope.COMMON;}
 
 	public final CWorldGen worldGen = nested(0, CWorldGen::new, Comments.worldGen);
 

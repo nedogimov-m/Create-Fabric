@@ -1,19 +1,8 @@
 pluginManagement {
     repositories {
-        mavenLocal()
+        maven { url = 'https://maven.fabricmc.net/' }
         gradlePluginPortal()
-        maven { url = "https://maven.neoforged.net/releases" }
     }
 }
 
-if (file("Ponder").exists()) {
-    includeBuild(".")
-    includeBuild("Ponder") {
-        dependencySubstitution {
-            substitute(module("net.createmod.ponder:ponder-neoforge")).using(project(":neoforge"))
-            substitute(module("net.createmod.ponder:ponder-common")).using(project(":common"))
-        }
-    }
-}
-
-rootProject.name = "Create"
+rootProject.name = 'create-fabric-26.3'

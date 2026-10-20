@@ -1,0 +1,33 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "bonus_rolls": 0.0,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "create:magenta_toolbox",
+          "modifier": [
+            {
+              "source": "block_entity",
+              "type": "minecraft:copy_name"
+            },
+            {
+              "include": [
+                "create:toolbox_uuid",
+                "create:toolbox_inventory"
+              ],
+              "source": "block_entity",
+              "type": "minecraft:copy_components"
+            }
+          ]
+        }
+      ],
+      "rolls": 1.0,
+      "condition": {
+        "type": "minecraft:survives_explosion"
+      }
+    }
+  ],
+  "random_sequence": "create:blocks/magenta_toolbox"
+}

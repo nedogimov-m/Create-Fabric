@@ -1,213 +1,45 @@
 package com.simibubi.create.content.logistics.packagePort;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllDataComponents;
-import com.simibubi.create.content.equipment.clipboard.ClipboardContent;
-import com.simibubi.create.content.equipment.clipboard.ClipboardEntry;
-import com.simibubi.create.content.equipment.clipboard.ClipboardOverrides.ClipboardType;
 import com.simibubi.create.content.logistics.box.PackageItem;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.animatedContainer.AnimatedContainerBehaviour;
-import com.simibubi.create.foundation.item.SmartInventory;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import net.createmod.catnip.codecs.CatnipCodecUtils;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
-import net.minecraft.world.Clearable;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.MenuProvider;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.*;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
-import net.neoforged.neoforge.common.util.FakePlayer;
-import net.neoforged.neoforge.items.IItemHandler;
-import net.neoforged.neoforge.items.ItemHandlerHelper;
-
-public abstract class PackagePortBlockEntity extends SmartBlockEntity implements MenuProvider, Clearable {
-	public boolean acceptsPackages;
-	public String addressFilter;
-	public PackagePortTarget target;
-	public SmartInventory inventory;
-
-	protected AnimatedContainerBehaviour<PackagePortMenu> openTracker;
-
-	protected IItemHandler itemHandler;
-
-	public PackagePortBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		addressFilter = "";
-		acceptsPackages = true;
-		inventory = new SmartInventory(18, this, (slot, stack) -> PackageItem.isPackage(stack));
-		itemHandler = new PackagePortAutomationInventoryWrapper(inventory, this);
-	}
-
-	public boolean isBackedUp() {
-		for (int i = 0; i < inventory.getSlots(); i++)
-			if (inventory.getStackInSlot(i)
-				.isEmpty())
-				return false;
-		return true;
-	}
-
-	public void filterChanged() {
-		if (target != null) {
-			target.deregister(this, level, worldPosition);
-			target.register(this, level, worldPosition);
-		}
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		if (target != null)
-			target.register(this, level, worldPosition);
-	}
-
-	public String getFilterString() {
-		return acceptsPackages ? addressFilter : null;
-	}
-
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-		if (target != null)
-			tag.put("Target", CatnipCodecUtils.encode(PackagePortTarget.CODEC, registries, target).orElseThrow());
-		tag.putString("AddressFilter", addressFilter);
-		tag.putBoolean("AcceptsPackages", acceptsPackages);
-		tag.put("Inventory", inventory.serializeNBT(registries));
-	}
-
-	@Override
-	protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(tag, registries, clientPacket);
-		inventory.deserializeNBT(registries, tag.getCompound("Inventory"));
-		PackagePortTarget prevTarget = target;
-		target = CatnipCodecUtils.decodeOrNull(PackagePortTarget.CODEC, registries, tag.getCompound("Target"));
-		addressFilter = tag.getString("AddressFilter");
-		acceptsPackages = tag.getBoolean("AcceptsPackages");
-		if (clientPacket && prevTarget != target)
-			invalidateRenderBoundingBox();
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-	}
-
-	@Override
-	public void clearContent() {
-		inventory.clearContent();
-	}
-
-	@Override
-	public void destroy() {
-		if (target != null)
-			target.deregister(this, level, worldPosition);
-		super.destroy();
-		for (int i = 0; i < inventory.getSlots(); i++)
-			drop(inventory.getStackInSlot(i));
-	}
-
-	public void drop(ItemStack box) {
-		if (box.isEmpty())
-			return;
-		Block.popResource(level, worldPosition, box);
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		behaviours.add(openTracker = new AnimatedContainerBehaviour<>(this, PackagePortMenu.class));
-		openTracker.onOpenChanged(this::onOpenChange);
-	}
-
-	protected abstract void onOpenChange(boolean open);
-
-	public ItemInteractionResult use(Player player) {
-		if (player == null || player.isCrouching())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		if (player instanceof FakePlayer)
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		ItemStack mainHandItem = player.getMainHandItem();
-		boolean clipboard = AllBlocks.CLIPBOARD.isIn(mainHandItem);
-
-		if (level.isClientSide) {
-			if (!clipboard)
-				onOpenedManually();
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		if (clipboard) {
-			addAddressToClipboard(player, mainHandItem);
-			return ItemInteractionResult.SUCCESS;
-		}
-
-		player.openMenu(this, worldPosition);
-		return ItemInteractionResult.SUCCESS;
-	}
-
-	protected void onOpenedManually() {
-	}
-
-	private void addAddressToClipboard(Player player, ItemStack mainHandItem) {
-		if (addressFilter == null || addressFilter.isBlank())
-			return;
-
-		ClipboardContent clipboard = mainHandItem.getOrDefault(AllDataComponents.CLIPBOARD_CONTENT, ClipboardContent.EMPTY);
-		List<List<ClipboardEntry>> list = ClipboardEntry.readAll(clipboard);
-		for (List<ClipboardEntry> page : list) {
-			for (ClipboardEntry entry : page) {
-				String existing = entry.text.getString();
-				if (existing.equals("#" + addressFilter) || existing.equals("# " + addressFilter))
-					return;
-			}
-		}
-
-		List<ClipboardEntry> page = null;
-
-		for (List<ClipboardEntry> freePage : list) {
-			if (freePage.size() > 11)
-				continue;
-			page = freePage;
-			break;
-		}
-
-		if (page == null) {
-			page = new ArrayList<>();
-			list.add(page);
-		}
-
-		page.add(new ClipboardEntry(false, Component.literal("#" + addressFilter)));
-		player.displayClientMessage(CreateLang.translate("clipboard.address_added", addressFilter)
-			.component(), true);
-
-
-		clipboard = clipboard.setPages(list).setType(ClipboardType.WRITTEN);
-		mainHandItem.set(AllDataComponents.CLIPBOARD_CONTENT, clipboard);
-	}
-
-	@Override
-	public Component getDisplayName() {
-		return Component.empty();
-	}
-
-	@Override
-	public AbstractContainerMenu createMenu(int pContainerId, Inventory pPlayerInventory, Player pPlayer) {
-		return PackagePortMenu.create(pContainerId, pPlayerInventory, this);
-	}
-
-	public int getComparatorOutput() {
-		return ItemHandlerHelper.calcRedstoneFromInventory(inventory);
-	}
+public abstract class PackagePortBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements Clearable {
+    public static final int RANGE=5;
+    public final PackagePortInventory inventory=new PackagePortInventory(this);
+    public final PackagePortAutomationInventoryWrapper itemHandler=new PackagePortAutomationInventoryWrapper(this);
+    public PackagePortTarget target;
+    public String addressFilter="";
+    public boolean acceptsPackages=true;
+    protected PackagePortBlockEntity(BlockEntityType<?> type,BlockPos pos,BlockState state){super(type,pos,state);}
+    public String getFilterString(){return acceptsPackages?addressFilter:null;}
+    public boolean isBackedUp(){return inventory.full();}
+    public int getComparatorOutput(){int filled=0;for(int i=0;i<inventory.getContainerSize();i++)if(!inventory.getItem(i).isEmpty())filled++;return filled==0?0:1+14*filled/inventory.getContainerSize();}
+    public void inventoryChanged(){notifyUpdate();if(level!=null&&!level.isClientSide())level.updateNeighbourForOutputSignal(worldPosition,getBlockState().getBlock());}
+    public void notifyUpdate(){setChanged();if(level!=null)level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS);}
+    public void filterChanged(){if(target!=null){target.deregister(this);target.register(this);}inventory.setChanged();}
+    public boolean setTarget(PackagePortTarget next){
+        if(level==null||next==null||!next.valid(this))return false;var point=next.getExactTargetLocation(this);var diff=point.subtract(net.minecraft.world.phys.Vec3.atBottomCenterOf(worldPosition));if(diff.y<0&&!(this instanceof com.simibubi.create.content.logistics.packagePort.postbox.PostboxBlockEntity)||diff.length()>com.simibubi.create.infrastructure.config.AllConfigs.server().logistics.packagePortRange.get())return false;
+        if(target!=null)target.deregister(this);target=next;next.setup(this);next.register(this);notifyUpdate();return true;
+    }
+    public void refreshTarget(){if(target!=null)target.register(this);}
+    public void drop(ItemStack item){if(level!=null&&!level.isClientSide()&&!item.isEmpty())Block.popResource(level,worldPosition,item);}
+    @Override public void clearContent(){inventory.clearContent();}
+    public abstract void startOpen();
+    public abstract void stopOpen();
+    public abstract boolean use(net.minecraft.world.entity.player.Player player);
+    protected boolean retainTargetOnUnload(){return false;}
+    @Override public void invalidate(){if(level!=null&&!level.isClientSide()&&target!=null&&!retainTargetOnUnload())target.deregister(this);super.invalidate();}
+    @Override public void preRemoveSideEffects(BlockPos pos,BlockState state){if(level!=null&&!level.isClientSide()){if(target!=null)target.deregister(this);for(int i=0;i<inventory.getContainerSize();i++)drop(inventory.getItem(i));inventory.clearContent();}super.preRemoveSideEffects(pos,state);}
+    @Override protected void write(ValueOutput out, boolean clientPacket){super.write(out, clientPacket);inventory.write(out);out.putString("AddressFilter",addressFilter);out.putBoolean("AcceptsPackages",acceptsPackages);if(target!=null)out.store("Target",PackagePortTarget.CODEC,target);}
+    @Override protected void read(ValueInput in, boolean clientPacket){super.read(in, clientPacket);inventory.read(in);addressFilter=in.getStringOr("AddressFilter","");acceptsPackages=in.getBooleanOr("AcceptsPackages",true);target=in.read("Target",PackagePortTarget.CODEC).orElse(null);}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){return super.getUpdateTag(registries);}
 }

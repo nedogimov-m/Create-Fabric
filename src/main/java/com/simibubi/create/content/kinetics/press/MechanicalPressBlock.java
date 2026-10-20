@@ -1,78 +1,27 @@
 package com.simibubi.create.content.kinetics.press;
 
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.kinetics.base.HorizontalKineticBlock;
-import com.simibubi.create.content.processing.basin.BasinBlock;
-import com.simibubi.create.foundation.block.IBE;
-
+import com.simibubi.create.content.kinetics.base.KineticBlock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.pathfinder.PathComputationType;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.EntityCollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
 
-public class MechanicalPressBlock extends HorizontalKineticBlock implements IBE<MechanicalPressBlockEntity> {
-
-	public MechanicalPressBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState state, BlockGetter worldIn, BlockPos pos, CollisionContext context) {
-		if (context instanceof EntityCollisionContext
-			&& ((EntityCollisionContext) context).getEntity() instanceof Player)
-			return AllShapes.CASING_14PX.get(Direction.DOWN);
-
-		return AllShapes.MECHANICAL_PROCESSOR_SHAPE;
-	}
-
-	@Override
-	public boolean canSurvive(BlockState state, LevelReader worldIn, BlockPos pos) {
-		return !BasinBlock.isBasin(worldIn, pos.below());
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		Direction prefferedSide = getPreferredHorizontalFacing(context);
-		if (prefferedSide != null)
-			return defaultBlockState().setValue(HORIZONTAL_FACING, prefferedSide);
-		return super.getStateForPlacement(context);
-	}
-
-	@Override
-	public Axis getRotationAxis(BlockState state) {
-		return state.getValue(HORIZONTAL_FACING)
-			.getAxis();
-	}
-
-	@Override
-	public boolean hasShaftTowards(LevelReader world, BlockPos pos, BlockState state, Direction face) {
-		return face.getAxis() == state.getValue(HORIZONTAL_FACING)
-			.getAxis();
-	}
-
-	@Override
-	public Class<MechanicalPressBlockEntity> getBlockEntityClass() {
-		return MechanicalPressBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends MechanicalPressBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.MECHANICAL_PRESS.get();
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
+public final class MechanicalPressBlock extends KineticBlock {
+    public static final EnumProperty<Direction> FACING = BlockStateProperties.HORIZONTAL_FACING;
+    public MechanicalPressBlock(Properties properties) { super(properties); registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH)); }
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) { builder.add(FACING); }
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context) { return defaultBlockState().setValue(FACING, context.getHorizontalDirection().getOpposite()); }
+    @Override protected BlockState rotate(BlockState state, Rotation rotation) { return state.setValue(FACING, rotation.rotate(state.getValue(FACING))); }
+    @Override protected BlockState mirror(BlockState state, Mirror mirror) { return rotate(state, mirror.getRotation(state.getValue(FACING))); }
+    @Override protected RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
+    @Override public Direction.Axis getRotationAxis(BlockState state) { return state.getValue(FACING).getAxis(); }
+    @Override public boolean hasShaftTowards(LevelReader level, BlockPos pos, BlockState state, Direction face) { return face.getAxis() == getRotationAxis(state); }
+    @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new MechanicalPressBlockEntity(pos, state); }
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) { return createTickerHelper(type, AllBlockEntityTypes.MECHANICAL_PRESS, MechanicalPressBlockEntity::tick); }
 }

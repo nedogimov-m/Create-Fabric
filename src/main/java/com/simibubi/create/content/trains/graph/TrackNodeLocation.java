@@ -1,218 +1,255 @@
 package com.simibubi.create.content.trains.graph;
 
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Objects;
-import java.util.Set;
-
-import com.simibubi.create.content.trains.track.BezierConnection;
-import com.simibubi.create.content.trains.track.TrackMaterial;
-
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Vec3i;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
+import com.simibubi.create.content.trains.track.*;
+import java.util.*;
+import net.minecraft.core.*;
+import net.minecraft.nbt.*;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
+/**
+ * Source half-block x/z identity, integral y and independent pixel smoothing, including dimension.
+ */
 public class TrackNodeLocation extends Vec3i {
+  public ResourceKey<Level> dimension;
+  public int yOffsetPixels;
+  public static final Codec<TrackNodeLocation> CODEC =
+      RecordCodecBuilder.create(
+          i ->
+              i.group(
+                      Codec.INT.fieldOf("X").forGetter(TrackNodeLocation::getX),
+                      Codec.INT.fieldOf("Y").forGetter(TrackNodeLocation::getY),
+                      Codec.INT.fieldOf("Z").forGetter(TrackNodeLocation::getZ),
+                      DimensionPalette.DIMENSION
+                          .fieldOf("Dimension")
+                          .forGetter(value -> value.dimension),
+                      Codec.intRange(-32768, 32767)
+                          .optionalFieldOf("YO", 0)
+                          .forGetter(value -> value.yOffsetPixels))
+                  .apply(i, TrackNodeLocation::packed));
 
-	public ResourceKey<Level> dimension;
-	public int yOffsetPixels;
+  public TrackNodeLocation(Vec3 value) {
+    this(value.x, value.y, value.z);
+  }
 
-	public TrackNodeLocation(Vec3 vec) {
-		this(vec.x, vec.y, vec.z);
-	}
+  public TrackNodeLocation(double x, double y, double z) {
+    super((int) Math.round(x * 2), Mth.floor(y) * 2, (int) Math.round(z * 2));
+    if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z))
+      throw new IllegalArgumentException("Nonfinite railway node");
+  }
 
-	public TrackNodeLocation(double x, double y, double z) {
-		super(Mth.floor((double) Math.round(x * 2)), Mth.floor(y) * 2, Mth.floor((double) Math.round(z * 2)));
-	}
+  private TrackNodeLocation(int x, int y, int z) {
+    super(x, y, z);
+  }
 
-	public TrackNodeLocation in(Level level) {
-		return in(level.dimension());
-	}
+  private static TrackNodeLocation packed(
+      int x, int y, int z, ResourceKey<Level> dimension, int pixels) {
+    var value = new TrackNodeLocation(x, y, z);
+    value.dimension = Objects.requireNonNull(dimension);
+    value.yOffsetPixels = pixels;
+    return value;
+  }
 
-	public TrackNodeLocation in(ResourceKey<Level> dimension) {
-		this.dimension = dimension;
-		return this;
-	}
+  public static TrackNodeLocation from(Vec3 vector) {
+    return new TrackNodeLocation(vector);
+  }
 
-	private static TrackNodeLocation fromPackedPos(BlockPos bufferPos) {
-		return new TrackNodeLocation(bufferPos);
-	}
+  public TrackNodeLocation in(Level level) {
+    return in(level.dimension());
+  }
 
-	private TrackNodeLocation(BlockPos readBlockPos) {
-		super(readBlockPos.getX(), readBlockPos.getY(), readBlockPos.getZ());
-	}
+  public TrackNodeLocation in(ResourceKey<Level> dimension) {
+    this.dimension = Objects.requireNonNull(dimension);
+    return this;
+  }
 
-	public Vec3 getLocation() {
-		return new Vec3(getX() / 2.0, getY() / 2.0 + yOffsetPixels / 16.0, getZ() / 2.0);
-	}
+  public TrackNodeLocation copy() {
+    return packed(getX(), getY(), getZ(), dimension, yOffsetPixels);
+  }
 
-	public ResourceKey<Level> getDimension() {
-		return dimension;
-	}
+  public Vec3 getLocation() {
+    return new Vec3(getX() / 2d, getY() / 2d + yOffsetPixels / 16d, getZ() / 2d);
+  }
 
-	@Override
-	public boolean equals(Object pOther) {
-		return equalsIgnoreDim(pOther) && pOther instanceof TrackNodeLocation tnl
-			&& Objects.equals(tnl.dimension, dimension);
-	}
+  public ResourceKey<Level> getDimension() {
+    return dimension;
+  }
 
-	public boolean equalsIgnoreDim(Object pOther) {
-		return super.equals(pOther) && pOther instanceof TrackNodeLocation tnl && tnl.yOffsetPixels == yOffsetPixels;
-	}
+  @Override
+  public boolean equals(Object other) {
+    return equalsIgnoreDim(other)
+        && other instanceof TrackNodeLocation location
+        && Objects.equals(dimension, location.dimension);
+  }
 
-	@Override
-	public int hashCode() {
-		return (getY() + ((getZ() + yOffsetPixels * 31) * 31 + dimension.hashCode()) * 31) * 31 + getX();
-	}
+  public boolean equalsIgnoreDim(Object other) {
+    return other instanceof TrackNodeLocation location
+        && super.equals(other)
+        && yOffsetPixels == location.yOffsetPixels;
+  }
 
-	public CompoundTag write(DimensionPalette dimensions) {
-		CompoundTag c = new CompoundTag();
-		c.put("Pos", NbtUtils.writeBlockPos(new BlockPos(this)));
-		if (dimensions != null)
-			c.putInt("D", dimensions.encode(dimension));
-		if (yOffsetPixels != 0)
-			c.putInt("YO", yOffsetPixels);
-		return c;
-	}
+  @Override
+  public int hashCode() {
+    return Objects.hash(getX(), getY(), getZ(), yOffsetPixels, dimension);
+  }
 
-	public static TrackNodeLocation read(CompoundTag tag, DimensionPalette dimensions) {
-		TrackNodeLocation location = fromPackedPos(tag.contains("Pos") ? NBTHelper.readBlockPos(tag, "Pos")
-			: new BlockPos(tag.getInt("X"), tag.getInt("Y"), tag.getInt("Z")));
-		if (dimensions != null)
-			location.dimension = dimensions.decode(tag.getInt("D"));
-		location.yOffsetPixels = tag.getInt("YO");
-		return location;
-	}
+  public CompoundTag write(DimensionPalette dimensions) {
+    var tag = new CompoundTag();
+    tag.store("Pos", BlockPos.CODEC, new BlockPos(getX(), getY(), getZ()));
+    if (dimensions != null) tag.putInt("D", dimensions.encode(dimension));
+    else if (dimension != null) tag.putString("Dimension", dimension.identifier().toString());
+    if (yOffsetPixels != 0) tag.putInt("YO", yOffsetPixels);
+    return tag;
+  }
 
-	public void send(FriendlyByteBuf buffer, DimensionPalette dimensions) {
-		buffer.writeVarInt(getX());
-		buffer.writeShort(getY());
-		buffer.writeVarInt(getZ());
-		buffer.writeVarInt(yOffsetPixels);
-		buffer.writeVarInt(dimensions.encode(dimension));
-	}
+  public static TrackNodeLocation read(CompoundTag tag, DimensionPalette dimensions) {
+    var pos =
+        tag.read("Pos", BlockPos.CODEC)
+            .orElseGet(
+                () -> {
+                  var legacy = tag.getCompoundOrEmpty("Pos");
+                  return new BlockPos(
+                      legacy.getIntOr("X", tag.getIntOr("X", 0)),
+                      legacy.getIntOr("Y", tag.getIntOr("Y", 0)),
+                      legacy.getIntOr("Z", tag.getIntOr("Z", 0)));
+                });
+    var dimension =
+        dimensions != null
+            ? dimensions.decode(tag.getIntOr("D", -1))
+            : net.minecraft.resources.ResourceKey.create(
+                net.minecraft.core.registries.Registries.DIMENSION,
+                net.minecraft.resources.Identifier.parse(
+                    tag.getStringOr("Dimension", "minecraft:overworld")));
+    return packed(pos.getX(), pos.getY(), pos.getZ(), dimension, tag.getIntOr("YO", 0));
+  }
 
-	public static TrackNodeLocation receive(FriendlyByteBuf buffer, DimensionPalette dimensions) {
-		TrackNodeLocation location = fromPackedPos(new BlockPos(
-				buffer.readVarInt(),
-				buffer.readShort(),
-				buffer.readVarInt()
-		));
-		location.yOffsetPixels = buffer.readVarInt();
-		location.dimension = dimensions.decode(buffer.readVarInt());
-		return location;
-	}
+  public void send(FriendlyByteBuf buf, DimensionPalette dimensions) {
+    buf.writeVarInt(getX());
+    buf.writeInt(getY());
+    buf.writeVarInt(getZ());
+    buf.writeVarInt(yOffsetPixels);
+    buf.writeVarInt(dimensions.encode(dimension));
+  }
 
-	public Collection<BlockPos> allAdjacent() {
-		Set<BlockPos> set = new HashSet<>();
-		Vec3 vec3 = getLocation().subtract(0, yOffsetPixels / 16.0, 0);
-		double step = 1 / 8f;
-		for (int x : Iterate.positiveAndNegative)
-			for (int y : Iterate.positiveAndNegative)
-				for (int z : Iterate.positiveAndNegative)
-					set.add(BlockPos.containing(vec3.add(x * step, y * step, z * step)));
-		return set;
-	}
+  public static TrackNodeLocation receive(FriendlyByteBuf buf, DimensionPalette dimensions) {
+    int x = buf.readVarInt(), y = buf.readInt(), z = buf.readVarInt(), pixels = buf.readVarInt();
+    if (pixels < -32768 || pixels > 32767)
+      throw new IllegalArgumentException("Invalid railway smoothing offset");
+    return packed(x, y, z, dimensions.decode(buf.readVarInt()), pixels);
+  }
 
-	public static class DiscoveredLocation extends TrackNodeLocation {
+  public Collection<BlockPos> allAdjacent() {
+    var result = new LinkedHashSet<BlockPos>();
+    var origin = getLocation().subtract(0, yOffsetPixels / 16d, 0);
+    for (int x : new int[] {-1, 1})
+      for (int y : new int[] {-1, 1})
+        for (int z : new int[] {-1, 1})
+          result.add(BlockPos.containing(origin.add(x / 8d, y / 8d, z / 8d)));
+    return result;
+  }
 
-		BezierConnection turn = null;
-		boolean forceNode = false;
-		Vec3 direction;
-		Vec3 normal;
-		TrackMaterial materialA;
-		TrackMaterial materialB;
+  public static final class DiscoveredLocation extends TrackNodeLocation {
+    BezierConnection turn;
+    boolean forceNode;
+    Vec3 direction;
+    Vec3 normal = new Vec3(0, 1, 0);
+    TrackMaterial materialA = TrackMaterial.ANDESITE, materialB = TrackMaterial.ANDESITE;
 
-		public DiscoveredLocation(Level level, double x, double y, double z) {
-			super(x, y, z);
-			in(level);
-		}
+    public DiscoveredLocation(Level level, double x, double y, double z) {
+      super(x, y, z);
+      in(level);
+    }
 
-		public DiscoveredLocation(ResourceKey<Level> dimension, Vec3 vec) {
-			super(vec);
-			in(dimension);
-		}
+    public DiscoveredLocation(ResourceKey<Level> dimension, Vec3 vector) {
+      super(vector);
+      in(dimension);
+    }
 
-		public DiscoveredLocation(Level level, Vec3 vec) {
-			this(level.dimension(), vec);
-		}
+    public DiscoveredLocation(Level level, Vec3 vector) {
+      this(level.dimension(), vector);
+    }
 
-		public DiscoveredLocation materialA(TrackMaterial material) {
-			this.materialA = material;
-			return this;
-		}
+    public DiscoveredLocation materialA(TrackMaterial material) {
+      materialA = Objects.requireNonNull(material);
+      return this;
+    }
 
-		public DiscoveredLocation materialB(TrackMaterial material) {
-			this.materialB = material;
-			return this;
-		}
+    public DiscoveredLocation materialB(TrackMaterial material) {
+      materialB = Objects.requireNonNull(material);
+      return this;
+    }
 
-		public DiscoveredLocation materials(TrackMaterial materialA, TrackMaterial materialB) {
-			this.materialA = materialA;
-			this.materialB = materialB;
-			return this;
-		}
+    public DiscoveredLocation materials(TrackMaterial first, TrackMaterial second) {
+      return materialA(first).materialB(second);
+    }
 
-		public DiscoveredLocation viaTurn(BezierConnection turn) {
-			this.turn = turn;
-			if (turn != null)
-				forceNode();
-			return this;
-		}
+    public TrackMaterial getMaterialA() {
+      return materialA;
+    }
 
-		public DiscoveredLocation forceNode() {
-			forceNode = true;
-			return this;
-		}
+    public TrackMaterial getMaterialB() {
+      return materialB;
+    }
 
-		public DiscoveredLocation withNormal(Vec3 normal) {
-			this.normal = normal;
-			return this;
-		}
+    public DiscoveredLocation viaTurn(BezierConnection connection) {
+      turn = connection;
+      if (connection != null) forceNode();
+      return this;
+    }
 
-		public DiscoveredLocation withYOffset(int yOffsetPixels) {
-			this.yOffsetPixels = yOffsetPixels;
-			return this;
-		}
+    public BezierConnection getTurn() {
+      return turn;
+    }
 
-		public DiscoveredLocation withDirection(Vec3 direction) {
-			this.direction = direction == null ? null : direction.normalize();
-			return this;
-		}
+    public boolean connectedViaTurn() {
+      return turn != null;
+    }
 
-		public boolean connectedViaTurn() {
-			return turn != null;
-		}
+    public DiscoveredLocation withNormal(Vec3 normal) {
+      this.normal = RailCodecs.nonzero(normal).normalize();
+      return this;
+    }
 
-		public BezierConnection getTurn() {
-			return turn;
-		}
+    public Vec3 getNormal() {
+      return normal;
+    }
 
-		public boolean shouldForceNode() {
-			return forceNode;
-		}
+    public DiscoveredLocation withDirection(Vec3 direction) {
+      this.direction = direction == null ? null : RailCodecs.nonzero(direction);
+      return this;
+    }
 
-		public boolean differentMaterials() {
-			return materialA != materialB;
-		}
+    public Vec3 getDirection() {
+      return direction;
+    }
 
-		public boolean notInLineWith(Vec3 direction) {
-			return this.direction != null
-				&& Math.max(direction.dot(this.direction), direction.dot(this.direction.scale(-1))) < 7 / 8f;
-		}
+    public DiscoveredLocation withYOffset(int pixels) {
+      if (pixels < -32768 || pixels > 32767)
+        throw new IllegalArgumentException("Invalid railway smoothing");
+      yOffsetPixels = pixels;
+      return this;
+    }
 
-		public Vec3 getDirection() {
-			return direction;
-		}
+    public DiscoveredLocation forceNode() {
+      forceNode = true;
+      return this;
+    }
 
-	}
+    public boolean shouldForceNode() {
+      return forceNode;
+    }
 
+    public boolean differentMaterials() {
+      return materialA != materialB;
+    }
+
+    public boolean notInLineWith(Vec3 axis) {
+      return direction != null && Math.abs(axis.normalize().dot(direction.normalize())) < 7 / 8f;
+    }
+  }
 }

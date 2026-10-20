@@ -1,60 +1,68 @@
 package com.simibubi.create.content.contraptions.actors.trainControls;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.UUID;
-
-import com.simibubi.create.AllPackets;
-import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
-import net.createmod.catnip.net.base.ServerboundPacketPayload;
-
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
-import io.netty.buffer.ByteBuf;
+import com.simibubi.create.Create;
+import java.util.*;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.Level;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
-public record ControlsInputPacket(List<Integer> activatedButtons, boolean press, int contraptionEntityId,
-								  BlockPos controlsPos, boolean stopControlling) implements ServerboundPacketPayload {
-	public static final StreamCodec<ByteBuf, ControlsInputPacket> STREAM_CODEC = StreamCodec.composite(
-			CatnipStreamCodecBuilders.list(ByteBufCodecs.VAR_INT), ControlsInputPacket::activatedButtons,
-			ByteBufCodecs.BOOL, ControlsInputPacket::press,
-			ByteBufCodecs.INT, ControlsInputPacket::contraptionEntityId,
-			BlockPos.STREAM_CODEC, ControlsInputPacket::controlsPos,
-			ByteBufCodecs.BOOL, ControlsInputPacket::stopControlling,
-	        ControlsInputPacket::new
-	);
+/** Source key deltas/keepalive, bound to the accepted body UUID and current real input session. */
+public record ControlsInputPacket(
+    int entityId,
+    UUID body,
+    BlockPos controls,
+    UUID session,
+    long sequence,
+    List<Integer> buttons,
+    boolean press,
+    boolean stop)
+    implements CustomPacketPayload {
+  public static final Type<ControlsInputPacket> TYPE =
+      new Type<>(Create.asResource("controls_input"));
+  public static final StreamCodec<RegistryFriendlyByteBuf, ControlsInputPacket> CODEC =
+      StreamCodec.of(
+          (buf, packet) -> {
+            buf.writeVarInt(packet.entityId());
+            buf.writeUUID(packet.body());
+            buf.writeBlockPos(packet.controls());
+            buf.writeUUID(packet.session());
+            buf.writeVarLong(packet.sequence());
+            buf.writeVarInt(packet.buttons().size());
+            for (int button : packet.buttons()) buf.writeByte(button);
+            buf.writeBoolean(packet.press());
+            buf.writeBoolean(packet.stop());
+          },
+          buf -> {
+            int entity = buf.readVarInt();
+            var body = buf.readUUID();
+            var pos = buf.readBlockPos();
+            var session = buf.readUUID();
+            long sequence = buf.readVarLong();
+            int count = buf.readVarInt();
+            if (count < 0 || count > 6)
+              throw new io.netty.handler.codec.DecoderException("Invalid train key count");
+            var keys = new ArrayList<Integer>();
+            for (int i = 0; i < count; i++) keys.add((int) buf.readUnsignedByte());
+            return new ControlsInputPacket(
+                entity, body, pos, session, sequence, keys, buf.readBoolean(), buf.readBoolean());
+          });
 
-	public ControlsInputPacket(Collection<Integer> activatedButtons, boolean press, int contraptionEntityId, BlockPos controlsPos, boolean stopControlling) {
-		// given list is reused, copy it
-		this(List.copyOf(activatedButtons), press, contraptionEntityId, controlsPos, stopControlling);
-	}
+  public ControlsInputPacket {
+    Objects.requireNonNull(body);
+    controls = controls.immutable();
+    Objects.requireNonNull(session);
+    buttons = List.copyOf(buttons);
+    if (entityId < 0
+        || sequence < 0
+        || buttons.size() > 6
+        || new HashSet<>(buttons).size() != buttons.size()
+        || buttons.stream().anyMatch(key -> key < 0 || key > 5))
+      throw new IllegalArgumentException("Invalid native train input");
+  }
 
-	@Override
-	public void handle(ServerPlayer player) {
-		Level world = player.getCommandSenderWorld();
-		UUID uniqueID = player.getUUID();
-
-		if (player.isSpectator() && press)
-			return;
-
-		Entity entity = world.getEntity(contraptionEntityId);
-		if (!(entity instanceof AbstractContraptionEntity ace))
-			return;
-		if (stopControlling) {
-			ace.stopControlling(controlsPos);
-			return;
-		}
-
-		if (ace.canInteractWithBlock(player, controlsPos, 16))
-			ControlsServerHandler.receivePressed(world, ace, controlsPos, uniqueID, activatedButtons, press);
-	}
-
-	@Override
-	public PacketTypeProvider getTypeProvider() {
-		return AllPackets.CONTROLS_INPUT;
-	}
+  @Override
+  public Type<ControlsInputPacket> type() {
+    return TYPE;
+  }
 }

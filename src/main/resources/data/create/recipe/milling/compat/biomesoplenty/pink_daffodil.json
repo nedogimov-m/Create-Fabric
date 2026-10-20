@@ -1,0 +1,29 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "biomesoplenty:pink_daffodil"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "count": 2,
+      "id": "minecraft:pink_dye"
+    },
+    {
+      "chance": 0.25,
+      "id": "minecraft:magenta_dye"
+    },
+    {
+      "chance": 0.05,
+      "id": "minecraft:cyan_dye"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "biomesoplenty"
+      ]
+    }
+  ]
+}

@@ -1,105 +1,35 @@
 package com.simibubi.create.content.kinetics.deployer;
 
-import com.mojang.serialization.MapCodec;
+import com.mojang.serialization.*;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.AllRecipeTypes;
-import com.simibubi.create.content.processing.recipe.ProcessingRecipe;
-import com.simibubi.create.content.processing.recipe.ProcessingRecipeBuilder;
-
-import com.simibubi.create.content.processing.recipe.ProcessingRecipeParams;
-
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.world.item.crafting.RecipeSerializer;
+import com.simibubi.create.content.processing.recipe.ProcessingOutput;
+import com.simibubi.create.content.processing.sequenced.IAssemblyRecipe;
+import java.util.List;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.*;
 import net.minecraft.world.level.Level;
 
-import net.neoforged.neoforge.items.wrapper.RecipeWrapper;
-
-public class ItemApplicationRecipe extends ProcessingRecipe<RecipeWrapper, ItemApplicationRecipeParams> {
-
-	private boolean keepHeldItem;
-
-	public ItemApplicationRecipe(AllRecipeTypes type, ItemApplicationRecipeParams params) {
-		super(type, params);
-		keepHeldItem = params.keepHeldItem;
-	}
-
-	@Override
-	public boolean matches(RecipeWrapper inv, Level p_77569_2_) {
-		return getProcessedItem().test(inv.getItem(0)) && getRequiredHeldItem().test(inv.getItem(1));
-	}
-
-	@Override
-	protected int getMaxInputCount() {
-		return 2;
-	}
-
-	@Override
-	protected int getMaxOutputCount() {
-		return 4;
-	}
-
-	public boolean shouldKeepHeldItem() {
-		return keepHeldItem;
-	}
-
-	public Ingredient getRequiredHeldItem() {
-		if (ingredients.size() < 2)
-			throw new IllegalStateException("Item Application Recipe has no tool!");
-		return ingredients.get(1);
-	}
-
-	public Ingredient getProcessedItem() {
-		if (ingredients.isEmpty())
-			throw new IllegalStateException("Item Application Recipe has no ingredient!");
-		return ingredients.get(0);
-	}
-
-	@FunctionalInterface
-	public interface Factory<R extends ItemApplicationRecipe> extends ProcessingRecipe.Factory<ItemApplicationRecipeParams, R> {
-		R create(ItemApplicationRecipeParams params);
-	}
-
-	public static class Builder<R extends ItemApplicationRecipe> extends ProcessingRecipeBuilder<ItemApplicationRecipeParams, R, Builder<R>> {
-		public Builder(Factory<R> factory, ResourceLocation recipeId) {
-			super(factory, recipeId);
-		}
-
-		@Override
-		protected ItemApplicationRecipeParams createParams() {
-			return new ItemApplicationRecipeParams();
-		}
-
-		@Override
-		public Builder<R> self() {
-			return this;
-		}
-
-		public Builder<R> toolNotConsumed() {
-			params.keepHeldItem = true;
-			return this;
-		}
-	}
-
-	public static class Serializer<R extends ItemApplicationRecipe> implements RecipeSerializer<R> {
-		private final MapCodec<R> codec;
-		private final StreamCodec<RegistryFriendlyByteBuf, R> streamCodec;
-
-		public Serializer(ProcessingRecipe.Factory<ItemApplicationRecipeParams, R> factory) {
-			this.codec = ProcessingRecipe.codec(factory, ItemApplicationRecipeParams.CODEC);
-			this.streamCodec = ProcessingRecipe.streamCodec(factory, ItemApplicationRecipeParams.STREAM_CODEC);
-		}
-
-		@Override
-		public MapCodec<R> codec() {
-			return codec;
-		}
-
-		@Override
-		public StreamCodec<RegistryFriendlyByteBuf, R> streamCodec() {
-			return streamCodec;
-		}
-
-	}
+public record ItemApplicationRecipe(List<Ingredient> ingredients,List<ProcessingOutput> results,boolean keepHeldItem,boolean deploying) implements Recipe<ItemApplicationRecipe.Input>,IAssemblyRecipe {
+    public record Input(ItemStack item,ItemStack tool) implements RecipeInput {
+        @Override public ItemStack getItem(int slot){return switch(slot){case 0->item;case 1->tool;default->throw new IndexOutOfBoundsException(slot);};}
+        @Override public int size(){return 2;}
+    }
+    public static MapCodec<ItemApplicationRecipe> codec(boolean deploying){return RecordCodecBuilder.mapCodec(i->i.group(
+        Ingredient.CODEC.listOf(2,2).fieldOf("ingredients").forGetter(ItemApplicationRecipe::ingredients),
+        ProcessingOutput.CODEC.listOf(1,4).fieldOf("results").forGetter(ItemApplicationRecipe::results),
+        Codec.BOOL.optionalFieldOf("keep_held_item",false).forGetter(ItemApplicationRecipe::keepHeldItem)
+    ).apply(i,(ingredients,results,keep)->new ItemApplicationRecipe(ingredients,results,keep,deploying)));}
+    public Ingredient getProcessedItem(){return ingredients.getFirst();}
+    public Ingredient getRequiredHeldItem(){return ingredients.get(1);}
+    public boolean shouldKeepHeldItem(){return keepHeldItem;}
+    @Override public boolean matches(Input input,Level level){return getProcessedItem().test(input.item)&&getRequiredHeldItem().test(input.tool);}
+    @Override public ItemStack assemble(Input input){return results.getFirst().stack();}
+    @Override public boolean isSpecial(){return true;}
+    @Override public boolean showNotification(){return false;}
+    @Override public String group(){return "";}
+    @Override public RecipeType<ItemApplicationRecipe> getType(){return deploying?AllRecipeTypes.DEPLOYING:AllRecipeTypes.ITEM_APPLICATION;}
+    @Override public RecipeSerializer<ItemApplicationRecipe> getSerializer(){return deploying?AllRecipeTypes.DEPLOYING_SERIALIZER:AllRecipeTypes.ITEM_APPLICATION_SERIALIZER;}
+    @Override public PlacementInfo placementInfo(){return PlacementInfo.NOT_PLACEABLE;}
+    @Override public RecipeBookCategory recipeBookCategory(){return RecipeBookCategories.CRAFTING_MISC;}
 }

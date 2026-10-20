@@ -1,0 +1,90 @@
+{
+  "values": [
+    {
+      "id": "create:sail_frame",
+      "required": false
+    },
+    {
+      "id": "create:white_sail",
+      "required": false
+    },
+    {
+      "id": "create:orange_sail",
+      "required": false
+    },
+    {
+      "id": "create:magenta_sail",
+      "required": false
+    },
+    {
+      "id": "create:light_blue_sail",
+      "required": false
+    },
+    {
+      "id": "create:yellow_sail",
+      "required": false
+    },
+    {
+      "id": "create:lime_sail",
+      "required": false
+    },
+    {
+      "id": "create:pink_sail",
+      "required": false
+    },
+    {
+      "id": "create:gray_sail",
+      "required": false
+    },
+    {
+      "id": "create:light_gray_sail",
+      "required": false
+    },
+    {
+      "id": "create:cyan_sail",
+      "required": false
+    },
+    {
+      "id": "create:purple_sail",
+      "required": false
+    },
+    {
+      "id": "create:blue_sail",
+      "required": false
+    },
+    {
+      "id": "create:brown_sail",
+      "required": false
+    },
+    {
+      "id": "create:green_sail",
+      "required": false
+    },
+    {
+      "id": "create:red_sail",
+      "required": false
+    },
+    {
+      "id": "create:black_sail",
+      "required": false
+    },
+    "#minecraft:wool",
+    "create:sail_frame",
+    "create:white_sail",
+    "create:orange_sail",
+    "create:magenta_sail",
+    "create:light_blue_sail",
+    "create:yellow_sail",
+    "create:lime_sail",
+    "create:pink_sail",
+    "create:gray_sail",
+    "create:light_gray_sail",
+    "create:cyan_sail",
+    "create:purple_sail",
+    "create:blue_sail",
+    "create:brown_sail",
+    "create:green_sail",
+    "create:red_sail",
+    "create:black_sail"
+  ]
+}

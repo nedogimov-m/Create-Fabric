@@ -1,172 +1,56 @@
 package com.simibubi.create.content.kinetics.gauge;
 
-import java.util.List;
-
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.compat.Mods;
-import com.simibubi.create.compat.computercraft.AbstractComputerBehaviour;
-import com.simibubi.create.compat.computercraft.ComputerCraftProxy;
-import com.simibubi.create.content.kinetics.base.IRotate.StressImpact;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.item.TooltipHelper;
-import net.createmod.catnip.platform.CatnipServices;
-import com.simibubi.create.foundation.utility.CreateLang;
-
-import dan200.computercraft.api.peripheral.PeripheralCapability;
-import net.createmod.catnip.lang.LangBuilder;
-import net.createmod.catnip.theme.Color;
+import com.simibubi.create.content.equipment.goggles.GoggleTooltip;
+import com.simibubi.create.content.kinetics.KineticGraph;
+import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.Component;
-import net.minecraft.util.Mth;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.network.chat.*;
 import net.minecraft.world.level.block.state.BlockState;
-import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 
 public class StressGaugeBlockEntity extends GaugeBlockEntity {
+    private java.util.UUID advancementOwner;
+    private boolean initializedOwner;
+    public java.util.UUID advancementOwner(){return advancementOwner;}
+    public void placedBy(net.minecraft.server.level.ServerPlayer player){if(!com.simibubi.create.foundation.advancement.GaugeAdvancements.actualPlacer(this,player))return;advancementOwner=player.getUUID();removeCompletedOwner();setChanged();}
+    public void removeCompletedOwner(){if(!com.simibubi.create.foundation.advancement.AdvancementBehaviour.hasPendingFor(this,advancementOwner)&&com.simibubi.create.foundation.advancement.GaugeAdvancements.complete(this,advancementOwner,"stressometer","stressometer_maxed")){advancementOwner=null;setChanged();}}
+    public void onObserved(){com.simibubi.create.foundation.advancement.GaugeAdvancements.award(this,advancementOwner,"stressometer");if(net.minecraft.util.Mth.equal(dialTarget,1))com.simibubi.create.foundation.advancement.GaugeAdvancements.award(this,advancementOwner,"stressometer_maxed");removeCompletedOwner();}
+    public static void tick(net.minecraft.world.level.Level level,BlockPos pos,BlockState state,StressGaugeBlockEntity gauge){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, gauge)) {
+            if (!createTick.shouldTick()) return;
+GaugeBlockEntity.tick(level,pos,state,gauge);if(!level.isClientSide()&&!gauge.initializedOwner){gauge.initializedOwner=true;gauge.removeCompletedOwner();}
+        }
+    }
+    @Override protected void read(net.minecraft.world.level.storage.ValueInput input, boolean clientPacket){super.read(input, clientPacket);initializedOwner=false;}
 
-	public AbstractComputerBehaviour computerBehaviour;
-
-	static BlockPos lastSent;
-
-	public StressGaugeBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
-
-	public static void registerCapabilities(RegisterCapabilitiesEvent event) {
-		if (Mods.COMPUTERCRAFT.isLoaded()) {
-			event.registerBlockEntity(
-					PeripheralCapability.get(),
-					AllBlockEntityTypes.STRESSOMETER.get(),
-					(be, context) -> be.computerBehaviour.getPeripheralCapability()
-			);
-		}
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		behaviours.add(computerBehaviour = ComputerCraftProxy.behaviour(this));
-		registerAwardables(behaviours, AllAdvancements.STRESSOMETER, AllAdvancements.STRESSOMETER_MAXED);
-	}
-
-	@Override
-	public void updateFromNetwork(float maxStress, float currentStress, int networkSize) {
-		super.updateFromNetwork(maxStress, currentStress, networkSize);
-
-		if (computerBehaviour.hasAttachedComputer())
-			computerBehaviour.prepareComputerEvent(makeComputerKineticsChangeEvent());
-
-		if (!StressImpact.isEnabled())
-			dialTarget = 0;
-		else if (isOverStressed())
-			dialTarget = 1.125f;
-		else if (maxStress == 0)
-			dialTarget = 0;
-		else
-			dialTarget = currentStress / maxStress;
-
-		if (dialTarget > 0) {
-			if (dialTarget < .5f)
-				color = Color.mixColors(0x00FF00, 0xFFFF00, dialTarget * 2);
-			else if (dialTarget < 1)
-				color = Color.mixColors(0xFFFF00, 0xFF0000, (dialTarget) * 2 - 1);
-			else
-				color = 0xFF0000;
-		}
-
-		sendData();
-		setChanged();
-	}
-
-	@Override
-	public void onSpeedChanged(float prevSpeed) {
-		super.onSpeedChanged(prevSpeed);
-		if (getSpeed() == 0) {
-			dialTarget = 0;
-			setChanged();
-			return;
-		}
-
-		updateFromNetwork(capacity, stress, getOrCreateNetwork().getSize());
-	}
-
-	@Override
-	public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
-		if (!StressImpact.isEnabled())
-			return false;
-
-		super.addToGoggleTooltip(tooltip, isPlayerSneaking);
-
-		double capacity = getNetworkCapacity();
-		double stressFraction = getNetworkStress() / (capacity == 0 ? 1 : capacity);
-
-		CreateLang.translate("gui.stressometer.title")
-			.style(ChatFormatting.GRAY)
-			.forGoggles(tooltip);
-
-		if (getTheoreticalSpeed() == 0)
-			CreateLang.text(TooltipHelper.makeProgressBar(3, 0))
-				.translate("gui.stressometer.no_rotation")
-				.style(ChatFormatting.DARK_GRAY)
-				.forGoggles(tooltip);
-		else {
-			StressImpact.getFormattedStressText(stressFraction)
-				.forGoggles(tooltip);
-			CreateLang.translate("gui.stressometer.capacity")
-				.style(ChatFormatting.GRAY)
-				.forGoggles(tooltip);
-
-			double remainingCapacity = capacity - getNetworkStress();
-
-			LangBuilder su = CreateLang.translate("generic.unit.stress");
-			LangBuilder stressTip = CreateLang.number(remainingCapacity)
-				.add(su)
-				.style(StressImpact.of(stressFraction)
-					.getRelativeColor());
-
-			if (remainingCapacity != capacity)
-				stressTip.text(ChatFormatting.GRAY, " / ")
-					.add(CreateLang.number(capacity)
-						.add(su)
-						.style(ChatFormatting.DARK_GRAY));
-
-			stressTip.forGoggles(tooltip, 1);
-		}
-
-		if (!worldPosition.equals(lastSent))
-			CatnipServices.NETWORK.sendToServer(new GaugeObservedPacket(lastSent = worldPosition));
-
-		return true;
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-		if (clientPacket && worldPosition != null && worldPosition.equals(lastSent))
-			lastSent = null;
-	}
-
-	public float getNetworkStress() {
-		return stress;
-	}
-
-	public float getNetworkCapacity() {
-		return capacity;
-	}
-
-	public void onObserved() {
-		award(AllAdvancements.STRESSOMETER);
-		if (Mth.equal(dialTarget, 1))
-			award(AllAdvancements.STRESSOMETER_MAXED);
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		computerBehaviour.removePeripheral();
-	}
+    public StressGaugeBlockEntity(BlockPos pos, BlockState state) { super(AllBlockEntityTypes.STRESSOMETER, pos, state); }
+    @Override protected void updateReading(float speed, float theoreticalSpeed, KineticGraph.Stress stress) {
+        dialTarget = theoreticalSpeed == 0 ? 0 : stress.overstressed() ? 1.125f : stress.capacity() == 0 ? 0 : (float)(stress.impact() / stress.capacity());
+        if (dialTarget > 0) color = dialTarget < 0.5f ? mix(0x00FF00, 0xFFFF00, dialTarget * 2) : dialTarget < 1 ? mix(0xFFFF00, 0xFF0000, dialTarget * 2 - 1) : 0xFF0000;
+    }
+    public double getNetworkStress() { return getStressImpact(); }
+    public double getNetworkCapacity() { return getStressCapacity(); }
+    @Override public boolean addToGoggleTooltip(List<Component> tooltip, boolean sneaking) {
+        super.addToGoggleTooltip(tooltip, sneaking); tooltip.add(GoggleTooltip.translate("gui.stressometer.title").withStyle(ChatFormatting.GRAY));
+        if (getTheoreticalSpeed() == 0) { tooltip.add(Component.literal(bar(0)).append(GoggleTooltip.translate("gui.stressometer.no_rotation")).withStyle(ChatFormatting.DARK_GRAY)); return true; }
+        double capacity = getNetworkCapacity(), stress = getNetworkStress(), fraction = stress / (capacity == 0 ? 1 : capacity);
+        int level = fraction > 1 ? 3 : fraction > 0.75 ? 2 : fraction > 0.5 ? 1 : 0;
+        var color = new ChatFormatting[]{ChatFormatting.GREEN, ChatFormatting.YELLOW, ChatFormatting.GOLD, ChatFormatting.RED}[level];
+        tooltip.add(Component.literal(bar(Math.min(3, level + 1))).append(GoggleTooltip.translate("tooltip.stressImpact." + new String[]{"low", "medium", "high", "overstressed"}[level])).append(" (" + (int)(fraction * 100) + "%) ").withStyle(color));
+        tooltip.add(GoggleTooltip.translate("gui.stressometer.capacity").withStyle(ChatFormatting.GRAY));
+        var remaining = GoggleTooltip.units(capacity - stress, "stress").withStyle(color);
+        if (stress != 0) remaining.append(Component.literal(" / ").withStyle(ChatFormatting.GRAY)).append(GoggleTooltip.units(capacity, "stress").withStyle(ChatFormatting.DARK_GRAY));
+        GoggleTooltip.line(tooltip, remaining, 1); return true;
+    }
+    @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
+        super.addNativeAdvancementIds(ids);
+        ids.add("stressometer");
+        ids.add("stressometer_maxed");
+    }
+    private final com.simibubi.create.foundation.advancement.AdvancementBehaviour.OwnerStorage canonicalAdvancementOwner=new com.simibubi.create.foundation.advancement.AdvancementBehaviour.OwnerStorage() {
+        @Override public java.util.UUID getPlayerId(){return advancementOwner;}
+        @Override public void setPlayerId(java.util.UUID id){advancementOwner=id;}
+    };
+    @Override protected com.simibubi.create.foundation.advancement.AdvancementBehaviour.OwnerStorage nativeAdvancementOwnerStorage() {return canonicalAdvancementOwner;}
 }

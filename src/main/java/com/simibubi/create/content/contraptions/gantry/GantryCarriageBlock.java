@@ -1,142 +1,35 @@
 package com.simibubi.create.content.contraptions.gantry;
 
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.kinetics.base.DirectionalAxisKineticBlock;
-import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.content.kinetics.gantry.GantryShaftBlock;
-import com.simibubi.create.foundation.block.IBE;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
-import net.minecraft.world.ItemInteractionResult;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.redstone.Orientation;
 import net.minecraft.world.phys.BlockHitResult;
 
-public class GantryCarriageBlock extends DirectionalAxisKineticBlock implements IBE<GantryCarriageBlockEntity> {
-
-	public GantryCarriageBlock(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public boolean canSurvive(BlockState state, LevelReader world, BlockPos pos) {
-		Direction direction = state.getValue(FACING);
-		BlockState shaft = world.getBlockState(pos.relative(direction.getOpposite()));
-		return AllBlocks.GANTRY_SHAFT.has(shaft) && shaft.getValue(GantryShaftBlock.FACING)
-			.getAxis() != direction.getAxis();
-	}
-
-	@Override
-	public void updateIndirectNeighbourShapes(BlockState stateIn, LevelAccessor worldIn, BlockPos pos, int flags, int count) {
-		super.updateIndirectNeighbourShapes(stateIn, worldIn, pos, flags, count);
-		withBlockEntityDo(worldIn, pos, GantryCarriageBlockEntity::checkValidGantryShaft);
-	}
-
-	@Override
-	public void onPlace(BlockState state, Level worldIn, BlockPos pos, BlockState oldState, boolean isMoving) {
-		super.onPlace(state, worldIn, pos, oldState, isMoving);
-	}
-
-	@Override
-	protected Direction getFacingForPlacement(BlockPlaceContext context) {
-		return context.getClickedFace();
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		if (!player.mayBuild() || player.isShiftKeyDown())
-			return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-		if (stack.isEmpty()) {
-			withBlockEntityDo(level, pos, be -> be.checkValidGantryShaft());
-			return ItemInteractionResult.SUCCESS;
-		}
-		return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		BlockState stateForPlacement = super.getStateForPlacement(context);
-		Direction opposite = stateForPlacement.getValue(FACING)
-			.getOpposite();
-		return cycleAxisIfNecessary(stateForPlacement, opposite, context.getLevel()
-			.getBlockState(context.getClickedPos()
-				.relative(opposite)));
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level world, BlockPos pos, Block p_220069_4_, BlockPos updatePos,
-								boolean p_220069_6_) {
-		if (updatePos.equals(pos.relative(state.getValue(FACING)
-			.getOpposite())) && !canSurvive(state, world, pos))
-			world.destroyBlock(pos, true);
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction direction, BlockState otherState, LevelAccessor world,
-								  BlockPos pos, BlockPos p_196271_6_) {
-		if (state.getValue(FACING) != direction.getOpposite())
-			return state;
-		return cycleAxisIfNecessary(state, direction, otherState);
-	}
-
-	protected BlockState cycleAxisIfNecessary(BlockState state, Direction direction, BlockState otherState) {
-		if (!AllBlocks.GANTRY_SHAFT.has(otherState))
-			return state;
-		if (otherState.getValue(GantryShaftBlock.FACING)
-			.getAxis() == direction.getAxis())
-			return state;
-		if (isValidGantryShaftAxis(state, otherState))
-			return state;
-		return state.cycle(AXIS_ALONG_FIRST_COORDINATE);
-	}
-
-	public static boolean isValidGantryShaftAxis(BlockState pinionState, BlockState gantryState) {
-		return getValidGantryShaftAxis(pinionState) == gantryState.getValue(GantryShaftBlock.FACING)
-			.getAxis();
-	}
-
-	public static Axis getValidGantryShaftAxis(BlockState state) {
-		if (!(state.getBlock() instanceof GantryCarriageBlock block))
-			return Axis.Y;
-		Axis rotationAxis = block.getRotationAxis(state);
-		Axis facingAxis = state.getValue(FACING)
-			.getAxis();
-		for (Axis axis : Iterate.axes)
-			if (axis != rotationAxis && axis != facingAxis)
-				return axis;
-		return Axis.Y;
-	}
-
-	public static Axis getValidGantryPinionAxis(BlockState state, Axis shaftAxis) {
-		Axis facingAxis = state.getValue(FACING)
-			.getAxis();
-		for (Axis axis : Iterate.axes)
-			if (axis != shaftAxis && axis != facingAxis)
-				return axis;
-		return Axis.Y;
-	}
-
-	@Override
-	public Class<GantryCarriageBlockEntity> getBlockEntityClass() {
-		return GantryCarriageBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends GantryCarriageBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.GANTRY_PINION.get();
-	}
-
+public class GantryCarriageBlock extends DirectionalAxisKineticBlock {
+    public GantryCarriageBlock(Properties p){super(p.strength(1.5f,6).sound(SoundType.STONE).noOcclusion());registerDefaultState(defaultBlockState().setValue(FACING,Direction.UP).setValue(AXIS_ALONG_FIRST_COORDINATE,false));}
+    @Override protected Direction getFacingForPlacement(BlockPlaceContext context){return context.getClickedFace();}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){var state=super.getStateForPlacement(context);return cycleAxisIfNecessary(state,LoadedLevelAccess.blockState(context.getLevel(),context.getClickedPos().relative(state.getValue(FACING).getOpposite())));}
+    public static Direction.Axis getValidGantryShaftAxis(BlockState state){var carriage=(GantryCarriageBlock)state.getBlock();for(var axis:Direction.Axis.values())if(axis!=carriage.getRotationAxis(state)&&axis!=state.getValue(FACING).getAxis())return axis;throw new IllegalArgumentException("Carriage has no perpendicular rack axis");}
+    public static Direction.Axis getValidGantryPinionAxis(BlockState state,Direction.Axis shaftAxis){for(var axis:Direction.Axis.values())if(axis!=shaftAxis&&axis!=state.getValue(FACING).getAxis())return axis;throw new IllegalArgumentException("Carriage has no perpendicular pinion axis");}
+    private BlockState cycleAxisIfNecessary(BlockState state,BlockState shaft){return shaft.getBlock() instanceof GantryShaftBlock&&shaft.getValue(GantryShaftBlock.FACING).getAxis()!=state.getValue(FACING).getAxis()&&getValidGantryShaftAxis(state)!=shaft.getValue(GantryShaftBlock.FACING).getAxis()?state.cycle(AXIS_ALONG_FIRST_COORDINATE):state;}
+    @Override protected boolean canSurvive(BlockState state,LevelReader reader,BlockPos pos){var behind=pos.relative(state.getValue(FACING).getOpposite());if(reader instanceof Level level&&!LoadedLevelAccess.isLoaded(level,behind))return true;var shaft=LoadedLevelAccess.blockState(reader,behind);return shaft.getBlock() instanceof GantryShaftBlock&&shaft.getValue(GantryShaftBlock.FACING).getAxis()!=state.getValue(FACING).getAxis();}
+    @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction side,BlockPos otherPos,BlockState other,RandomSource random){return side==state.getValue(FACING).getOpposite()?cycleAxisIfNecessary(state,other):state;}
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block neighbor,Orientation orientation,boolean moved){super.neighborChanged(state,level,pos,neighbor,orientation,moved);if(!level.isClientSide()&&!canSurvive(state,level,pos))level.destroyBlock(pos,true);}
+    @Override public void updateIndirectNeighbourShapes(BlockState state,LevelAccessor accessor,BlockPos pos,int flags,int recursion){super.updateIndirectNeighbourShapes(state,accessor,pos,flags,recursion);if(accessor instanceof Level level&&!level.isClientSide()&&LoadedLevelAccess.blockEntity(level,pos) instanceof GantryCarriageBlockEntity carriage)carriage.checkValidGantryShaft();}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){return InteractionResult.TRY_WITH_EMPTY_HAND;}
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){if(!player.mayBuild()||player.isSpectator()||player.isShiftKeyDown()||!player.getMainHandItem().isEmpty()||!level.mayInteract(player,pos))return InteractionResult.PASS;if(!level.isClientSide()&&LoadedLevelAccess.blockEntity(level,pos) instanceof GantryCarriageBlockEntity carriage)carriage.checkValidGantryShaft();return InteractionResult.SUCCESS;}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new GantryCarriageBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity>BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return createTickerHelper(type,AllBlockEntityTypes.GANTRY_PINION,GantryCarriageBlockEntity::tick);}
 }

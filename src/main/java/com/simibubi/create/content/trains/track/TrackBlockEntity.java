@@ -1,402 +1,148 @@
 package com.simibubi.create.content.trains.track;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Optional;
-import java.util.Set;
-
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllTags;
-import com.simibubi.create.api.contraption.transformable.TransformableBlockEntity;
-import com.simibubi.create.content.contraptions.StructureTransform;
-import com.simibubi.create.content.trains.graph.TrackNodeLocation;
-import com.simibubi.create.foundation.block.ProperWaterloggedBlock;
-import com.simibubi.create.foundation.blockEntity.IMergeableBE;
-import com.simibubi.create.foundation.blockEntity.RemoveBlockEntityPacket;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import dev.engine_room.flywheel.lib.visualization.VisualizationHelper;
-import net.createmod.catnip.data.Pair;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.createmod.catnip.platform.CatnipServices;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.HolderLookup;
+import com.simibubi.create.AllBlockEntityTypes;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import java.util.*;
+import net.minecraft.core.*;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.nbt.Tag;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.Mth;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.phys.AABB;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.Vec3;
+import net.createmod.catnip.data.Pair;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.client.model.data.ModelData;
+/** Curves are stored at both real endpoint BEs; only the primary renders. No unloaded endpoint is treated as air. */
+public class TrackBlockEntity extends com.simibubi.create.foundation.blockEntity.SmartBlockEntity implements net.fabricmc.fabric.api.blockgetter.v2.RenderDataBlockEntity {
+    private final Map<BlockPos,BezierConnection> connections=new LinkedHashMap<>();
+    boolean cancelDrops;
+    private boolean removing;
+    private int validationDelay=1,portalValidationDelay=1;
+    private long portalResyncAt=-1;
+    private UUID portalBinding;
+    boolean portalCounterpartRemoval;
+    public Pair<ResourceKey<Level>,BlockPos> boundLocation;
+    public final TrackBlockEntityTilt tilt=new TrackBlockEntityTilt(this);
+    public record TrackRenderData(Optional<Double> smoothingAngle){}
+    @Override public Object getRenderData(){return new TrackRenderData(tilt.smoothingAngle);}
+    public TrackBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.TRACK,pos,state);}
+    public Map<BlockPos,BezierConnection> getConnections(){return Collections.unmodifiableMap(connections);}
+    public boolean isTilted(){return tilt.smoothingAngle.isPresent();}
+    public boolean hasInteractableConnections(){return connections.values().stream().anyMatch(BezierConnection::isPrimary);}
+    public UUID getPortalBinding(){return portalBinding;}
+    public void bind(ResourceKey<Level> dimension,BlockPos pos){
+        if(portalBinding!=null)throw new IllegalStateException("Actual portal ownership requires paired binding, not independent rebinding");
+        boundLocation=Pair.of(dimension,pos.immutable());notifyUpdate();scheduleGraph();portalValidationDelay=1;
+    }
+    void bindPortal(ResourceKey<Level> dimension,BlockPos pos,UUID binding){
+        boundLocation=Pair.of(dimension,pos.immutable());portalBinding=Objects.requireNonNull(binding);
+        // A normal BlockItem predicts a straight rail without a conditional BE.
+        // Native block updates can precede its prediction ACK, so the first BE
+        // packet may arrive before that real client owner exists. Reannounce the
+        // authoritative owner through normal chunk updates after two server ticks.
+        if(level instanceof ServerLevel server)portalResyncAt=server.getGameTime()+2;
+        notifyUpdate();scheduleGraph();portalValidationDelay=1;
+    }
+    void finishRollback(){removing=false;notifyUpdate();}
+    public void tickClient(){if(!getBlockState().getOptionalValue(TrackBlock.HAS_BE).orElse(false))level.removeBlockEntity(worldPosition);}
+    public void tick(){
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, worldPosition, getBlockState(), this)) {
+            if (!createTick.shouldTick()) return;
 
-public class TrackBlockEntity extends SmartBlockEntity implements TransformableBlockEntity, IMergeableBE {
-
-	Map<BlockPos, BezierConnection> connections;
-	boolean cancelDrops;
-
-	public Pair<ResourceKey<Level>, BlockPos> boundLocation;
-	public TrackBlockEntityTilt tilt;
-
-	public TrackBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		connections = new HashMap<>();
-		setLazyTickRate(100);
-		tilt = new TrackBlockEntityTilt(this);
-	}
-
-	public Map<BlockPos, BezierConnection> getConnections() {
-		return connections;
-	}
-
-	@Override
-	public void initialize() {
-		super.initialize();
-		if (!level.isClientSide && hasInteractableConnections())
-			registerToCurveInteraction();
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		tilt.undoSmoothing();
-	}
-
-	@Override
-	public void lazyTick() {
-		for (BezierConnection connection : connections.values())
-			if (connection.isPrimary())
-				manageFakeTracksAlong(connection, false);
-	}
-
-	public void validateConnections() {
-		Set<BlockPos> invalid = new HashSet<>();
-
-		for (Entry<BlockPos, BezierConnection> entry : connections.entrySet()) {
-			BlockPos key = entry.getKey();
-			BezierConnection bc = entry.getValue();
-
-			if (!key.equals(bc.getKey()) || !worldPosition.equals(bc.bePositions.getFirst())) {
-				invalid.add(key);
-				continue;
-			}
-
-			BlockState blockState = level.getBlockState(key);
-			if (blockState.getBlock()instanceof ITrackBlock trackBlock && !blockState.getValue(TrackBlock.HAS_BE))
-				for (Vec3 v : trackBlock.getTrackAxes(level, key, blockState)) {
-					Vec3 bcEndAxis = bc.axes.getSecond();
-					if (v.distanceTo(bcEndAxis) < 1 / 1024f || v.distanceTo(bcEndAxis.scale(-1)) < 1 / 1024f)
-						level.setBlock(key, blockState.setValue(TrackBlock.HAS_BE, true), Block.UPDATE_ALL);
-				}
-
-			BlockEntity blockEntity = level.getBlockEntity(key);
-			if (!(blockEntity instanceof TrackBlockEntity trackBE) || blockEntity.isRemoved()) {
-				invalid.add(key);
-				continue;
-			}
-
-			if (!trackBE.connections.containsKey(worldPosition)) {
-				trackBE.addConnection(bc.secondary());
-				trackBE.tilt.tryApplySmoothing();
-			}
-		}
-
-		for (BlockPos blockPos : invalid)
-			removeConnection(blockPos);
-	}
-
-	public void addConnection(BezierConnection connection) {
-		// don't replace existing connections with different materials
-		if (connections.containsKey(connection.getKey()) && connection.equalsSansMaterial(connections.get(connection.getKey())))
-			return;
-		connections.put(connection.getKey(), connection);
-		level.scheduleTick(worldPosition, getBlockState().getBlock(), 1);
-		notifyUpdate();
-
-		if (connection.isPrimary())
-			manageFakeTracksAlong(connection, false);
-	}
-
-	public void removeConnection(BlockPos target) {
-		if (isTilted())
-			tilt.captureSmoothingHandles();
-
-		BezierConnection removed = connections.remove(target);
-		notifyUpdate();
-
-		if (removed != null)
-			manageFakeTracksAlong(removed, true);
-
-		if (!connections.isEmpty() || getBlockState().getOptionalValue(TrackBlock.SHAPE)
-			.orElse(TrackShape.NONE)
-			.isPortal())
-			return;
-
-		BlockState blockState = level.getBlockState(worldPosition);
-		if (blockState.hasProperty(TrackBlock.HAS_BE))
-			level.setBlockAndUpdate(worldPosition, blockState.setValue(TrackBlock.HAS_BE, false));
-		if (level instanceof ServerLevel serverLevel)
-			CatnipServices.NETWORK.sendToClientsTrackingChunk(serverLevel, new ChunkPos(worldPosition), new RemoveBlockEntityPacket(worldPosition));
-	}
-
-	public void removeInboundConnections(boolean dropAndDiscard) {
-		for (BezierConnection bezierConnection : connections.values()) {
-			if (!(level.getBlockEntity(bezierConnection.getKey())instanceof TrackBlockEntity tbe))
-				return;
-			tbe.removeConnection(bezierConnection.bePositions.getFirst());
-			if (!dropAndDiscard)
-				continue;
-			if (!cancelDrops)
-				bezierConnection.spawnItems(level);
-			bezierConnection.spawnDestroyParticles(level);
-		}
-		if (dropAndDiscard && level instanceof ServerLevel serverLevel)
-			CatnipServices.NETWORK.sendToClientsTrackingChunk(serverLevel, new ChunkPos(worldPosition), new RemoveBlockEntityPacket(worldPosition));
-	}
-
-	public void bind(ResourceKey<Level> boundDimension, BlockPos boundLocation) {
-		this.boundLocation = Pair.of(boundDimension, boundLocation);
-		setChanged();
-	}
-
-	public boolean isTilted() {
-		return tilt.smoothingAngle.isPresent();
-	}
-
-	@Override
-	public void writeSafe(CompoundTag tag, HolderLookup.Provider registries) {
-		super.writeSafe(tag, registries);
-		writeTurns(tag, true);
-	}
-
-	@Override
-	protected void write(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(tag, registries, clientPacket);
-		writeTurns(tag, false);
-		if (isTilted())
-			tag.putDouble("Smoothing", tilt.smoothingAngle.get());
-		if (boundLocation == null)
-			return;
-		tag.put("BoundLocation", NbtUtils.writeBlockPos(boundLocation.getSecond()));
-		tag.putString("BoundDimension", boundLocation.getFirst()
-			.location()
-			.toString());
-	}
-
-	private void writeTurns(CompoundTag tag, boolean restored) {
-		ListTag listTag = new ListTag();
-		for (BezierConnection bezierConnection : connections.values())
-			listTag.add((restored ? tilt.restoreToOriginalCurve(bezierConnection.clone()) : bezierConnection)
-				.write(worldPosition));
-		tag.put("Connections", listTag);
-	}
-
-	@Override
-	protected void read(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(tag, registries, clientPacket);
-		connections.clear();
-		for (Tag t : tag.getList("Connections", Tag.TAG_COMPOUND)) {
-			if (!(t instanceof CompoundTag))
-				return;
-			BezierConnection connection = new BezierConnection((CompoundTag) t, worldPosition);
-			connections.put(connection.getKey(), connection);
-		}
-
-		boolean smoothingPreviously = tilt.smoothingAngle.isPresent();
-		tilt.smoothingAngle = Optional.ofNullable(tag.contains("Smoothing") ? tag.getDouble("Smoothing") : null);
-		if (smoothingPreviously != tilt.smoothingAngle.isPresent() && clientPacket) {
-			requestModelDataUpdate();
-			level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 16);
-		}
-
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> VisualizationHelper.queueUpdate(this));
-
-		if (hasInteractableConnections())
-			registerToCurveInteraction();
-		else
-			removeFromCurveInteraction();
-
-		if (tag.contains("BoundLocation"))
-			boundLocation = Pair.of(
-				ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(tag.getString("BoundDimension"))),
-				NBTHelper.readBlockPos(tag, "BoundLocation"));
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public AABB getRenderBoundingBox() {
-		return AABB.INFINITE;
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {}
-
-	@Override
-	public void accept(BlockEntity other) {
-		if (other instanceof TrackBlockEntity track)
-			connections.putAll(track.connections);
-		validateConnections();
-		level.scheduleTick(worldPosition, getBlockState().getBlock(), 1);
-	}
-
-	public boolean hasInteractableConnections() {
-		for (BezierConnection connection : connections.values())
-			if (connection.isPrimary())
-				return true;
-		return false;
-	}
-
-	@Override
-	public void transform(BlockEntity be, StructureTransform transform) {
-		Map<BlockPos, BezierConnection> restoredConnections = new HashMap<>();
-		for (Entry<BlockPos, BezierConnection> entry : connections.entrySet())
-			restoredConnections.put(entry.getKey(),
-				tilt.restoreToOriginalCurve(tilt.restoreToOriginalCurve(entry.getValue()
-					.secondary())
-					.secondary()));
-		connections = restoredConnections;
-		tilt.smoothingAngle = Optional.empty();
-
-		if (transform.rotationAxis != Axis.Y)
-			return;
-
-		Map<BlockPos, BezierConnection> transformedConnections = new HashMap<>();
-		for (Entry<BlockPos, BezierConnection> entry : connections.entrySet()) {
-			BezierConnection newConnection = entry.getValue();
-			newConnection.normals.replace(transform::applyWithoutOffsetUncentered);
-			newConnection.axes.replace(transform::applyWithoutOffsetUncentered);
-
-			BlockPos diff = newConnection.bePositions.getSecond()
-				.subtract(newConnection.bePositions.getFirst());
-			newConnection.bePositions
-				.setSecond(BlockPos.containing(Vec3.atCenterOf(newConnection.bePositions.getFirst())
-					.add(transform.applyWithoutOffsetUncentered(Vec3.atLowerCornerOf(diff)))));
-
-			Vec3 beVec = Vec3.atLowerCornerOf(worldPosition);
-			Vec3 teCenterVec = beVec.add(0.5, 0.5, 0.5);
-			Vec3 start = newConnection.starts.getFirst();
-			Vec3 startToBE = start.subtract(teCenterVec);
-			Vec3 endToStart = newConnection.starts.getSecond()
-				.subtract(start);
-			startToBE = transform.applyWithoutOffsetUncentered(startToBE)
-				.add(teCenterVec);
-			endToStart = transform.applyWithoutOffsetUncentered(endToStart)
-				.add(startToBE);
-
-			newConnection.starts.setFirst(new TrackNodeLocation(startToBE).getLocation());
-			newConnection.starts.setSecond(new TrackNodeLocation(endToStart).getLocation());
-
-			BlockPos newTarget = newConnection.getKey();
-			transformedConnections.put(newTarget, newConnection);
-		}
-
-		connections = transformedConnections;
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		if (level.isClientSide)
-			removeFromCurveInteraction();
-	}
-
-	@Override
-	public void remove() {
-		super.remove();
-
-		for (BezierConnection connection : connections.values())
-			manageFakeTracksAlong(connection, true);
-
-		if (boundLocation != null && level instanceof ServerLevel) {
-			ServerLevel otherLevel = level.getServer()
-				.getLevel(boundLocation.getFirst());
-			if (otherLevel == null)
-				return;
-			if (AllTags.AllBlockTags.TRACKS.matches(otherLevel.getBlockState(boundLocation.getSecond())))
-				otherLevel.destroyBlock(boundLocation.getSecond(), false);
-		}
-	}
-
-	private void registerToCurveInteraction() {
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> this::registerToCurveInteractionUnsafe);
-	}
-
-	private void removeFromCurveInteraction() {
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> this::removeFromCurveInteractionUnsafe);
-	}
-
-	@Override
-	public ModelData getModelData() {
-		if (!isTilted())
-			return super.getModelData();
-		return ModelData.builder()
-			.with(TrackBlockEntityTilt.ASCENDING_PROPERTY, tilt.smoothingAngle.get())
-			.build();
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private void registerToCurveInteractionUnsafe() {
-		TrackBlockOutline.TRACKS_WITH_TURNS.get(level)
-			.put(worldPosition, this);
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private void removeFromCurveInteractionUnsafe() {
-		TrackBlockOutline.TRACKS_WITH_TURNS.get(level)
-			.remove(worldPosition);
-	}
-
-	public void manageFakeTracksAlong(BezierConnection bc, boolean remove) {
-		Map<Pair<Integer, Integer>, Double> yLevels = bc.rasterise();
-
-		for (Entry<Pair<Integer, Integer>, Double> entry : yLevels.entrySet()) {
-			double yValue = entry.getValue();
-			int floor = Mth.floor(yValue);
-			BlockPos targetPos = new BlockPos(entry.getKey()
-				.getFirst(), floor,
-				entry.getKey()
-					.getSecond());
-			targetPos = targetPos.offset(bc.bePositions.getFirst())
-				.above(1);
-
-			BlockState stateAtPos = level.getBlockState(targetPos);
-			boolean present = AllBlocks.FAKE_TRACK.has(stateAtPos);
-
-			if (remove) {
-				if (present)
-					level.removeBlock(targetPos, false);
-				continue;
-			}
-
-			FluidState fluidState = stateAtPos.getFluidState();
-			if (!fluidState.isEmpty() && !fluidState.isSourceOfType(Fluids.WATER))
-				continue;
-
-			if (!present && stateAtPos.canBeReplaced())
-				level.setBlock(targetPos,
-					ProperWaterloggedBlock.withWater(level, AllBlocks.FAKE_TRACK.getDefaultState(), targetPos), Block.UPDATE_ALL);
-			FakeTrackBlock.keepAlive(level, targetPos);
-		}
-	}
-
+        if(!getBlockState().getOptionalValue(TrackBlock.HAS_BE).orElse(false)){cancelDrops=true;preRemoveSideEffects(worldPosition,getBlockState());level.removeBlockEntity(worldPosition);return;}
+        if(--portalValidationDelay<=0){portalValidationDelay=20;TrackPortalConnection.tick(this);if(isRemoved())return;}
+        if(portalResyncAt>=0&&level.getGameTime()>=portalResyncAt){portalResyncAt=-1;if(boundLocation!=null&&portalBinding!=null)notifyUpdate();}
+        tilt.tick();
+        if(--validationDelay<=0){validationDelay=100;validateConnections();if(!isRemoved()){tilt.tryApplySmoothing();for(var curve:List.copyOf(connections.values()))if(curve.isPrimary())manageFakeTracksAlong(curve,false);}}
+    
+        }
+    }
+    public void validateConnections(){
+        if(!(level instanceof ServerLevel server)||removing)return;
+        var repaired=new LinkedHashSet<TrackBlockEntity>();
+        for(var entry:List.copyOf(connections.entrySet())){
+            var curve=entry.getValue();var target=entry.getKey();
+            if(!target.equals(curve.getKey())||!worldPosition.equals(curve.bePositions.getFirst()))throw new IllegalStateException("Misbound curve at "+worldPosition);
+            if(TrackConnectionCleanup.isPending(server,curve)){removeConnection(target);continue;}
+            if(!LoadedLevelAccess.isLoaded(level,target))continue;
+            var state=LoadedLevelAccess.blockState(level,target);
+            if(!(state.getBlock() instanceof ITrackBlock track)){removeConnection(target);continue;}
+            var endAxis=TrackBlockEntityTilt.axisBeforeSmoothing(curve,false);boolean aligns=track.getTrackAxes(level,target,state).stream().anyMatch(axis->axis.normalize().distanceTo(endAxis)<1/1024f||axis.normalize().distanceTo(endAxis.scale(-1))<1/1024f);
+            if(!aligns||!state.hasProperty(TrackBlock.HAS_BE)){removeConnection(target);continue;}
+            if(!state.getValue(TrackBlock.HAS_BE))level.setBlock(target,state.setValue(TrackBlock.HAS_BE,true),Block.UPDATE_ALL);
+            if(LoadedLevelAccess.blockEntity(level,target) instanceof TrackBlockEntity other){
+                var reverse=other.connections.get(worldPosition);
+                if(reverse==null){other.addConnection(curve.secondary());repaired.add(other);}
+                else if(!reverse.equalsSansMaterial(curve)||reverse.getMaterial()!=curve.getMaterial())removeConnection(target);
+            }
+        }
+        for(var other:repaired)if(!other.isRemoved())other.tilt.tryApplySmoothing();
+    }
+    public void addConnection(BezierConnection curve){
+        if(!worldPosition.equals(curve.bePositions.getFirst())||curve.getKey().equals(worldPosition))throw new IllegalArgumentException("Curve endpoint identity");
+        var old=connections.get(curve.getKey());
+        if(old!=null){if(old.equalsSansMaterial(curve)&&old.getMaterial()==curve.getMaterial())return;throw new IllegalStateException("Different curve already owns endpoint pair");}
+        connections.put(curve.getKey().immutable(),curve);TrackCurveIndex.track(this);notifyUpdate();scheduleGraph();if(curve.isPrimary())manageFakeTracksAlong(curve,false);
+    }
+    public void removeConnection(BlockPos target){
+        if(isTilted())tilt.captureSmoothingHandles();var removed=connections.remove(target);if(removed==null)return;tilt.connectionsChanged();manageFakeTracksAlong(removed,true);notifyUpdate();scheduleGraph();
+        // Native conditional BE removal must be explicit for a same-block property transition.
+        if(connections.isEmpty()&&boundLocation==null&&!removing&&level!=null&&!level.isClientSide()){
+            var state=LoadedLevelAccess.blockState(level,worldPosition);
+            if(state.getBlock() instanceof TrackBlock&&state.getValue(TrackBlock.HAS_BE)){
+                removing=true;level.setBlock(worldPosition,state.setValue(TrackBlock.HAS_BE,false),Block.UPDATE_ALL);level.removeBlockEntity(worldPosition);removing=false;
+            }
+        }
+    }
+    void replaceSmoothingConnections(Map<BlockPos,BezierConnection> replacements){connections.clear();connections.putAll(replacements);}
+    void finishSmoothingUpdate(){TrackCurveIndex.track(this);notifyUpdate();scheduleGraph();}
+    void suppressRemovalForRollback(){removing=true;}
+    private void scheduleGraph(){if(level instanceof ServerLevel)level.scheduleTick(worldPosition,getBlockState().getBlock(),1);}
+    public void notifyUpdate(){setChanged();if(level!=null)level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_CLIENTS);}
+    /** Actual native destruction callback; chunk unload never executes this path. */
+    @Override public void preRemoveSideEffects(BlockPos pos,BlockState state){
+        if(level instanceof ServerLevel server&&!removing){
+            if(!cancelDrops)for(var curve:connections.values())TrackCurveItems.requireMaterials(curve);
+            TrackPortalCleanup.removed(this);
+            removing=true;
+            for(var curve:List.copyOf(connections.values())){
+                // Queue before changing the reciprocal BE. Matching the full geometry protects a replacement rail.
+                TrackConnectionCleanup.removeOrQueue(server,curve.secondary());
+                manageFakeTracksAlong(curve,true);
+                if(!cancelDrops)TrackCurveItems.spawn(server,curve);
+            }
+            connections.clear();TrackCurveIndex.untrack(this);setChanged();removing=false;
+        }
+        super.preRemoveSideEffects(pos,state);
+    }
+    @Override protected void write(ValueOutput out, boolean clientPacket){
+        super.write(out, clientPacket);out.store("Connections",CompoundTag.CODEC.listOf(),connections.values().stream().map(curve->curve.write(worldPosition)).toList());
+        tilt.smoothingAngle.ifPresent(angle->out.putDouble("Smoothing",angle));
+        if(portalBinding!=null)out.store("PortalBinding",UUIDUtil.CODEC,portalBinding);
+        if(boundLocation!=null){out.store("BoundLocation",BlockPos.CODEC,boundLocation.getSecond());out.putString("BoundDimension",boundLocation.getFirst().identifier().toString());}
+    }
+    @Override protected void read(ValueInput input, boolean clientPacket){
+        var previousAngle=tilt.smoothingAngle;super.read(input, clientPacket);connections.clear();
+        for(var encoded:input.read("Connections",CompoundTag.CODEC.listOf()).orElse(List.of())){
+            var curve=new BezierConnection(encoded,worldPosition);
+            if(!curve.bePositions.getFirst().equals(worldPosition)||curve.getKey().equals(worldPosition)||connections.putIfAbsent(curve.getKey(),curve)!=null)throw new IllegalArgumentException("Invalid saved curve endpoint binding");
+        }
+        tilt.smoothingAngle=input.read("Smoothing",com.mojang.serialization.Codec.DOUBLE);tilt.afterLoad();boundLocation=null;
+        var target=input.read("BoundLocation",BlockPos.CODEC);if(target.isPresent())boundLocation=Pair.of(ResourceKey.create(Registries.DIMENSION,Identifier.parse(input.getStringOr("BoundDimension","minecraft:overworld"))),target.get());
+        portalBinding=input.read("PortalBinding",UUIDUtil.CODEC).orElse(null);portalValidationDelay=1;
+        if(portalBinding!=null&&boundLocation==null)throw new IllegalArgumentException("Saved portal binding without actual dimensional endpoint");
+        validationDelay=1;if(level!=null){TrackCurveIndex.track(this);if(level.isClientSide()&&!previousAngle.equals(tilt.smoothingAngle))level.sendBlockUpdated(worldPosition,getBlockState(),getBlockState(),Block.UPDATE_ALL);}
+    }
+    public void manageFakeTracksAlong(BezierConnection curve,boolean remove){TrackCurveCoverage.update(level,curve,remove);}
+    @Override public void setLevel(Level level){super.setLevel(level);TrackCurveIndex.track(this);}
+    @Override public void invalidate(){TrackCurveIndex.untrack(this);super.invalidate();}
+    @Override public void clearRemoved(){super.clearRemoved();TrackCurveIndex.track(this);}
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries){return super.getUpdateTag(registries);}
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket(){return ClientboundBlockEntityDataPacket.create(this);}
 }

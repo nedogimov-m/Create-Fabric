@@ -1,0 +1,13 @@
+{
+  "type": "create:deploying",
+  "ingredients": [
+    "create:waxed_copper_tile_slab",
+    "#minecraft:axes"
+  ],
+  "keep_held_item": true,
+  "results": [
+    {
+      "id": "create:copper_tile_slab"
+    }
+  ]
+}

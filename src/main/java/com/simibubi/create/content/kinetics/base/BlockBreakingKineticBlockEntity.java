@@ -1,161 +1,78 @@
 package com.simibubi.create.content.kinetics.base;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
-import com.simibubi.create.AllTags.AllBlockTags;
+import com.simibubi.create.Create;
 import com.simibubi.create.foundation.utility.BlockHelper;
-
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.nbt.NBTHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.Mth;
+import net.minecraft.tags.TagKey;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.level.GameRules;
-import net.minecraft.world.level.block.AirBlock;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.Vec3;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public abstract class BlockBreakingKineticBlockEntity extends KineticBlockEntity {
-
-	public static final AtomicInteger NEXT_BREAKER_ID = new AtomicInteger();
-	protected int ticksUntilNextProgress;
-	protected int destroyProgress;
-	protected int breakerId = -NEXT_BREAKER_ID.incrementAndGet();
-	protected BlockPos breakingPos;
-
-	public BlockBreakingKineticBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
-
-	@Override
-	public void onSpeedChanged(float prevSpeed) {
-		super.onSpeedChanged(prevSpeed);
-		if (destroyProgress == -1)
-			destroyNextTick();
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-		if (ticksUntilNextProgress == -1)
-			destroyNextTick();
-	}
-
-	public void destroyNextTick() {
-		ticksUntilNextProgress = 1;
-	}
-
-	protected abstract BlockPos getBreakingPos();
-
-	protected boolean shouldRun() {
-		return true;
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		compound.putInt("Progress", destroyProgress);
-		compound.putInt("NextTick", ticksUntilNextProgress);
-		if (breakingPos != null)
-			compound.put("Breaking", NbtUtils.writeBlockPos(breakingPos));
-		super.write(compound, registries, clientPacket);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		destroyProgress = compound.getInt("Progress");
-		ticksUntilNextProgress = compound.getInt("NextTick");
-		breakingPos = null;
-		if (compound.contains("Breaking"))
-			breakingPos = NBTHelper.readBlockPos(compound, "Breaking");
-		super.read(compound, registries, clientPacket);
-	}
-
-	@Override
-	public void invalidate() {
-		super.invalidate();
-		if (!level.isClientSide && destroyProgress != 0)
-			level.destroyBlockProgress(breakerId, breakingPos, -1);
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		if (level.isClientSide)
-			return;
-		if (!shouldRun())
-			return;
-		if (getSpeed() == 0)
-			return;
-
-		breakingPos = getBreakingPos();
-
-		if (ticksUntilNextProgress < 0)
-			return;
-		if (ticksUntilNextProgress-- > 0)
-			return;
-
-		BlockState stateToBreak = level.getBlockState(breakingPos);
-		float blockHardness = stateToBreak.getDestroySpeed(level, breakingPos);
-
-		if (!canBreak(stateToBreak, blockHardness)) {
-			if (destroyProgress != 0) {
-				destroyProgress = 0;
-				level.destroyBlockProgress(breakerId, breakingPos, -1);
-			}
-			return;
-		}
-
-		float breakSpeed = getBreakSpeed();
-		destroyProgress += Mth.clamp((int) (breakSpeed / blockHardness), 1, 10 - destroyProgress);
-		level.playSound(null, worldPosition, stateToBreak.getSoundType()
-			.getHitSound(), SoundSource.BLOCKS, .25f, 1);
-
-		if (destroyProgress >= 10) {
-			onBlockBroken(stateToBreak);
-			destroyProgress = 0;
-			ticksUntilNextProgress = -1;
-			level.destroyBlockProgress(breakerId, breakingPos, -1);
-			return;
-		}
-
-		ticksUntilNextProgress = (int) (blockHardness / breakSpeed);
-		level.destroyBlockProgress(breakerId, breakingPos, (int) destroyProgress);
-	}
-
-	public boolean canBreak(BlockState stateToBreak, float blockHardness) {
-		return isBreakable(stateToBreak, blockHardness);
-	}
-
-	public static boolean isBreakable(BlockState stateToBreak, float blockHardness) {
-		return !(stateToBreak.liquid() || stateToBreak.getBlock() instanceof AirBlock || blockHardness == -1 || AllBlockTags.NON_BREAKABLE.matches(stateToBreak));
-	}
-
-	public void onBlockBroken(BlockState stateToBreak) {
-		Vec3 vec = VecHelper.offsetRandomly(VecHelper.getCenterOf(breakingPos), level.random, .125f);
-		BlockHelper.destroyBlock(level, breakingPos, 1f, (stack) -> {
-			if (stack.isEmpty())
-				return;
-			if (!level.getGameRules()
-				.getBoolean(GameRules.RULE_DOBLOCKDROPS))
-				return;
-			if (level.restoringBlockSnapshots)
-				return;
-
-			ItemEntity itementity = new ItemEntity(level, vec.x, vec.y, vec.z, stack);
-			itementity.setDefaultPickUpDelay();
-			itementity.setDeltaMovement(Vec3.ZERO);
-			level.addFreshEntity(itementity);
-		});
-	}
-
-	protected float getBreakSpeed() {
-		return Math.abs(getSpeed() / 100f);
-	}
-
+    private static final AtomicInteger NEXT_BREAKER = new AtomicInteger();
+    public static final TagKey<net.minecraft.world.level.block.Block> NON_BREAKABLE = TagKey.create(Registries.BLOCK, Create.asResource("non_breakable"));
+    public static int nextBreakerId(){return -NEXT_BREAKER.incrementAndGet();}
+    private final int breakerId = nextBreakerId();
+    protected int ticksUntilNextProgress, destroyProgress;
+    protected BlockPos breakingPos;
+    private BlockState breakingState;
+    protected BlockBreakingKineticBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) { super(type, pos, state); }
+    protected abstract BlockPos getBreakingPos();
+    protected boolean shouldRun() { return true; }
+    public int getDestroyProgress() { return destroyProgress; }
+    public void destroyNextTick() { ticksUntilNextProgress = 1; }
+    public static boolean isBreakable(BlockState state, float hardness) { return !state.isAir() && !state.liquid() && hardness >= 0 && !state.is(NON_BREAKABLE); }
+    public boolean canBreak(BlockState state, float hardness) { return isBreakable(state, hardness); }
+    protected float getBreakSpeed() { return Math.abs(getSpeed() / 100f); }
+    private void clearProgress() {
+        if (level instanceof ServerLevel server && breakingPos != null && destroyProgress != 0) server.destroyBlockProgress(breakerId, breakingPos, -1);
+        destroyProgress = 0; breakingState = null;
+    }
+    protected void tickBreaking() {
+        if (!(level instanceof ServerLevel server)) return;
+        if (!shouldRun()) { clearProgress(); return; }
+        if (getSpeed() == 0) return;
+        var next = getBreakingPos(); if (!level.isLoaded(next)) return;
+        var state = level.getBlockState(next);
+        if (!next.equals(breakingPos) || breakingState != null && state != breakingState) { clearProgress(); ticksUntilNextProgress = 0; }
+        breakingPos = next; breakingState = state;
+        if (ticksUntilNextProgress < 0) { if (level.getGameTime() % 20 != 0) return; destroyNextTick(); }
+        if (ticksUntilNextProgress-- > 0) return;
+        float hardness = state.getDestroySpeed(level, next);
+        if (!canBreak(state, hardness)) { clearProgress(); ticksUntilNextProgress = 20; return; }
+        float speed = getBreakSpeed();
+        destroyProgress += Math.clamp(hardness == 0 ? 10 : (int) (speed / hardness), 1, 10 - destroyProgress);
+        level.playSound(null, worldPosition, state.getSoundType().getHitSound(), SoundSource.BLOCKS, 0.25f, 1);
+        if (destroyProgress >= 10) {
+            onBlockBroken(state); clearProgress(); ticksUntilNextProgress = -1; setChanged(); return;
+        }
+        ticksUntilNextProgress = (int) (hardness / speed); server.destroyBlockProgress(breakerId, next, destroyProgress); setChanged();
+    }
+    public void onBlockBroken(BlockState state) {
+        if (!(level instanceof ServerLevel server)) return;
+        var random = server.getRandom();
+        var pos = Vec3.atCenterOf(breakingPos).add((random.nextDouble() - 0.5) * 0.25, (random.nextDouble() - 0.5) * 0.25, (random.nextDouble() - 0.5) * 0.25);
+        BlockHelper.destroyBlock(server, breakingPos, 1, stack -> {
+            if (stack.isEmpty()) return;
+            var entity = new ItemEntity(level, pos.x, pos.y, pos.z, stack, 0, 0, 0); entity.setDefaultPickUpDelay(); level.addFreshEntity(entity);
+        });
+    }
+    @Override public void invalidate() { clearProgress(); super.invalidate(); }
+    @Override protected void write(ValueOutput out, boolean clientPacket) {
+        super.write(out, clientPacket); out.putInt("Progress", destroyProgress); out.putInt("NextTick", ticksUntilNextProgress);
+        if (breakingPos != null) out.store("Breaking", BlockPos.CODEC, breakingPos);
+        if (breakingState != null) out.store("BreakingState", BlockState.CODEC, breakingState);
+    }
+    @Override protected void read(ValueInput in, boolean clientPacket) {
+         destroyProgress = Math.clamp(in.getIntOr("Progress", 0), 0, 9); ticksUntilNextProgress = Math.max(-1, in.getIntOr("NextTick", 0));
+        breakingPos = in.read("Breaking", BlockPos.CODEC).orElse(null); breakingState = in.read("BreakingState", BlockState.CODEC).orElse(null);
+    
+        super.read(in, clientPacket);
+    }
 }

@@ -1,47 +1,63 @@
-## Based on GitHub's Eclipse .gitignore
+# Local documentation and research
+*.[mM][dD]
+*.[mM][aA][rR][kK][dD][oO][wW][nN]
+/research/
 
-run/
+# Build output, caches, packaged artifacts
 .gradle/
+.kotlin/
+.cache/
 build/
-gradle-app.setting
-
-## IntelliJ IDEA
-
-.idea/
 out/
-*.iml
-*.iws
-*.ipr
-
-## Eclipse
-
-eclipse/
-*.pydevproject
-.project
-.metadata
 bin/
-tmp/
+target/
+dist/
+artifacts/
+checkpoints/
+reports/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.hprof
+*.jfr
+__pycache__/
+*.py[cod]
+
+# Minecraft development runs and logs
+run/
+run-*/
+runClient/
+runServer/
+logs/
+crash-reports/
+*.log
+*.log.gz
+
+# Editors and machine-specific configuration
+.idea/
+.vscode/
+.eclipse/
+.settings/
+.project
+.classpath
+.factorypath
+*.iml
+*.ipr
+*.iws
+*.launch
+.DS_Store
+Thumbs.db
+local.properties
+gradle-app.setting
+.env
+.env.*
 *.tmp
 *.bak
 *.swp
-*~.nib
-local.properties
-.classpath
-.settings/
-.loadpath
-.factorypath
-
-# External tool builders
-.externalToolBuilders/
-
-# Locally stored "Eclipse launch configurations"
-*.launch
-
-# CDT-specific
-.cproject
-
-# PDT-specific
-.buildpath
-
-.DS_Store
-/libs/
+*.swo
+*~

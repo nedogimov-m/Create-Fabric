@@ -3,54 +3,37 @@ package com.simibubi.create.content.processing;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.kinetics.belt.BeltBlock;
 import com.simibubi.create.content.kinetics.belt.BeltSlope;
-import com.simibubi.create.content.processing.basin.BasinBlock;
-
+import com.simibubi.create.content.processing.basin.BasinBlockEntity;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
+/** Source press/mixer/spout/deployer auto-height; ordinary native placement validates and pays once. */
 public class AssemblyOperatorBlockItem extends BlockItem {
-
-	public AssemblyOperatorBlockItem(Block block, Properties builder) {
-		super(block, builder);
-	}
-
-	@Override
-	public InteractionResult place(BlockPlaceContext context) {
-		BlockPos placedOnPos = context.getClickedPos()
-			.relative(context.getClickedFace()
-				.getOpposite());
-		Level level = context.getLevel();
-		BlockState placedOnState = level
-			.getBlockState(placedOnPos);
-		if (operatesOn(level, placedOnPos, placedOnState) && context.getClickedFace() == Direction.UP) {
-			if (level.getBlockState(placedOnPos.above(2))
-				.canBeReplaced())
-				context = adjustContext(context, placedOnPos);
-			else
-				return InteractionResult.FAIL;
-		}
-
-		return super.place(context);
-	}
-
-	protected BlockPlaceContext adjustContext(BlockPlaceContext context, BlockPos placedOnPos) {
-		BlockPos up = placedOnPos.above(2);
-		return new AssemblyOperatorUseContext(context.getLevel(), context.getPlayer(), context.getHand(), context.getItemInHand(), new BlockHitResult(new Vec3((double)up.getX() + 0.5D + (double) Direction.UP.getStepX() * 0.5D, (double)up.getY() + 0.5D + (double) Direction.UP.getStepY() * 0.5D, (double)up.getZ() + 0.5D + (double) Direction.UP.getStepZ() * 0.5D), Direction.UP, up, false));
-	}
-
-	protected boolean operatesOn(LevelReader world, BlockPos pos, BlockState placedOnState) {
-		if (AllBlocks.BELT.has(placedOnState))
-			return placedOnState.getValue(BeltBlock.SLOPE) == BeltSlope.HORIZONTAL;
-		return BasinBlock.isBasin(world, pos) || AllBlocks.DEPOT.has(placedOnState) || AllBlocks.WEIGHTED_EJECTOR.has(placedOnState);
-	}
-
+    public AssemblyOperatorBlockItem(Block block,Properties properties){super(block,properties);}
+    @Override public InteractionResult place(BlockPlaceContext context){
+        var placedOn=context.getClickedPos().relative(context.getClickedFace().getOpposite());var level=context.getLevel();
+        if(context.getClickedFace()==Direction.UP&&operatesOn(level,placedOn,LoadedLevelAccess.blockState(level,placedOn))){
+            var target=placedOn.above(2);
+            if(!LoadedLevelAccess.isLoaded(level,target)||!LoadedLevelAccess.blockState(level,target).canBeReplaced())return InteractionResult.FAIL;
+            context=adjustContext(context,placedOn);
+        }
+        return super.place(context);
+    }
+    protected BlockPlaceContext adjustContext(BlockPlaceContext context,BlockPos placedOn){
+        var target=placedOn.above(2);
+        return new AssemblyOperatorUseContext(context.getLevel(),context.getPlayer(),context.getHand(),context.getItemInHand(),new BlockHitResult(Vec3.atCenterOf(target).add(0,.5,0),Direction.UP,target,false));
+    }
+    protected boolean operatesOn(LevelReader level,BlockPos pos,BlockState state){
+        if(state.is(AllBlocks.BELT))return state.getValue(BeltBlock.SLOPE)==BeltSlope.HORIZONTAL;
+        return LoadedLevelAccess.blockEntity(level,pos) instanceof BasinBlockEntity||state.is(AllBlocks.DEPOT)||state.is(AllBlocks.WEIGHTED_EJECTOR);
+    }
 }

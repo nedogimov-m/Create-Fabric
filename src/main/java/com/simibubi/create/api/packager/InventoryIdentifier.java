@@ -33,7 +33,8 @@ public interface InventoryIdentifier {
 	 */
 	@Nullable
 	static InventoryIdentifier get(Level level, BlockFace face) {
-		BlockState state = level.getBlockState(face.getPos());
+		if (!level.isLoaded(face.getPos())) return null;
+        BlockState state = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockState(level, face.getPos());
 		Finder finder = REGISTRY.get(state);
 		Finder toQuery = finder != null ? finder : AllInventoryIdentifiers::fallback;
 		return toQuery.find(level, state, face);

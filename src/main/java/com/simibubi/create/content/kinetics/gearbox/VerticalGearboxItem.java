@@ -1,60 +1,40 @@
 package com.simibubi.create.content.kinetics.gearbox;
 
-import java.util.Map;
-
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.content.kinetics.base.IRotate;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
+import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
-public class VerticalGearboxItem extends BlockItem {
+import java.util.Map;
 
-	public VerticalGearboxItem(Properties builder) {
-		super(AllBlocks.GEARBOX.get(), builder);
-	}
+public final class VerticalGearboxItem extends BlockItem {
+    public VerticalGearboxItem(Properties properties) { super(AllBlocks.GEARBOX, properties); }
 
-	@Override
-	public String getDescriptionId() {
-		return "item.create.vertical_gearbox";
-	}
+    @Override
+    public void registerBlocks(Map<Block, Item> map, Item item) {
+        // Both gearbox items place the same block; preserve the default block item mapping.
+    }
 
-	@Override
-	public void registerBlocks(Map<Block, Item> p_195946_1_, Item p_195946_2_) {
-	}
-
-	@Override
-	protected boolean updateCustomBlockEntityTag(BlockPos pos, Level world, Player player, ItemStack stack, BlockState state) {
-		Axis prefferedAxis = null;
-		for (Direction side : Iterate.horizontalDirections) {
-			BlockState blockState = world.getBlockState(pos.relative(side));
-			if (blockState.getBlock() instanceof IRotate) {
-				if (((IRotate) blockState.getBlock()).hasShaftTowards(world, pos.relative(side), blockState,
-						side.getOpposite()))
-					if (prefferedAxis != null && prefferedAxis != side.getAxis()) {
-						prefferedAxis = null;
-						break;
-					} else {
-						prefferedAxis = side.getAxis();
-					}
-			}
-		}
-
-		Axis axis = prefferedAxis == null ? player.getDirection()
-				.getClockWise()
-				.getAxis() : prefferedAxis == Axis.X ? Axis.Z : Axis.X;
-		world.setBlockAndUpdate(pos, state.setValue(BlockStateProperties.AXIS, axis));
-		return super.updateCustomBlockEntityTag(pos, world, player, stack, state);
-	}
-
+    @Override
+    protected BlockState getPlacementState(BlockPlaceContext context) {
+        BlockState state = super.getPlacementState(context);
+        if (state == null) return null;
+        Direction.Axis preferred = null;
+        for (Direction face : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST}) {
+            var neighborPos = context.getClickedPos().relative(face);
+            var neighbor = context.getLevel().getBlockState(neighborPos);
+            if (neighbor.getBlock() instanceof IRotate rotation
+                    && rotation.hasShaftTowards(context.getLevel(), neighborPos, neighbor, face.getOpposite())) {
+                if (preferred != null && preferred != face.getAxis()) { preferred = null; break; }
+                preferred = face.getAxis();
+            }
+        }
+        Direction.Axis axis = preferred == null ? context.getHorizontalDirection().getClockWise().getAxis()
+                : preferred == Direction.Axis.X ? Direction.Axis.Z : Direction.Axis.X;
+        return state.setValue(GearboxBlock.AXIS, axis);
+    }
 }

@@ -5,7 +5,6 @@ import static java.lang.Math.signum;
 
 import com.simibubi.create.foundation.collision.CollisionList.Populate;
 
-import net.createmod.catnip.data.Iterate;
 import net.minecraft.world.phys.Vec3;
 
 public class ContinuousOBBCollider {
@@ -40,9 +39,9 @@ public class ContinuousOBBCollider {
 
 		// The extents of the AABB encompassing the OBB, in local space.
 		// https://madmann91.github.io/2024/02/10/converting-oriented-bounding-boxes-to-axis-aligned-ones.html
-		double aabbInLocalX = (a00 + a01 + a02) * obbExtents.x + 0.5;
-		double aabbInLocalY = (a10 + a11 + a12) * obbExtents.y + 0.5;
-		double aabbInLocalZ = (a20 + a21 + a22) * obbExtents.z + 0.5;
+		double aabbInLocalX = a00 * obbExtents.x + a01 * obbExtents.y + a02 * obbExtents.z + 0.5;
+		double aabbInLocalY = a10 * obbExtents.x + a11 * obbExtents.y + a12 * obbExtents.z + 0.5;
+		double aabbInLocalZ = a20 * obbExtents.x + a21 * obbExtents.y + a22 * obbExtents.z + 0.5;
 
 		CollisionList.Populate populateDenseViableColliders = new Populate(denseViableColliders);
 
@@ -51,11 +50,11 @@ public class ContinuousOBBCollider {
 		// space required for the actual collision pass and improve the cache locality of the colliders.
 		denseViableColliders.size = 0;
 		for (int bbIdx = 0; bbIdx < collidableBBs.size; ++bbIdx) {
-			if (Math.abs((obbCenter.x + motion.x) - collidableBBs.centerX[bbIdx]) > collidableBBs.extentsX[bbIdx] + aabbInLocalX)
+			if (collidableBBs.centerX[bbIdx] < Math.min(obbCenter.x, obbCenter.x + motion.x) - collidableBBs.extentsX[bbIdx] - aabbInLocalX || collidableBBs.centerX[bbIdx] > Math.max(obbCenter.x, obbCenter.x + motion.x) + collidableBBs.extentsX[bbIdx] + aabbInLocalX)
 				continue;
-			if (Math.abs((obbCenter.y + motion.y) - collidableBBs.centerY[bbIdx]) > collidableBBs.extentsY[bbIdx] + aabbInLocalY)
+			if (collidableBBs.centerY[bbIdx] < Math.min(obbCenter.y, obbCenter.y + motion.y) - collidableBBs.extentsY[bbIdx] - aabbInLocalY || collidableBBs.centerY[bbIdx] > Math.max(obbCenter.y, obbCenter.y + motion.y) + collidableBBs.extentsY[bbIdx] + aabbInLocalY)
 				continue;
-			if (Math.abs((obbCenter.z + motion.z) - collidableBBs.centerZ[bbIdx]) > collidableBBs.extentsZ[bbIdx] + aabbInLocalZ)
+			if (collidableBBs.centerZ[bbIdx] < Math.min(obbCenter.z, obbCenter.z + motion.z) - collidableBBs.extentsZ[bbIdx] - aabbInLocalZ || collidableBBs.centerZ[bbIdx] > Math.max(obbCenter.z, obbCenter.z + motion.z) + collidableBBs.extentsZ[bbIdx] + aabbInLocalZ)
 				continue;
 
 			populateDenseViableColliders.appendFrom(collidableBBs, bbIdx);
@@ -98,7 +97,7 @@ public class ContinuousOBBCollider {
 		ContinuousSeparationManifold mf = new ContinuousSeparationManifold(uB1);
 
 		// Apply separation maths
-		for (boolean horizontalPass : Iterate.trueAndFalse) {
+		for (boolean horizontalPass : new boolean[] { true, false }) {
 			boolean verticalPass = !horizontalPass || !doHorizontalPass;
 
 			if (horizontalPass && !doHorizontalPass) {
@@ -231,7 +230,7 @@ public class ContinuousOBBCollider {
 			if (!discreteCollision && signum(projectedMotion) == signum(TL))
 				return true;
 
-			double sTL = signum(TL);
+			double sTL = TL == 0 ? 1 : signum(TL);
 			double separation = sTL * abs(diff);
 
 			if (!discreteCollision) {
@@ -247,7 +246,7 @@ public class ContinuousOBBCollider {
 				earliestCollisionExitTime = Math.min(exitTime, earliestCollisionExitTime);
 			}
 
-			if (axisOfObjA && distance != 0 && -(diff) <= abs(normalSeparation)) {
+			if (axisOfObjA && -(diff) <= abs(normalSeparation)) {
 				normalAxis = axis;
 				normalSeparation = separation;
 			}
@@ -274,7 +273,7 @@ public class ContinuousOBBCollider {
 				}
 			}
 
-			if (distance != 0 && -(diff) <= abs(this.separation)) {
+			if (-(diff) <= abs(this.separation)) {
 				this.axis = axis;
 				this.separation = separation;
 				double scale = signum(TL) * (axisOfObjA ? -rA : -rB) - signum(separation) * 0.125;

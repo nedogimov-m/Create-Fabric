@@ -1,226 +1,51 @@
 package com.simibubi.create.content.kinetics.steamEngine;
 
-import static net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED;
-
-import java.util.function.Predicate;
-
-import org.jetbrains.annotations.NotNull;
-
-import com.mojang.serialization.MapCodec;
-import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.AllShapes;
-import com.simibubi.create.content.equipment.wrench.IWrenchable;
-import com.simibubi.create.content.fluids.tank.FluidTankBlock;
-import com.simibubi.create.content.kinetics.simpleRelays.ShaftBlock;
-import com.simibubi.create.foundation.advancement.AdvancementBehaviour;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.utility.BlockHelper;
-
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.placement.IPlacementHelper;
-import net.createmod.catnip.placement.PlacementHelpers;
-import net.createmod.catnip.placement.PlacementOffset;
-import net.minecraft.MethodsReturnNonnullByDefault;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.ItemInteractionResult;
-import net.minecraft.world.entity.LivingEntity;
+import com.simibubi.create.*;
+import com.simibubi.create.content.fluids.tank.*;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.*;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.LevelAccessor;
-import net.minecraft.world.level.LevelReader;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.FaceAttachedHorizontalDirectionalBlock;
-import net.minecraft.world.level.block.SimpleWaterloggedBlock;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.AttachFace;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.Fluids;
-import net.minecraft.world.level.pathfinder.PathComputationType;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.context.*;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.material.*;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.shapes.*;
 
-public class SteamEngineBlock extends FaceAttachedHorizontalDirectionalBlock
-	implements SimpleWaterloggedBlock, IWrenchable, IBE<SteamEngineBlockEntity> {
-
-	private static final int placementHelperId = PlacementHelpers.register(new PlacementHelper());
-
-	public static final MapCodec<SteamEngineBlock> CODEC = simpleCodec(SteamEngineBlock::new);
-
-	public SteamEngineBlock(Properties properties) {
-		super(properties);
-		registerDefaultState(stateDefinition.any().setValue(FACE, AttachFace.FLOOR).setValue(FACING, Direction.NORTH).setValue(WATERLOGGED, false));
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> pBuilder) {
-		super.createBlockStateDefinition(pBuilder.add(FACE, FACING, WATERLOGGED));
-	}
-
-	@Override
-	public void setPlacedBy(Level pLevel, BlockPos pPos, BlockState pState, LivingEntity pPlacer, ItemStack pStack) {
-		super.setPlacedBy(pLevel, pPos, pState, pPlacer, pStack);
-		AdvancementBehaviour.setPlacedBy(pLevel, pPos, pPlacer);
-	}
-
-	@Override
-	public boolean canSurvive(BlockState pState, LevelReader pLevel, BlockPos pPos) {
-		return canAttach(pLevel, pPos, getConnectedDirection(pState).getOpposite());
-	}
-
-	public static boolean canAttach(LevelReader pReader, BlockPos pPos, Direction pDirection) {
-		BlockPos blockpos = pPos.relative(pDirection);
-		return pReader.getBlockState(blockpos)
-			.getBlock() instanceof FluidTankBlock;
-	}
-
-	@Override
-	public FluidState getFluidState(BlockState state) {
-		return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : Fluids.EMPTY.defaultFluidState();
-	}
-
-	@Override
-	protected ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
-		IPlacementHelper placementHelper = PlacementHelpers.get(placementHelperId);
-		if (placementHelper.matchesItem(stack))
-			return placementHelper.getOffset(player, level, state, pos, hitResult)
-				.placeInWorld(level, (BlockItem) stack.getItem(), player, hand, hitResult);
-		return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-	}
-
-	@Override
-	public BlockState updateShape(BlockState state, Direction direction, BlockState neighbourState, LevelAccessor world,
-								  BlockPos pos, BlockPos neighbourPos) {
-		if (state.getValue(WATERLOGGED))
-			world.scheduleTick(pos, Fluids.WATER, Fluids.WATER.getTickDelay(world));
-		return state;
-	}
-
-	@Override
-	public void onPlace(BlockState pState, Level pLevel, BlockPos pPos, BlockState pOldState, boolean pIsMoving) {
-		FluidTankBlock.updateBoilerState(pState, pLevel, pPos.relative(getFacing(pState).getOpposite()));
-		BlockPos shaftPos = getShaftPos(pState, pPos);
-		BlockState shaftState = pLevel.getBlockState(shaftPos);
-		if (isShaftValid(pState, shaftState))
-			pLevel.setBlock(shaftPos, PoweredShaftBlock.getEquivalent(shaftState), Block.UPDATE_ALL);
-	}
-
-	@Override
-	public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pIsMoving) {
-		if (pState.hasBlockEntity() && (!pState.is(pNewState.getBlock()) || !pNewState.hasBlockEntity()))
-			pLevel.removeBlockEntity(pPos);
-		FluidTankBlock.updateBoilerState(pState, pLevel, pPos.relative(getFacing(pState).getOpposite()));
-		BlockPos shaftPos = getShaftPos(pState, pPos);
-		BlockState shaftState = pLevel.getBlockState(shaftPos);
-		if (AllBlocks.POWERED_SHAFT.has(shaftState))
-			pLevel.scheduleTick(shaftPos, shaftState.getBlock(), 1);
-	}
-
-	@Override
-	public VoxelShape getShape(BlockState pState, BlockGetter pLevel, BlockPos pPos, CollisionContext pContext) {
-		AttachFace face = pState.getValue(FACE);
-		Direction direction = pState.getValue(FACING);
-		return face == AttachFace.CEILING ? AllShapes.STEAM_ENGINE_CEILING.get(direction.getAxis())
-			: face == AttachFace.FLOOR ? AllShapes.STEAM_ENGINE.get(direction.getAxis())
-			: AllShapes.STEAM_ENGINE_WALL.get(direction);
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		Level level = context.getLevel();
-		BlockPos pos = context.getClickedPos();
-		FluidState ifluidstate = level.getFluidState(pos);
-		BlockState state = super.getStateForPlacement(context);
-		if (state == null)
-			return null;
-		return state.setValue(WATERLOGGED, Boolean.valueOf(ifluidstate.getType() == Fluids.WATER));
-	}
-
-	@Override
-	protected boolean isPathfindable(BlockState state, PathComputationType pathComputationType) {
-		return false;
-	}
-
-	public static Direction getFacing(BlockState sideState) {
-		return getConnectedDirection(sideState);
-	}
-
-	public static BlockPos getShaftPos(BlockState sideState, BlockPos pos) {
-		return pos.relative(getConnectedDirection(sideState), 2);
-	}
-
-	public static boolean isShaftValid(BlockState state, BlockState shaft) {
-		return (AllBlocks.SHAFT.has(shaft) || AllBlocks.POWERED_SHAFT.has(shaft))
-			&& shaft.getValue(ShaftBlock.AXIS) != getFacing(state).getAxis();
-	}
-
-	@Override
-	public Class<SteamEngineBlockEntity> getBlockEntityClass() {
-		return SteamEngineBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends SteamEngineBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.STEAM_ENGINE.get();
-	}
-
-	@MethodsReturnNonnullByDefault
-	private static class PlacementHelper implements IPlacementHelper {
-		@Override
-		public Predicate<ItemStack> getItemPredicate() {
-			return AllBlocks.SHAFT::isIn;
-		}
-
-		@Override
-		public Predicate<BlockState> getStatePredicate() {
-			return s -> s.getBlock() instanceof SteamEngineBlock;
-		}
-
-		@Override
-		public PlacementOffset getOffset(Player player, Level world, BlockState state, BlockPos pos,
-										 BlockHitResult ray) {
-			BlockPos shaftPos = SteamEngineBlock.getShaftPos(state, pos);
-			BlockState shaft = AllBlocks.SHAFT.getDefaultState();
-			for (Direction direction : Direction.orderedByNearest(player)) {
-				shaft = shaft.setValue(ShaftBlock.AXIS, direction.getAxis());
-				if (isShaftValid(state, shaft))
-					break;
-			}
-
-			BlockState newState = world.getBlockState(shaftPos);
-			if (!newState.canBeReplaced())
-				return PlacementOffset.fail();
-
-			Axis axis = shaft.getValue(ShaftBlock.AXIS);
-			return PlacementOffset.success(shaftPos,
-				s -> BlockHelper
-					.copyProperties(s,
-						(world.isClientSide ? AllBlocks.SHAFT : AllBlocks.POWERED_SHAFT).getDefaultState())
-					.setValue(PoweredShaftBlock.AXIS, axis));
-		}
-	}
-
-	public static Couple<Integer> getSpeedRange() {
-		return Couple.create(16, 64);
-	}
-
-	public static Direction getConnectedDirection(BlockState state) {
-		return FaceAttachedHorizontalDirectionalBlock.getConnectedDirection(state);
-	}
-
-	@Override
-	protected @NotNull MapCodec<? extends FaceAttachedHorizontalDirectionalBlock> codec() {
-		return CODEC;
-	}
-
+public final class SteamEngineBlock extends FaceAttachedHorizontalDirectionalBlock implements SimpleWaterloggedBlock,EntityBlock {
+    public static final BooleanProperty WATERLOGGED=BlockStateProperties.WATERLOGGED;
+    public SteamEngineBlock(Properties properties){super(properties);registerDefaultState(stateDefinition.any().setValue(FACE,AttachFace.FLOOR).setValue(FACING,Direction.NORTH).setValue(WATERLOGGED,false));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(FACE,FACING,WATERLOGGED);}
+    @Override protected RenderShape getRenderShape(BlockState state){return RenderShape.MODEL;}
+    public static Direction getFacing(BlockState state){return getConnectedDirection(state);}
+    public static BlockPos getShaftPos(BlockState state,BlockPos pos){return pos.relative(getFacing(state),2);}
+    public static boolean isShaftValid(BlockState state,BlockState shaft){return (shaft.is(AllBlocks.SHAFT)||shaft.is(AllBlocks.POWERED_SHAFT))&&shaft.getValue(PoweredShaftBlock.AXIS)!=getFacing(state).getAxis();}
+    @Override protected boolean canSurvive(BlockState state,LevelReader level,BlockPos pos){return LoadedLevelAccess.blockState(level,pos.relative(getFacing(state).getOpposite())).getBlock() instanceof FluidTankBlock;}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){var state=super.getStateForPlacement(context);return state==null?null:state.setValue(WATERLOGGED,context.getLevel().getFluidState(context.getClickedPos()).is(net.minecraft.tags.FluidTags.WATER));}
+    @Override protected FluidState getFluidState(BlockState state){return state.getValue(WATERLOGGED)?Fluids.WATER.getSource(false):Fluids.EMPTY.defaultFluidState();}
+    @Override protected BlockState updateShape(BlockState state,LevelReader level,ScheduledTickAccess ticks,BlockPos pos,Direction side,BlockPos otherPos,BlockState other,RandomSource random){if(state.getValue(WATERLOGGED))ticks.scheduleTick(pos,Fluids.WATER,Fluids.WATER.getTickDelay(level));return state;}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new SteamEngineBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return type==AllBlockEntityTypes.STEAM_ENGINE?(world,pos,block,entity)->SteamEngineBlockEntity.tick(world,pos,block,(SteamEngineBlockEntity)entity):null;}
+    @Override protected void onPlace(BlockState state,Level level,BlockPos pos,BlockState old,boolean moved){if(level.isClientSide())return;updateBoiler(level,pos,state);var shaftPos=getShaftPos(state,pos);if(level.isLoaded(shaftPos)){var shaft=LoadedLevelAccess.blockState(level,shaftPos);if(shaft.is(AllBlocks.SHAFT)&&isShaftValid(state,shaft))level.setBlockAndUpdate(shaftPos,PoweredShaftBlock.getEquivalent(shaft));}}
+    @Override protected void affectNeighborsAfterRemoval(BlockState state,ServerLevel level,BlockPos pos,boolean moved){updateBoiler(level,pos,state);var shaftPos=getShaftPos(state,pos);if(level.isLoaded(shaftPos)&&LoadedLevelAccess.blockState(level,shaftPos).is(AllBlocks.POWERED_SHAFT))level.scheduleTick(shaftPos,AllBlocks.POWERED_SHAFT,1);}
+    private static void updateBoiler(Level level,BlockPos pos,BlockState state){var tankPos=pos.relative(getFacing(state).getOpposite());if(level.isLoaded(tankPos)&&LoadedLevelAccess.blockEntity(level,tankPos) instanceof FluidTankBlockEntity tank)tank.updateBoilerState();}
+    @Override protected InteractionResult useWithoutItem(BlockState state,Level level,BlockPos pos,Player player,BlockHitResult hit){if(!player.mayBuild())return InteractionResult.PASS;if(!level.isClientSide()&&level.getBlockEntity(pos) instanceof SteamEngineBlockEntity engine)engine.reverse();return InteractionResult.SUCCESS;}
+    @Override protected InteractionResult useItemOn(ItemStack stack,BlockState state,Level level,BlockPos pos,Player player,InteractionHand hand,BlockHitResult hit){
+        if(!stack.is(AllBlocks.SHAFT.asItem())||!player.mayBuild())return InteractionResult.PASS;
+        var target=getShaftPos(state,pos);if(!level.isLoaded(target)||!LoadedLevelAccess.blockState(level,target).canBeReplaced())return InteractionResult.PASS;
+        Direction side=java.util.Arrays.stream(Direction.orderedByNearest(player)).filter(d->d.getAxis()!=getFacing(state).getAxis()).findFirst().orElse(Direction.UP);
+        var context=new UseOnContext(player,hand,hit);return ((BlockItem)stack.getItem()).place(BlockPlaceContext.at(new BlockPlaceContext(context),target,side));
+    }
+    @Override protected VoxelShape getShape(BlockState state,BlockGetter level,BlockPos pos,CollisionContext context){
+        if(state.getValue(FACE)==AttachFace.FLOOR)return Shapes.or(box(1,0,1,15,3,15),box(3,0,3,13,15,13),state.getValue(FACING).getAxis()==Direction.Axis.Z?box(1,5,4,15,13,12):box(4,5,1,12,13,15));
+        if(state.getValue(FACE)==AttachFace.CEILING)return Shapes.or(box(1,13,1,15,16,15),box(3,1,3,13,16,13),state.getValue(FACING).getAxis()==Direction.Axis.Z?box(1,3,4,15,11,12):box(4,3,1,12,11,15));
+        return switch(state.getValue(FACING)){case SOUTH->Shapes.or(box(1,1,0,15,15,3),box(3,3,0,13,13,15),box(1,4,5,15,12,13));case NORTH->Shapes.or(box(1,1,13,15,15,16),box(3,3,1,13,13,16),box(1,4,3,15,12,11));case EAST->Shapes.or(box(0,1,1,3,15,15),box(0,3,3,15,13,13),box(5,4,1,13,12,15));case WEST->Shapes.or(box(13,1,1,16,15,15),box(1,3,3,16,13,13),box(3,4,1,11,12,15));default->Shapes.block();};
+    }
 }

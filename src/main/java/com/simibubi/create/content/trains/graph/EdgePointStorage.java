@@ -1,99 +1,87 @@
 package com.simibubi.create.content.trains.graph;
 
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.UUID;
-
-import com.simibubi.create.Create;
 import com.simibubi.create.content.trains.signal.TrackEdgePoint;
-
-import net.createmod.catnip.nbt.NBTHelper;
+import java.util.*;
 import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
+import net.minecraft.nbt.*;
 
-public class EdgePointStorage {
+/**
+ * Actual typed points; graph edge lists reference these exact instances, never redecoded
+ * duplicates.
+ */
+public final class EdgePointStorage {
+  private final Map<EdgePointType<?>, Map<UUID, TrackEdgePoint>> pointsByType =
+      new LinkedHashMap<>();
 
-	private Map<EdgePointType<?>, Map<UUID, TrackEdgePoint>> pointsByType;
+  public void put(EdgePointType<?> type, TrackEdgePoint point) {
+    if (point.getType() != type) throw new IllegalArgumentException("Railway point type mismatch");
+    var map = pointsByType.computeIfAbsent(type, key -> new LinkedHashMap<>());
+    var previous = map.putIfAbsent(point.getId(), point);
+    if (previous != null && previous != point)
+      throw new IllegalArgumentException("Duplicate railway point id " + point.getId());
+  }
 
-	public EdgePointStorage() {
-		pointsByType = new HashMap<>();
-	}
+  @SuppressWarnings("unchecked")
+  public <T extends TrackEdgePoint> T get(EdgePointType<T> type, UUID id) {
+    return (T) pointsByType.getOrDefault(type, Map.of()).get(id);
+  }
 
-	public <T extends TrackEdgePoint> void put(EdgePointType<T> type, TrackEdgePoint point) {
-		getMap(type).put(point.getId(), point);
-	}
+  @SuppressWarnings("unchecked")
+  public <T extends TrackEdgePoint> T remove(EdgePointType<T> type, UUID id) {
+    var map = pointsByType.get(type);
+    return map == null ? null : (T) map.remove(id);
+  }
 
-	@SuppressWarnings("unchecked")
-	public <T extends TrackEdgePoint> T get(EdgePointType<T> type, UUID id) {
-		return (T) getMap(type).get(id);
-	}
+  @SuppressWarnings("unchecked")
+  public <T extends TrackEdgePoint> Collection<T> values(EdgePointType<T> type) {
+    return pointsByType.getOrDefault(type, Map.of()).values().stream()
+        .map(point -> (T) point)
+        .toList();
+  }
 
-	@SuppressWarnings("unchecked")
-	public <T extends TrackEdgePoint> T remove(EdgePointType<T> type, UUID id) {
-		return (T) getMap(type).remove(id);
-	}
+  public Map<UUID, TrackEdgePoint> getMap(EdgePointType<?> type) {
+    return Collections.unmodifiableMap(pointsByType.getOrDefault(type, Map.of()));
+  }
 
-	@SuppressWarnings("unchecked")
-	public <T extends TrackEdgePoint> Collection<T> values(EdgePointType<T> type) {
-		return getMap(type).values()
-			.stream()
-			.map(e -> (T) e)
-			.toList();
-	}
+  public List<TrackEdgePoint> all() {
+    return pointsByType.values().stream().flatMap(map -> map.values().stream()).toList();
+  }
 
-	public Map<UUID, TrackEdgePoint> getMap(EdgePointType<? extends TrackEdgePoint> type) {
-		return pointsByType.computeIfAbsent(type, t -> new HashMap<>());
-	}
+  public void tick(TrackGraph graph, boolean preTrains) {
+    for (var point : all())
+      if (get(point.getType(), point.id) == point) point.tick(graph, preTrains);
+  }
 
-	public void tick(TrackGraph graph, boolean preTrains) {
-		for (Map<UUID, TrackEdgePoint> map : pointsByType.values()) {
-			for (TrackEdgePoint point : map.values()) {
-				point.tick(graph, preTrains);
-			}
-		}
-	}
+  public void transferAll(TrackGraph target, EdgePointStorage other) {
+    for (var point : all()) {
+      point.bind(null);
+      other.put(point.getType(), point);
+      point.bind(target);
+    }
+    pointsByType.clear();
+  }
 
-	public void transferAll(TrackGraph target, EdgePointStorage other) {
-		pointsByType.forEach((type, map) -> {
-			other.getMap(type)
-				.putAll(map);
-			map.values()
-				.forEach(ep -> Create.RAILWAYS.sync.pointAdded(target, ep));
-		});
-		pointsByType.clear();
-	}
+  public CompoundTag write(HolderLookup.Provider registries, DimensionPalette dimensions) {
+    return (CompoundTag)
+        TrackEdgePoint.CODEC
+            .listOf()
+            .fieldOf("Values")
+            .codec()
+            .encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), all())
+            .getOrThrow();
+  }
 
-	public CompoundTag write(HolderLookup.Provider registries, DimensionPalette dimensions) {
-		CompoundTag nbt = new CompoundTag();
-		for (Entry<EdgePointType<?>, Map<UUID, TrackEdgePoint>> entry : pointsByType.entrySet()) {
-			EdgePointType<?> type = entry.getKey();
-			ListTag list = NBTHelper.writeCompoundList(entry.getValue()
-				.values(), edgePoint -> {
-					CompoundTag tag = new CompoundTag();
-					edgePoint.write(tag, registries, dimensions);
-					return tag;
-				});
-			nbt.put(type.getId()
-				.toString(), list);
-		}
-		return nbt;
-	}
-
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, DimensionPalette dimensions) {
-		for (EdgePointType<?> type : EdgePointType.TYPES.values()) {
-			ListTag list = nbt.getList(type.getId()
-				.toString(), Tag.TAG_COMPOUND);
-			Map<UUID, TrackEdgePoint> map = getMap(type);
-			NBTHelper.iterateCompoundList(list, tag -> {
-				TrackEdgePoint edgePoint = type.create();
-				edgePoint.read(tag, registries, false, dimensions);
-				map.put(edgePoint.getId(), edgePoint);
-			});
-		}
-	}
-
+  public void read(CompoundTag tag, HolderLookup.Provider registries, DimensionPalette dimensions) {
+    var decoded =
+        TrackEdgePoint.CODEC
+            .listOf()
+            .fieldOf("Values")
+            .codec()
+            .parse(registries.createSerializationContext(NbtOps.INSTANCE), tag)
+            .getOrThrow();
+    var check = new EdgePointStorage();
+    for (var point : decoded) check.put(point.getType(), point);
+    pointsByType.clear();
+    pointsByType.putAll(check.pointsByType);
+  }
 }

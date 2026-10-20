@@ -13,7 +13,7 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.UUID;
 
-import org.jetbrains.annotations.Nullable;
+import org.jspecify.annotations.Nullable;
 
 import org.apache.commons.lang3.mutable.MutableDouble;
 import org.apache.commons.lang3.mutable.MutableObject;
@@ -26,6 +26,7 @@ import com.simibubi.create.content.trains.graph.EdgeData;
 import com.simibubi.create.content.trains.graph.EdgePointType;
 import com.simibubi.create.content.trains.graph.TrackEdge;
 import com.simibubi.create.content.trains.graph.TrackGraph;
+import com.simibubi.create.content.trains.graph.TrackGraphLocation;
 import com.simibubi.create.content.trains.graph.TrackNode;
 import com.simibubi.create.content.trains.graph.TrackNodeLocation;
 import com.simibubi.create.content.trains.signal.SignalBlock.SignalType;
@@ -37,8 +38,6 @@ import com.simibubi.create.content.trains.track.BezierConnection;
 import com.simibubi.create.content.trains.track.TrackMaterial;
 
 import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.nbt.NBTHelper;
 import net.createmod.catnip.data.Pair;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
@@ -71,8 +70,8 @@ public class Navigation {
 	}
 
 	public void tick(Level level) {
-		if (destination == null)
-			return;
+        if(destination==null)return;
+        if(train.graph==null){train.targetSpeed=train.speed=0;return;}
 
 		if (!train.runtime.paused) {
 			boolean frontDriver = train.hasForwardConductor();
@@ -98,7 +97,7 @@ public class Navigation {
 		destination.reserveFor(train);
 
 		double acceleration = train.acceleration();
-		double brakingDistance = (train.speed * train.speed) / (2 * acceleration);
+		double brakingDistance = stoppingDistance(train.speed,acceleration);
 		double speedMod = destinationBehindTrain ? -1 : 1;
 		double preDepartureLookAhead = train.getCurrentStation() != null ? 4.5 : 0;
 		double distanceToNextCurve = -1;
@@ -107,8 +106,8 @@ public class Navigation {
 		if (train.graph != null) {
 			if (waitingForSignal != null && currentSignalResolved()) {
 				UUID signalId = waitingForSignal.getFirst();
-				SignalBoundary signal = train.graph.getPoint(EdgePointType.SIGNAL, signalId);
-				if (signal != null && signal.types.get(waitingForSignal.getSecond()) == SignalType.CROSS_SIGNAL)
+				SignalBoundary signal = train.graph.getPoint(com.simibubi.create.content.trains.signal.SignalEdgePoints.SIGNAL, signalId);
+				if (signal != null && signal.type(waitingForSignal.getSecond()) == SignalType.CROSS_SIGNAL)
 					waitingForChainedGroups.clear();
 				waitingForSignal = null;
 			}
@@ -126,10 +125,17 @@ public class Navigation {
 			if (distanceToSignal > 1 / 16f) {
 				MutableDouble curveDistanceTracker = new MutableDouble(-1);
 
-				signalScout.node1 = leadingPoint.node1;
-				signalScout.node2 = leadingPoint.node2;
-				signalScout.edge = leadingPoint.edge;
-				signalScout.position = leadingPoint.position;
+                if(!leadingPoint.resolve(train.graph)){
+                    train.updateSignalBlocks=true;
+                    train.targetSpeed=train.speed=0;
+                    return;
+                }
+                var location=new TrackGraphLocation();
+                location.graph=train.graph;
+                location.edge=Couple.create(leadingPoint.node1.getLocation(),leadingPoint.node2.getLocation());
+                location.position=leadingPoint.position;
+                signalScout.migrateTo(new ArrayList<>(List.of(location)));
+                signalScout.upsideDown=leadingPoint.upsideDown;
 
 				double brakingDistanceNoFlicker = brakingDistance + 3 - (brakingDistance % 3);
 				double scanDistance = Mth.clamp(brakingDistanceNoFlicker, preDepartureLookAhead, distanceToDestination);
@@ -154,13 +160,16 @@ public class Navigation {
 						if (!(boundary instanceof SignalBoundary signal))
 							return false;
 
-						UUID entering = signal.getGroup(nodes.getSecond());
-						SignalEdgeGroup signalEdgeGroup = Create.RAILWAYS.signalEdgeGroups.get(entering);
-						if (signalEdgeGroup == null)
-							return false;
+						UUID entering = signal.groupFor(nodes.getSecond());
+						SignalEdgeGroup signalEdgeGroup = train.manager().signalEdgeGroups().get(entering);
+                        boolean primary=signal.isPrimary(nodes.getSecond());
+                        if(signalEdgeGroup==null||!signalEdgeGroup.topologyReady){
+                            waitingForSignal=crossSignalTracked?trackingCrossSignal.getValue():Pair.of(boundary.id,primary);
+                            distanceToSignal=crossSignalTracked?crossSignalDistanceTracker.doubleValue():distance;
+                            return true;
+                        }
 
-						boolean primary = entering.equals(signal.groups.getFirst());
-						boolean crossSignal = signal.types.get(primary) == SignalType.CROSS_SIGNAL;
+						boolean crossSignal = signal.type(primary) == SignalType.CROSS_SIGNAL;
 						boolean occupied = !train.manualTick
 							&& (signal.isForcedRed(nodes.getSecond()) || signalEdgeGroup.isOccupiedUnless(train));
 
@@ -178,7 +187,7 @@ public class Navigation {
 							}
 							if (!occupied && !crossSignal && distance < distanceToSignal + .25
 								&& distance < brakingDistanceNoFlicker)
-								signalEdgeGroup.reserved = signal; // Reserve group for traversal
+								train.manager().reserve(train,signalEdgeGroup,signal); // Reserve group for traversal
 							return false;
 						}
 
@@ -193,9 +202,13 @@ public class Navigation {
 							if (!crossSignal) {
 								if (distance < distanceToSignal + .25) {
 									// Collect and reset the signal chain because none were blocked
-									trackingCrossSignal.setValue(null);
-									reserveChain();
-									return false;
+                                    if(!reserveChain()){
+                                        waitingForSignal=trackingCrossSignal.getValue();
+                                        distanceToSignal=crossSignalDistanceTracker.doubleValue();
+                                        return true;
+                                    }
+                                    trackingCrossSignal.setValue(null);
+                                    return false;
 								} else
 									return true; // End of a blocked signal chain
 							}
@@ -205,7 +218,7 @@ public class Navigation {
 
 					}, (distance, edge) -> {
 						BezierConnection turn = edge.getTurn();
-						double vDistance = Math.abs(turn.starts.getFirst().y - turn.starts.getSecond().y);
+						double vDistance = turn==null?0:Math.abs(turn.starts.getFirst().y - turn.starts.getSecond().y);
 
 						// ignore turn if its a straight & mild slope
 						if (turn != null && vDistance > 1 / 16f) {
@@ -223,8 +236,9 @@ public class Navigation {
 							curveDistanceTracker.setValue(distance);
 					});
 
-				if (trackingCrossSignal.getValue() != null && waitingForSignal == null)
-					reserveChain();
+                if(trackingCrossSignal.getValue()!=null&&waitingForSignal==null&&!reserveChain()){
+                    waitingForSignal=trackingCrossSignal.getValue();distanceToSignal=crossSignalDistanceTracker.doubleValue();
+                }
 
 				distanceToNextCurve = curveDistanceTracker.floatValue();
 
@@ -278,7 +292,7 @@ public class Navigation {
 		double targetSpeed = targetDistance > brakingDistance ? topSpeed * speedMod : 0;
 
 		if (distanceToNextCurve != -1) {
-			double slowingDistance = brakingDistance - (turnTopSpeed * turnTopSpeed) / (2 * acceleration);
+			double slowingDistance = acceleration>0?brakingDistance-stoppingDistance(turnTopSpeed,acceleration):Math.abs(train.speed)>turnTopSpeed?Double.MAX_VALUE:0;
 			double targetTurnSpeed =
 				distanceToNextCurve > slowingDistance ? topSpeed * speedMod : turnTopSpeed * speedMod;
 			if (Math.abs(targetTurnSpeed) < Math.abs(targetSpeed))
@@ -289,34 +303,36 @@ public class Navigation {
 		train.approachTargetSpeed(1);
 	}
 
-	private void reserveChain() {
-		train.reservedSignalBlocks.addAll(waitingForChainedGroups.keySet());
-		waitingForChainedGroups.forEach((groupId, boundary) -> {
-			SignalEdgeGroup signalEdgeGroup = Create.RAILWAYS.signalEdgeGroups.get(groupId);
-			if (signalEdgeGroup != null)
-				signalEdgeGroup.reserved = boundary.getFirst();
-		});
-		waitingForChainedGroups.clear();
-	}
+    private boolean reserveChain(){
+        if(!train.manager().reserveChain(train,waitingForChainedGroups))return false;
+        train.reservedSignalBlocks.addAll(waitingForChainedGroups.keySet());
+        waitingForChainedGroups.clear();
+        return true;
+    }
 
 	private boolean currentSignalResolved() {
 		if (train.manualTick)
 			return true;
 		if (distanceToDestination < .5f)
 			return true;
-		SignalBoundary signal = train.graph.getPoint(EdgePointType.SIGNAL, waitingForSignal.getFirst());
-		if (signal == null)
-			return true;
+		SignalBoundary signal = train.graph.getPoint(com.simibubi.create.content.trains.signal.SignalEdgePoints.SIGNAL, waitingForSignal.getFirst());
+        if(signal==null)return true;
+        if(signal.isForcedRed(waitingForSignal.getSecond()))return false;
+        var entryGroup=train.manager().signalEdgeGroups().get(signal.group(waitingForSignal.getSecond()));
+        if(entryGroup==null||!entryGroup.topologyReady){
+            distanceToSignal=Math.max(distanceToSignal,1/8d);
+            return false;
+        }
 
 		// Cross Signal
-		if (signal.types.get(waitingForSignal.getSecond()) == SignalType.CROSS_SIGNAL) {
+		if (signal.type(waitingForSignal.getSecond()) == SignalType.CROSS_SIGNAL) {
 			for (Entry<UUID, Pair<SignalBoundary, Boolean>> entry : waitingForChainedGroups.entrySet()) {
 				Pair<SignalBoundary, Boolean> boundary = entry.getValue();
-				SignalEdgeGroup signalEdgeGroup = Create.RAILWAYS.signalEdgeGroups.get(entry.getKey());
-				if (signalEdgeGroup == null) { // Migration, re-initialize chain
-					waitingForSignal.setFirst(null);
-					return true;
-				}
+				SignalEdgeGroup signalEdgeGroup = train.manager().signalEdgeGroups().get(entry.getKey());
+                if(signalEdgeGroup==null||!signalEdgeGroup.topologyReady){
+                    distanceToSignal=Math.max(distanceToSignal,1/8d);
+                    return false;
+                }
 				if (boundary.getFirst()
 					.isForcedRed(boundary.getSecond())) {
 					train.reservedSignalBlocks.clear();
@@ -329,16 +345,21 @@ public class Navigation {
 		}
 
 		// Entry Signal
-		UUID groupId = signal.groups.get(waitingForSignal.getSecond());
-		if (groupId == null)
-			return true;
-		SignalEdgeGroup signalEdgeGroup = Create.RAILWAYS.signalEdgeGroups.get(groupId);
-		if (signalEdgeGroup == null)
-			return true;
+		UUID groupId = signal.group(waitingForSignal.getSecond());
+        if(groupId==null)return false;
+        SignalEdgeGroup signalEdgeGroup=train.manager().signalEdgeGroups().get(groupId);
+        if(signalEdgeGroup==null)return false;
 		if (!signalEdgeGroup.isOccupiedUnless(train))
 			return true;
 		return false;
 	}
+
+    private static double stoppingDistance(double speed,double acceleration){
+        if(!Double.isFinite(speed)||!Double.isFinite(acceleration)||acceleration<0)
+            throw new IllegalArgumentException("Invalid actual native train braking state");
+        if(acceleration==0)return speed==0?0:Double.MAX_VALUE;
+        return Math.min(Double.MAX_VALUE,(speed*speed)/(2*acceleration));
+    }
 
 	public boolean isActive() {
 		return destination != null;
@@ -401,7 +422,7 @@ public class Navigation {
 		if (Math.abs(distanceToDestination) > 100)
 			announceArrival = true;
 
-		currentPath = pathTo.path;
+		currentPath = new ArrayList<>(pathTo.path);
 		destinationBehindTrain = pathTo.distance < 0;
 		train.reservedSignalBlocks.clear();
 		train.navigation.waitingForSignal = null;
@@ -452,7 +473,7 @@ public class Navigation {
 			return null;
 
 		Couple<DiscoveredPath> results = Couple.create(null, null);
-		for (boolean forward : Iterate.trueAndFalse) {
+		for (boolean forward : new boolean[]{true,false}) {
 
 			// When updating destinations midtransit, avoid reversing out of path
 			if (this.destination != null && destinationBehindTrain == forward)
@@ -462,6 +483,7 @@ public class Navigation {
 				.getLeadingPoint()
 				: train.carriages.get(train.carriages.size() - 1)
 					.getTrailingPoint();
+            if(!initialPoint.resolve(graph))continue;
 			TrackEdge initialEdge = forward ? initialPoint.edge
 				: graph.getConnectionsFrom(initialPoint.node2)
 					.get(initialPoint.node1);
@@ -523,8 +545,9 @@ public class Navigation {
 
 		MutableObject<GlobalStation> result = new MutableObject<>(null);
 		double acceleration = train.acceleration();
-		double minDistance = .75f * (train.speed * train.speed) / (2 * acceleration);
-		double maxDistance = Math.max(32, 1.5f * (train.speed * train.speed) / (2 * acceleration));
+        double braking=stoppingDistance(train.speed,acceleration);
+        double minDistance=.75*braking;
+        double maxDistance=Math.max(32,1.5*Math.min(Double.MAX_VALUE/1.5,braking));
 
 		search(maxDistance, forward, null, (distance, cost, reachedVia, currentEntry, globalStation) -> {
 			if (distance < minDistance)
@@ -571,7 +594,7 @@ public class Navigation {
 		Map<TrackEdge, Integer> penalties = new IdentityHashMap<>();
 		boolean costRelevant = maxCost >= 0;
 		if (costRelevant) {
-			for (Train otherTrain : Create.RAILWAYS.trains.values()) {
+			for (Train otherTrain : train.manager().trains().values()) {
 				if (otherTrain.graph != graph)
 					continue;
 				if (otherTrain == train)
@@ -581,7 +604,7 @@ public class Navigation {
 					.forEach(nodes -> {
 						if (nodes.either(Objects::isNull))
 							return;
-						for (boolean flip : Iterate.trueAndFalse) {
+						for (boolean flip : new boolean[]{true,false}) {
 							TrackEdge e = graph.getConnection(flip ? nodes.swap() : nodes);
 							if (e == null)
 								continue;
@@ -601,6 +624,7 @@ public class Navigation {
 		Map<TrackEdge, Pair<Boolean, Couple<TrackNode>>> reachedVia = new IdentityHashMap<>();
 		PriorityQueue<FrontierEntry> frontier = new PriorityQueue<>();
 
+        if(!startingPoint.resolve(graph))return;
 		TrackNode initialNode1 = forward ? startingPoint.node1 : startingPoint.node2;
 		TrackNode initialNode2 = forward ? startingPoint.node2 : startingPoint.node1;
 		TrackEdge initialEdge = graph.getConnectionsFrom(initialNode1)
@@ -631,10 +655,10 @@ public class Navigation {
 						initialPenalty += Train.Penalties.REDSTONE_RED_SIGNAL;
 						continue;
 					}
-					UUID group = signal.getGroup(initialNode2);
+					UUID group = signal.groupFor(initialNode2);
 					if (group == null)
 						continue;
-					SignalEdgeGroup signalEdgeGroup = Create.RAILWAYS.signalEdgeGroups.get(group);
+					SignalEdgeGroup signalEdgeGroup = train.manager().signalEdgeGroups().get(group);
 					if (signalEdgeGroup == null)
 						continue;
 					if (signalEdgeGroup.isOccupiedUnless(signal)) {
@@ -730,10 +754,10 @@ public class Navigation {
 								newPenalty += Train.Penalties.REDSTONE_RED_SIGNAL;
 								continue;
 							}
-							UUID group = signal.getGroup(newNode);
+							UUID group = signal.groupFor(newNode);
 							if (group == null)
 								continue;
-							SignalEdgeGroup signalEdgeGroup = Create.RAILWAYS.signalEdgeGroups.get(group);
+							SignalEdgeGroup signalEdgeGroup = train.manager().signalEdgeGroups().get(group);
 							if (signalEdgeGroup == null)
 								continue;
 							if (signalEdgeGroup.isOccupiedUnless(signal)) {
@@ -850,20 +874,19 @@ public class Navigation {
 
 		removeBrokenPathEntries();
 
-		tag.putUUID("Destination", destination.id);
+		tag.store("Destination",net.minecraft.core.UUIDUtil.CODEC,destination.id);
 		tag.putDouble("DistanceToDestination", distanceToDestination);
 		tag.putDouble("DistanceStartedAt", distanceStartedAt);
 		tag.putBoolean("BehindTrain", destinationBehindTrain);
 		tag.putBoolean("AnnounceArrival", announceArrival);
-		tag.put("Path", NBTHelper.writeCompoundList(currentPath, c -> {
+		tag.put("Path", TrainNbt.writeCompoundList(currentPath, c -> {
 			CompoundTag nbt = new CompoundTag();
-			nbt.put("Nodes", c.map(TrackNode::getLocation)
-				.serializeEach(loc -> loc.write(dimensions)));
+            nbt.put("Nodes",com.simibubi.create.content.trains.graph.RailCodecs.writeCouple(c,node->node.getLocation().write(dimensions)));
 			return nbt;
 		}));
 		if (waitingForSignal == null)
 			return tag;
-		tag.putUUID("BlockingSignal", waitingForSignal.getFirst());
+		tag.store("BlockingSignal",net.minecraft.core.UUIDUtil.CODEC,waitingForSignal.getFirst());
 		tag.putBoolean("BlockingSignalSide", waitingForSignal.getSecond());
 		tag.putDouble("DistanceToSignal", distanceToSignal);
 		tag.putInt("TicksWaitingForSignal", ticksWaitingForSignal);
@@ -872,31 +895,33 @@ public class Navigation {
 
 	public void read(CompoundTag tag, TrackGraph graph, DimensionPalette dimensions) {
 		destination = graph != null && tag.contains("Destination")
-			? graph.getPoint(EdgePointType.STATION, tag.getUUID("Destination"))
+			? graph.getPoint(com.simibubi.create.content.trains.station.StationEdgePoints.STATION, TrainNbt.uuid(tag,"Destination"))
 			: null;
 
 		if (destination == null)
 			return;
 
-		distanceToDestination = tag.getDouble("DistanceToDestination");
-		distanceStartedAt = tag.getDouble("DistanceStartedAt");
-		destinationBehindTrain = tag.getBoolean("BehindTrain");
-		announceArrival = tag.getBoolean("AnnounceArrival");
+		distanceToDestination = tag.getDoubleOr("DistanceToDestination",0);
+        distanceStartedAt=tag.getDoubleOr("DistanceStartedAt",0);
+        if(!Double.isFinite(distanceToDestination)||!Double.isFinite(distanceStartedAt)||distanceStartedAt<0)
+            throw new IllegalArgumentException("Invalid actual persisted native navigation distance");
+		destinationBehindTrain = tag.getBooleanOr("BehindTrain",false);
+		announceArrival = tag.getBooleanOr("AnnounceArrival",false);
 		currentPath.clear();
-		NBTHelper.iterateCompoundList(tag.getList("Path", Tag.TAG_COMPOUND),
-			c -> currentPath.add(Couple
-				.deserializeEach(c.getList("Nodes", Tag.TAG_COMPOUND), c2 -> TrackNodeLocation.read(c2, dimensions))
+		TrainNbt.iterateCompoundList(tag.getListOrEmpty("Path"),
+			c -> currentPath.add(com.simibubi.create.content.trains.graph.RailCodecs.readCouple(c,"Nodes",c2->TrackNodeLocation.read(c2,dimensions))
 				.map(graph::locateNode)));
 
 		removeBrokenPathEntries();
 
 		waitingForSignal = tag.contains("BlockingSignal")
-			? Pair.of(tag.getUUID("BlockingSignal"), tag.getBoolean("BlockingSignalSide"))
+			? Pair.of(TrainNbt.uuid(tag,"BlockingSignal"), tag.getBooleanOr("BlockingSignalSide",false))
 			: null;
 		if (waitingForSignal == null)
 			return;
-		distanceToSignal = tag.getDouble("DistanceToSignal");
-		ticksWaitingForSignal = tag.getInt("TicksWaitingForSignal");
+        distanceToSignal=tag.getDoubleOr("DistanceToSignal",0);
+        ticksWaitingForSignal=tag.getIntOr("TicksWaitingForSignal",0);
+        if(!Double.isFinite(distanceToSignal)||ticksWaitingForSignal<0)throw new IllegalArgumentException("Invalid actual persisted Train signal wait");
 	}
 
 	private void removeBrokenPathEntries() {

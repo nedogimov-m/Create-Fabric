@@ -5,9 +5,7 @@ import java.util.List;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.simibubi.create.content.logistics.BigItemStack;
-import com.simibubi.create.content.logistics.packager.InventorySummary;
 
-import net.createmod.catnip.codecs.stream.CatnipStreamCodecBuilders;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -31,7 +29,7 @@ public record PackageOrderWithCrafts(PackageOrder orderedStacks, List<CraftingEn
 	public static final StreamCodec<RegistryFriendlyByteBuf, PackageOrderWithCrafts> STREAM_CODEC =
 		StreamCodec.composite(
 			PackageOrder.STREAM_CODEC, s -> s.orderedStacks,
-			CatnipStreamCodecBuilders.list(CraftingEntry.STREAM_CODEC), s -> s.orderedCrafts,
+			CraftingEntry.STREAM_CODEC.apply(ByteBufCodecs.list()), s -> s.orderedCrafts,
 			PackageOrderWithCrafts::new);
 
 	public static PackageOrderWithCrafts empty() {
@@ -82,18 +80,13 @@ public record PackageOrderWithCrafts(PackageOrder orderedStacks, List<CraftingEn
     	if (orderedCrafts.isEmpty())
     		return false;
 
-		InventorySummary stacks = new InventorySummary();
-    	InventorySummary crafts = new InventorySummary();
-
-		stacks().forEach(stacks::add);
-    	orderedCrafts.forEach(ce -> ce.pattern.stacks().forEach(bis -> crafts.add(new BigItemStack(bis.stack, bis.count * ce.count))));
-
-    	List<BigItemStack> stackEntries = stacks.getStacks();
-		if (stackEntries.size() != crafts.getStacks().size())
-    		return false;
-		for (BigItemStack bis : stackEntries)
-			if (crafts.getCountOf(bis.stack) != bis.count)
-				return false;
-    	return true;
+        var stacks = new java.util.HashMap<com.simibubi.create.foundation.item.ItemSampleEquality.Key, Integer>();
+        var crafts = new java.util.HashMap<com.simibubi.create.foundation.item.ItemSampleEquality.Key, Integer>();
+        for (var entry : stacks()) if (!entry.stack.isEmpty() && entry.count != 0)
+            stacks.merge(com.simibubi.create.foundation.item.ItemSampleEquality.key(entry.stack), entry.count, (left,right)->left>=BigItemStack.INF?left:left+right);
+        for (var craft : orderedCrafts) for (var entry : craft.pattern.stacks())
+            if (!entry.stack.isEmpty() && entry.count * craft.count != 0)
+                crafts.merge(com.simibubi.create.foundation.item.ItemSampleEquality.key(entry.stack), entry.count * craft.count, (left,right)->left>=BigItemStack.INF?left:left+right);
+        return stacks.equals(crafts);
     }
 }

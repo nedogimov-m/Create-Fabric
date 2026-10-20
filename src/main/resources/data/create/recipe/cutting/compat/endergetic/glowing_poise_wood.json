@@ -1,0 +1,20 @@
+{
+  "type": "create:cutting",
+  "ingredients": [
+    "endergetic:glowing_poise_wood"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "id": "endergetic:stripped_poise_wood"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "endergetic"
+      ]
+    }
+  ]
+}

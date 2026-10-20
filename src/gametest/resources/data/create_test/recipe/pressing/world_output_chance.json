@@ -1,0 +1,8 @@
+{
+  "type": "create:pressing",
+  "ingredients": ["minecraft:beetroot"],
+  "results": [
+    {"id": "minecraft:diamond", "count": 99, "chance": 0.5},
+    {"id": "minecraft:emerald", "count": 3}
+  ]
+}

@@ -1,322 +1,194 @@
 package com.simibubi.create.content.kinetics.mixer;
 
-import java.util.List;
-import java.util.Optional;
-
+import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.AllRecipeTypes;
 import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.fluids.FluidFX;
-import com.simibubi.create.content.fluids.potion.PotionMixingRecipes;
-import com.simibubi.create.content.kinetics.press.MechanicalPressBlockEntity;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.processing.basin.BasinBlockEntity;
 import com.simibubi.create.content.processing.basin.BasinOperatingBlockEntity;
-import com.simibubi.create.content.processing.recipe.StandardProcessingRecipe;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.advancement.CreateAdvancement;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.fluid.SmartFluidTankBehaviour;
-import com.simibubi.create.foundation.blockEntity.behaviour.fluid.SmartFluidTankBehaviour.TankSegment;
-import com.simibubi.create.foundation.item.SmartInventory;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import net.createmod.catnip.animation.AnimationTickHolder;
-import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.math.VecHelper;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction.Axis;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.particles.ItemParticleOption;
-import net.minecraft.core.particles.ParticleOptions;
-import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.Mth;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.item.crafting.ShapedRecipe;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.items.IItemHandler;
+public final class MechanicalMixerBlockEntity extends BasinOperatingBlockEntity {
+    private static final Object shapelessOrMixingRecipesKey = new Object();
+    public static final int MIN_SPEED = 30;
+    @Override public float getMinimumRequiredSpeed(){return com.simibubi.create.infrastructure.config.AllConfigs.server().kinetics.mediumSpeed.getF();}
+    private boolean running;
+    private boolean originalProcessing;
+    private int runningTicks;
+    private int processingTicks = -1;
+    private ResourceKey<Recipe<?>> activeRecipe;
 
-public class MechanicalMixerBlockEntity extends BasinOperatingBlockEntity {
+    public MechanicalMixerBlockEntity(BlockPos pos, BlockState state) { this(AllBlockEntityTypes.MECHANICAL_MIXER, pos, state); }
+    public MechanicalMixerBlockEntity(net.minecraft.world.level.block.entity.BlockEntityType<?> type, BlockPos pos, BlockState state) { super(type, pos, state); }
+    public boolean isRunning() { return running; }
+    public int getRunningTicks() { return runningTicks; }
+    public float getHeadOffset(float partialTick) {
+        if (!running) return 7f / 16f;
+        float progress = runningTicks < 20 ? runningTicks + partialTick : runningTicks == 20 ? 20 : 40 - runningTicks - partialTick;
+        return (1 - (float) Math.cos(Math.clamp(progress, 0, 20) / 20f * Math.PI)) / 2 + 7f / 16f;
+    }
+    public float getHeadAngle(float partialTick) {
+        float multiplier = !running ? 0.5f : runningTicks >= 15 && runningTicks <= 20 ? 2 : 1;
+        return getAngle(partialTick) * multiplier * 2;
+    }
+    private BasinBlockEntity basin() {
+        return getBasin().orElse(null);
+    }
+    private void stop() { running = false; originalProcessing = false; runningTicks = 0; processingTicks = -1; activeRecipe = null; currentRecipe = null; basinChecker.scheduleUpdate(); setChanged(); sync(); }
 
-	private static final Object shapelessOrMixingRecipesKey = new Object();
+    @Override public void startProcessingBasin() {
+        if (running && runningTicks <= 20) return;
+        if (isVirtual()) {
+            running = true; runningTicks = 0; processingTicks = -1;
+            return;
+        }
+        var recipe = findBasinRecipe();
+        if (recipe == null) return;
+        currentRecipe = recipe.value(); activeRecipe = recipe.id();
+        running = true; runningTicks = 0; processingTicks = -1;
+    }
+    @Override public boolean continueWithPreviousRecipe() { runningTicks = 20; return true; }
+    @Override protected void onBasinRemoved() { stop(); }
+    @Override protected Object getRecipeCacheKey() { return shapelessOrMixingRecipesKey; }
+    @Override protected boolean matchStaticFilters(net.minecraft.world.item.crafting.RecipeHolder<? extends Recipe<?>> recipe) {
+        return recipe.value().getType() == AllRecipeTypes.MIXING;
+    }
+    @Override protected java.util.List<Recipe<?>> getMatchingRecipes() {
+        var recipes = super.getMatchingRecipes();
+        var converted = getBasin().map(basin -> basin.findRecipe(AllRecipeTypes.MIXING)).orElse(null);
+        if (converted != null && !recipes.contains(converted.value()) && matchBasinRecipe(converted.value())) recipes.add(converted.value());
+        sortMatchingRecipes(recipes);
+        return recipes;
+    }
+    @Override protected java.util.Optional<com.simibubi.create.foundation.advancement.CreateAdvancement> getProcessedRecipeTrigger() {
+        return java.util.Optional.of(com.simibubi.create.foundation.advancement.AllAdvancements.MIXER);
+    }
 
-	public int runningTicks;
-	public int processingTicks;
-	public boolean running;
+    @Override public void tick() {
+        if (level == null) super.tick();
+        else tick(level, worldPosition, getBlockState(), this);
+    }
 
-	public MechanicalMixerBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-	}
+    public static void tick(Level level, BlockPos pos, BlockState state, MechanicalMixerBlockEntity mixer) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, mixer)) {
+            if (!createTick.shouldTick()) return;
+        if (mixer.handleBasinRemoval()) return;
 
-	public float getRenderedHeadOffset(float partialTicks) {
-		int localTick;
-		float offset = 0;
-		if (running) {
-			if (runningTicks < 20) {
-				localTick = runningTicks;
-				float num = (localTick + partialTicks) / 20f;
-				num = ((2 - Mth.cos((float) (num * Math.PI))) / 2);
-				offset = num - .5f;
-			} else if (runningTicks <= 20) {
-				offset = 1;
-			} else {
-				localTick = 40 - runningTicks;
-				float num = (localTick - partialTicks) / 20f;
-				num = ((2 - Mth.cos((float) (num * Math.PI))) / 2);
-				offset = num - .5f;
-			}
-		}
-		return offset + 7 / 16f;
-	}
+        KineticBlockEntity.tick(level, pos, state, mixer);
+        if (mixer.isVirtual()) { mixer.tickVirtualMixing(); return; }
+        if (level.isClientSide()) {
+            if (mixer.running && mixer.runningTicks == 20) mixer.renderParticles();
+            if (mixer.running && mixer.runningTicks != 20) mixer.runningTicks = Math.min(39, mixer.runningTicks + 1);
+            if (mixer.running && mixer.runningTicks == 20 && level.getGameTime() % 4 == 0) {
+                level.playLocalSound(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, AllSoundEvents.MIXING, SoundSource.BLOCKS, 0.75f, 1, false);
+            }
+            return;
+        }
+        var basin = mixer.basin();
+        if (!mixer.running) {
+            if (basin == null || Math.abs(mixer.getSpeed()) < mixer.getMinimumRequiredSpeed() || level.getGameTime() % 5 != 0) return;
+            mixer.updateBasin();
+            if (!mixer.running) return;
+        }
+        if (basin == null) { mixer.stop(); return; }
+        if (Math.abs(mixer.getSpeed()) < mixer.getMinimumRequiredSpeed()) {
+            if (mixer.runningTicks < 20) mixer.runningTicks = 40 - mixer.runningTicks;
+            else if (mixer.runningTicks == 20) mixer.runningTicks++;
+        }
+        if (mixer.runningTicks == 20) {
+            var recipe = mixer.findBasinRecipe();
+            if(mixer.originalProcessing&&mixer.activeRecipe==null&&recipe!=null&&basin.process(recipe.value(),true)){
+                // Original currentRecipe/processingTicks were transient. Adopt only an actual
+                // currently payable basin recipe; this creates no historical output/payment.
+                mixer.activeRecipe=recipe.id();mixer.currentRecipe=recipe.value();mixer.processingTicks=-1;mixer.originalProcessing=false;mixer.setChanged();
+            }
+            if (recipe == null || !recipe.id().equals(mixer.activeRecipe) || !basin.process(recipe.value(), true)) {
+                mixer.runningTicks++; mixer.sync();
+            } else if (mixer.processingTicks < 0) {
+                int log = 31 - Integer.numberOfLeadingZeros(Math.max(1, (int) (512 / Math.abs(mixer.getSpeed()))));
+                mixer.processingTicks = Math.max(1, log * (int) Math.ceil(recipe.value().processingTime() / 100f * 15) + 1);
+            } else if (--mixer.processingTicks <= 0) {
+                mixer.currentRecipe = recipe.value();
+                if (!mixer.applyBasinRecipeTransaction()) { mixer.runningTicks++; mixer.sync(); return; }
+                mixer.processingTicks = -1;
+                var next = mixer.findBasinRecipe();
+                if (next == null || !next.id().equals(mixer.activeRecipe) || !basin.process(next.value(), true)) mixer.runningTicks++;
+                mixer.sync();
+            }
+        } else mixer.runningTicks++;
+        if (mixer.runningTicks >= 40) mixer.stop();
+        mixer.setChanged();
+    
+        }
+    }
+    /** The genuine source null-recipe virtual animation uses the canonical renderer fields. */
+    private void tickVirtualMixing() {
+        if (runningTicks >= 40) { stop(); return; }
+        if (!running) return;
+        float speed = Math.abs(getSpeed());
+        if (runningTicks == 20) renderParticles();
+        if (speed == 0 || !isSpeedRequirementFulfilled()) {
+            if (runningTicks < 20) runningTicks = 40 - runningTicks;
+            else if (runningTicks == 20) runningTicks++;
+        }
+        if (runningTicks == 20) {
+            if (processingTicks < 0) {
+                int logarithm = 31 - Integer.numberOfLeadingZeros(Math.max(1, (int) (512 / speed)));
+                processingTicks = Math.max(logarithm * 15 + 1, 1);
+                var basin = basin();
+                if (basin != null && basin.fluids.allTanks().stream().anyMatch(tank -> !tank.isResourceBlank()))
+                    level.playSound(null, worldPosition, net.minecraft.sounds.SoundEvents.BUBBLE_COLUMN_WHIRLPOOL_AMBIENT,
+                        SoundSource.BLOCKS, .75f, speed < 65 ? .75f : 1.5f);
+            } else if (--processingTicks == 0) {
+                runningTicks++; processingTicks = -1;
+            }
+        }
+        if (runningTicks != 20) runningTicks++;
+    }
 
-	public float getRenderedHeadRotationSpeed(float partialTicks) {
-		float speed = getSpeed();
-		if (running) {
-			if (runningTicks < 15) {
-				return speed;
-			}
-			if (runningTicks <= 20) {
-				return speed * 2;
-			}
-			return speed;
-		}
-		return speed / 2;
-	}
+    /** Complete original particle emission, reading the actual native basin slots/tanks. */
+    public void renderParticles() {
+        var basin = basin();
+        if (basin == null || level == null || !level.isClientSide()) return;
+        for (var slot : basin.allItems()) if (!slot.isResourceBlank())
+            spillParticle(new net.minecraft.core.particles.ItemParticleOption(net.minecraft.core.particles.ParticleTypes.ITEM,
+                net.minecraft.world.item.ItemStackTemplate.fromNonEmptyStack(slot.stack())));
+        for (var tank : basin.fluids.allTanks()) if (!tank.isResourceBlank())
+            spillParticle(new com.simibubi.create.content.fluids.particle.FluidParticleData(
+                com.simibubi.create.AllParticleTypes.FLUID_PARTICLE,
+                new com.simibubi.create.foundation.fluid.FluidStack(tank.getResource(), tank.getAmount())));
+    }
 
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		registerAwardables(behaviours, AllAdvancements.MIXER);
-	}
+    protected void spillParticle(net.minecraft.core.particles.ParticleOptions data) {
+        float angle = level.getRandom().nextFloat() * 360;
+        var offset = net.createmod.catnip.math.VecHelper.rotate(new net.minecraft.world.phys.Vec3(0, 0, .25f), angle, net.minecraft.core.Direction.Axis.Y);
+        var target = net.createmod.catnip.math.VecHelper.rotate(offset, getSpeed() > 0 ? 25 : -25, net.minecraft.core.Direction.Axis.Y).add(0, .25f, 0);
+        var center = offset.add(net.createmod.catnip.math.VecHelper.getCenterOf(worldPosition));
+        target = net.createmod.catnip.math.VecHelper.offsetRandomly(target.subtract(offset), level.getRandom(), 1 / 128f);
+        level.addParticle(data, center.x, center.y - 1.75f, center.z, target.x, target.y, target.z);
+    }
 
-	@Override
-	protected AABB createRenderBoundingBox() {
-		return new AABB(worldPosition).expandTowards(0, -1.5, 0);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		running = compound.getBoolean("Running");
-		runningTicks = compound.getInt("Ticks");
-		super.read(compound, registries, clientPacket);
-
-		if (clientPacket && hasLevel())
-			getBasin().ifPresent(bte -> bte.setAreFluidsMoving(running && runningTicks <= 20));
-	}
-
-	@Override
-	protected void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		compound.putBoolean("Running", running);
-		compound.putInt("Ticks", runningTicks);
-		super.write(compound, registries, clientPacket);
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		if (runningTicks >= 40) {
-			running = false;
-			runningTicks = 0;
-			basinChecker.scheduleUpdate();
-			return;
-		}
-
-		float speed = Math.abs(getSpeed());
-		if (running && level != null) {
-			if (level.isClientSide && runningTicks == 20)
-				renderParticles();
-
-			if (getSpeed() == 0 || !isSpeedRequirementFulfilled()) {
-				if (runningTicks < 20)
-					runningTicks = 40 - runningTicks;
-				else if (runningTicks == 20)
-					runningTicks++;
-			}
-
-			if ((!level.isClientSide || isVirtual()) && runningTicks == 20) {
-				if (processingTicks < 0) {
-					float recipeSpeed = 1;
-					if (currentRecipe instanceof StandardProcessingRecipe) {
-						int t = ((StandardProcessingRecipe<?>) currentRecipe).getProcessingDuration();
-						if (t != 0)
-							recipeSpeed = t / 100f;
-					}
-
-					processingTicks = Math.max((Mth.log2((int) (512 / speed))) * Mth.ceil(recipeSpeed * 15) + 1, 1);
-
-					Optional<BasinBlockEntity> basin = getBasin();
-					if (basin.isPresent()) {
-						Couple<SmartFluidTankBehaviour> tanks = basin.get()
-							.getTanks();
-						if (!tanks.getFirst()
-							.isEmpty()
-							|| !tanks.getSecond()
-							.isEmpty())
-							level.playSound(null, worldPosition, SoundEvents.BUBBLE_COLUMN_WHIRLPOOL_AMBIENT,
-								SoundSource.BLOCKS, .75f, speed < 65 ? .75f : 1.5f);
-					}
-
-				} else {
-					processingTicks--;
-					if (processingTicks == 0) {
-						runningTicks++;
-						processingTicks = -1;
-						applyBasinRecipe();
-						sendData();
-					}
-				}
-			}
-
-			if (runningTicks != 20)
-				runningTicks++;
-		}
-	}
-
-	public void renderParticles() {
-		Optional<BasinBlockEntity> basin = getBasin();
-		if (!basin.isPresent() || level == null)
-			return;
-
-		for (SmartInventory inv : basin.get()
-			.getInvs()) {
-			for (int slot = 0; slot < inv.getSlots(); slot++) {
-				ItemStack stackInSlot = inv.getItem(slot);
-				if (stackInSlot.isEmpty())
-					continue;
-				ItemParticleOption data = new ItemParticleOption(ParticleTypes.ITEM, stackInSlot);
-				spillParticle(data);
-			}
-		}
-
-		for (SmartFluidTankBehaviour behaviour : basin.get()
-			.getTanks()) {
-			if (behaviour == null)
-				continue;
-			for (TankSegment tankSegment : behaviour.getTanks()) {
-				if (tankSegment.isEmpty(0))
-					continue;
-				spillParticle(FluidFX.getFluidParticle(tankSegment.getRenderedFluid()));
-			}
-		}
-	}
-
-	protected void spillParticle(ParticleOptions data) {
-		float angle = level.random.nextFloat() * 360;
-		Vec3 offset = new Vec3(0, 0, 0.25f);
-		offset = VecHelper.rotate(offset, angle, Axis.Y);
-		Vec3 target = VecHelper.rotate(offset, getSpeed() > 0 ? 25 : -25, Axis.Y)
-			.add(0, .25f, 0);
-		Vec3 center = offset.add(VecHelper.getCenterOf(worldPosition));
-		target = VecHelper.offsetRandomly(target.subtract(offset), level.random, 1 / 128f);
-		level.addParticle(data, center.x, center.y - 1.75f, center.z, target.x, target.y, target.z);
-	}
-
-	@Override
-	protected List<Recipe<?>> getMatchingRecipes() {
-		List<Recipe<?>> matchingRecipes = super.getMatchingRecipes();
-
-		if (!AllConfigs.server().recipes.allowBrewingInMixer.get())
-			return matchingRecipes;
-
-		Optional<BasinBlockEntity> basin = getBasin();
-		if (!basin.isPresent())
-			return matchingRecipes;
-
-		BasinBlockEntity basinBlockEntity = basin.get();
-		if (basin.isEmpty())
-			return matchingRecipes;
-
-		IItemHandler availableItems = level.getCapability(Capabilities.ItemHandler.BLOCK, basinBlockEntity.getBlockPos(), null);
-		if (availableItems == null)
-			return matchingRecipes;
-
-		for (int i = 0; i < availableItems.getSlots(); i++) {
-			ItemStack stack = availableItems.getStackInSlot(i);
-			if (stack.isEmpty())
-				continue;
-
-			List<MixingRecipe> list = PotionMixingRecipes.sortRecipesByItem(level).get(stack.getItem());
-			if (list == null)
-				continue;
-			for (MixingRecipe mixingRecipe : list)
-				if (matchBasinRecipe(mixingRecipe))
-					matchingRecipes.add(mixingRecipe);
-		}
-
-		return matchingRecipes;
-	}
-
-	@Override
-	protected boolean matchStaticFilters(RecipeHolder<? extends Recipe<?>> recipe) {
-		Recipe<?> r = recipe.value();
-		return ((r instanceof CraftingRecipe && !(r instanceof ShapedRecipe)
-			&& AllConfigs.server().recipes.allowShapelessInMixer.get() && r.getIngredients()
-			.size() > 1
-			&& !MechanicalPressBlockEntity.canCompress(r)) && !AllRecipeTypes.shouldIgnoreInAutomation(recipe)
-			|| r.getType() == AllRecipeTypes.MIXING.getType());
-	}
-
-	@Override
-	public void startProcessingBasin() {
-		if (running && runningTicks <= 20)
-			return;
-		super.startProcessingBasin();
-		running = true;
-		runningTicks = 0;
-	}
-
-	@Override
-	public boolean continueWithPreviousRecipe() {
-		runningTicks = 20;
-		return true;
-	}
-
-	@Override
-	protected void onBasinRemoved() {
-		if (!running)
-			return;
-		runningTicks = 40;
-		running = false;
-	}
-
-	@Override
-	protected Object getRecipeCacheKey() {
-		return shapelessOrMixingRecipesKey;
-	}
-
-	@Override
-	protected boolean isRunning() {
-		return running;
-	}
-
-	@Override
-	protected Optional<CreateAdvancement> getProcessedRecipeTrigger() {
-		return Optional.of(AllAdvancements.MIXER);
-	}
-
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	public void tickAudio() {
-		super.tickAudio();
-
-		// SoundEvents.BLOCK_STONE_BREAK
-		boolean slow = Math.abs(getSpeed()) < 65;
-		if (slow && AnimationTickHolder.getTicks() % 2 == 0)
-			return;
-		if (runningTicks == 20)
-			AllSoundEvents.MIXING.playAt(level, worldPosition, .75f, 1, true);
-	}
-
+    @Override protected void write(ValueOutput output, boolean clientPacket) {
+        super.write(output, clientPacket); output.putBoolean("Running", running); output.putInt("Ticks", runningTicks);
+        output.putInt("ProcessingTicks", processingTicks); output.putBoolean("OriginalProcessing",originalProcessing);
+        if (activeRecipe != null) output.store("ActiveRecipe", ResourceKey.codec(net.minecraft.core.registries.Registries.RECIPE), activeRecipe);
+    }
+    @Override protected void read(ValueInput input, boolean clientPacket) {
+         running = input.getBooleanOr("Running", false); runningTicks = input.getIntOr("Ticks", 0); originalProcessing=input.getBooleanOr("OriginalProcessing",false);
+        processingTicks = Math.clamp(input.getIntOr("ProcessingTicks", -1), -1, 1000000);
+        activeRecipe = input.read("ActiveRecipe", ResourceKey.codec(net.minecraft.core.registries.Registries.RECIPE)).orElse(null);
+    
+        super.read(input, clientPacket);
+    }
+    @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
+        super.addNativeAdvancementIds(ids);
+        ids.add("mechanical_mixer");
+    }
 }

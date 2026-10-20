@@ -1,0 +1,7 @@
+{
+  "parent": "create:block/encased_chain_drive/middle_vertical",
+  "textures": {
+    "side": "create:block/adjustable_chain_gearshift",
+    "particle": "create:block/adjustable_chain_gearshift"
+  }
+}

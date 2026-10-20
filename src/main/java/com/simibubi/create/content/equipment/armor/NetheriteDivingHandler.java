@@ -1,100 +1,18 @@
 package com.simibubi.create.content.equipment.armor;
 
-import com.simibubi.create.AllTags.AllItemTags;
-
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.entity.EquipmentSlot;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.item.ArmorItem;
+import net.minecraft.tags.*;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.event.entity.living.LivingEquipmentChangeEvent;
 
-@EventBusSubscriber
+/** Re-evaluates the actual native equipped stacks, including air depletion, after reload and component changes. */
 public final class NetheriteDivingHandler {
-	public static final String NETHERITE_DIVING_BITS_KEY = "CreateNetheriteDivingBits";
-	public static final String FIRE_IMMUNE_KEY = "CreateFireImmune";
-
-	@SubscribeEvent
-	public static void onLivingEquipmentChange(LivingEquipmentChangeEvent event) {
-		EquipmentSlot slot = event.getSlot();
-		if (slot.getType() != EquipmentSlot.Type.HUMANOID_ARMOR) {
-			return;
-		}
-
-		LivingEntity entity = event.getEntity();
-		ItemStack to = event.getTo();
-
-		if (slot == EquipmentSlot.HEAD) {
-			if (isNetheriteDivingHelmet(to)) {
-				setBit(entity, slot);
-			} else {
-				clearBit(entity, slot);
-			}
-		} else if (slot == EquipmentSlot.CHEST) {
-			if (isNetheriteBacktank(to) && BacktankUtil.hasAirRemaining(to)) {
-				setBit(entity, slot);
-			} else {
-				clearBit(entity, slot);
-			}
-		} else if (slot == EquipmentSlot.LEGS || slot == EquipmentSlot.FEET) {
-			if (isNetheriteArmor(to)) {
-				setBit(entity, slot);
-			} else {
-				clearBit(entity, slot);
-			}
-		}
-	}
-
-	public static boolean isNetheriteDivingHelmet(ItemStack stack) {
-		return stack.getItem() instanceof DivingHelmetItem && isNetheriteArmor(stack);
-	}
-
-	public static boolean isNetheriteBacktank(ItemStack stack) {
-		return stack.is(AllItemTags.PRESSURIZED_AIR_SOURCES.tag) && isNetheriteArmor(stack);
-	}
-
-	public static boolean isNetheriteArmor(ItemStack stack) {
-		return stack.getItem() instanceof ArmorItem && stack.has(DataComponents.FIRE_RESISTANT);
-	}
-
-	public static void setBit(LivingEntity entity, EquipmentSlot slot) {
-		CompoundTag nbt = entity.getPersistentData();
-		byte bits = nbt.getByte(NETHERITE_DIVING_BITS_KEY);
-		if ((bits & 0b1111) == 0b1111) {
-			return;
-		}
-
-		bits |= 1 << slot.getIndex();
-		nbt.putByte(NETHERITE_DIVING_BITS_KEY, bits);
-
-		if ((bits & 0b1111) == 0b1111) {
-			setFireImmune(entity, true);
-		}
-	}
-
-	public static void clearBit(LivingEntity entity, EquipmentSlot slot) {
-		CompoundTag nbt = entity.getPersistentData();
-		if (!nbt.contains(NETHERITE_DIVING_BITS_KEY)) {
-			return;
-		}
-
-		byte bits = nbt.getByte(NETHERITE_DIVING_BITS_KEY);
-		boolean prevFullSet = (bits & 0b1111) == 0b1111;
-		bits &= ~(1 << slot.getIndex());
-		nbt.putByte(NETHERITE_DIVING_BITS_KEY, bits);
-
-		if (prevFullSet) {
-			setFireImmune(entity, false);
-		}
-	}
-
-	// TODO: sync to the client
-	// The feature works without syncing because health and burning are calculated server-side and synced through vanilla code.
-	// This method will not be called when the entity is wearing a full diving set on creation because the NBT values are persistent.
-	public static void setFireImmune(LivingEntity entity, boolean fireImmune) {
-		entity.getPersistentData().putBoolean(FIRE_IMMUNE_KEY, fireImmune);
-	}
+    public static final String NETHERITE_DIVING_BITS_KEY="CreateNetheriteDivingBits",FIRE_IMMUNE_KEY="CreateFireImmune";
+    public static boolean isFireResistant(ItemStack stack){var resistance=stack.get(DataComponents.DAMAGE_RESISTANT);return resistance!=null&&resistance.types().stream().anyMatch(type->type.is(DamageTypeTags.IS_FIRE));}
+    public static boolean isNetheriteDivingHelmet(ItemStack stack){return stack.getItem() instanceof DivingHelmetItem&&isNetheriteArmor(stack);}
+    public static boolean isNetheriteBacktank(ItemStack stack){return stack.is(BacktankUtil.PRESSURIZED_AIR_SOURCES)&&isNetheriteArmor(stack);}
+    public static boolean isNetheriteArmor(ItemStack stack){return isFireResistant(stack)&&stack.has(DataComponents.EQUIPPABLE)&&(stack.getItem() instanceof BaseArmorItem||stack.is(ItemTags.HEAD_ARMOR)||stack.is(ItemTags.CHEST_ARMOR)||stack.is(ItemTags.LEG_ARMOR)||stack.is(ItemTags.FOOT_ARMOR));}
+    public static int getDivingBits(LivingEntity entity){int bits=0;if(isNetheriteDivingHelmet(entity.getItemBySlot(EquipmentSlot.HEAD)))bits|=1;if(isNetheriteBacktank(entity.getItemBySlot(EquipmentSlot.CHEST))&&BacktankUtil.hasAirRemaining(entity.getItemBySlot(EquipmentSlot.CHEST)))bits|=2;if(isNetheriteArmor(entity.getItemBySlot(EquipmentSlot.LEGS)))bits|=4;if(isNetheriteArmor(entity.getItemBySlot(EquipmentSlot.FEET)))bits|=8;return bits;}
+    public static boolean isFireImmune(LivingEntity entity){return getDivingBits(entity)==15;}
+    private NetheriteDivingHandler(){}
 }

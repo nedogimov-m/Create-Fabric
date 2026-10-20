@@ -1,159 +1,174 @@
 package com.simibubi.create.content.trains.entity;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Multimaps;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.AllSoundEvents;
-import com.simibubi.create.content.contraptions.Contraption;
+import com.simibubi.create.Create;
+import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.decoration.steamWhistle.WhistleBlock;
 import com.simibubi.create.content.decoration.steamWhistle.WhistleBlock.WhistleSize;
-
+import java.util.*;
 import net.createmod.catnip.data.Pair;
-import net.createmod.catnip.nbt.NBTHelper;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtUtils;
-import net.minecraft.nbt.Tag;
-import net.minecraft.sounds.SoundEvent;
-import net.minecraft.sounds.SoundEvents;
-import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.level.block.BellBlock;
-import net.minecraft.world.level.block.NoteBlock;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.*;
+import net.minecraft.sounds.*;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
+import org.jspecify.annotations.Nullable;
 
-public class ArrivalSoundQueue {
+/**
+ * Source carriage arrival sequence on an actual native contraption owner. No train is synthesized.
+ */
+public final class ArrivalSoundQueue {
+  public int offset;
+  private int min = Integer.MAX_VALUE, max = Integer.MIN_VALUE;
+  private final Map<Integer, List<BlockPos>> sources = new LinkedHashMap<>();
 
-	public int offset;
-	int min, max;
-	Multimap<Integer, BlockPos> sources;
+  public @Nullable Integer firstTick() {
+    return sources.isEmpty() ? null : Math.addExact(min, offset);
+  }
 
-	public ArrivalSoundQueue() {
-		sources = Multimaps.newMultimap(new HashMap<>(), ArrayList::new);
-		min = Integer.MAX_VALUE;
-		max = Integer.MIN_VALUE;
-	}
+  public @Nullable Integer lastTick() {
+    return sources.isEmpty() ? null : Math.addExact(max, offset);
+  }
 
-	@Nullable
-	public Integer firstTick() {
-		return sources.isEmpty() ? null : min + offset;
-	}
+  public boolean tick(AbstractContraptionEntity entity, int tick, boolean backwards) {
+    int localTick = Math.subtractExact(tick, offset);
+    var entries = sources.get(localTick);
+    if (entries != null)
+      for (var pos : entries) play(entity, entity.getContraption().getBlocks().get(pos));
+    return backwards ? localTick > min : localTick < max;
+  }
 
-	@Nullable
-	public Integer lastTick() {
-		return sources.isEmpty() ? null : max + offset;
-	}
+  public @Nullable Pair<Boolean, Integer> getFirstWhistle(AbstractContraptionEntity entity) {
+    for (var entry : sources.entrySet().stream().sorted(Map.Entry.comparingByKey()).toList()) {
+      for (var pos : entry.getValue()) {
+        var info = entity.getContraption().getBlocks().get(pos);
+        if (info == null
+            || !(info.state().getBlock() instanceof WhistleBlock)
+            || info.nbt() == null) continue;
+        int pitch = info.nbt().getIntOr("Pitch", 0);
+        var size = info.state().getValue(WhistleBlock.SIZE);
+        return Pair.of(size == WhistleSize.LARGE, (size == WhistleSize.SMALL ? 12 : 0) - pitch);
+      }
+    }
+    return null;
+  }
 
-	public boolean tick(CarriageContraptionEntity entity, int tick, boolean backwards) {
-		tick = tick - offset;
-		if (!sources.containsKey(tick))
-			return backwards ? tick > min : tick < max;
-		Contraption contraption = entity.getContraption();
-		for (BlockPos blockPos : sources.get(tick))
-			play(entity, contraption.getBlocks()
-				.get(blockPos));
-		return backwards ? tick > min : tick < max;
-	}
+  public void add(int tick, BlockPos localPos) {
+    sources.computeIfAbsent(tick, ignored -> new ArrayList<>()).add(localPos.immutable());
+    min = Math.min(min, tick);
+    max = Math.max(max, tick);
+  }
 
-	public Pair<Boolean, Integer> getFirstWhistle(CarriageContraptionEntity entity) {
-		Integer firstTick = firstTick();
-		Integer lastTick = lastTick();
-		if (firstTick == null || lastTick == null || firstTick > lastTick)
-			return null;
-		for (int i = firstTick; i <= lastTick; i++) {
-			if (!sources.containsKey(i - offset))
-				continue;
-			Contraption contraption = entity.getContraption();
-			for (BlockPos blockPos : sources.get(i - offset)) {
-				StructureBlockInfo info = contraption.getBlocks()
-					.get(blockPos);
-				if (info == null)
-					continue;
-				BlockState state = info.state();
-				if (state.getBlock() instanceof WhistleBlock && info.nbt() != null) {
-					int pitch = info.nbt().getInt("Pitch");
-					WhistleSize size = state.getValue(WhistleBlock.SIZE);
-					return Pair.of(size == WhistleSize.LARGE, (size == WhistleSize.SMALL ? 12 : 0) - pitch);
-				}
-			}
-		}
-		return null;
-	}
+  public Map<Integer, List<BlockPos>> sources() {
+    var copied = new LinkedHashMap<Integer, List<BlockPos>>();
+    sources.forEach((tick, list) -> copied.put(tick, List.copyOf(list)));
+    return Collections.unmodifiableMap(copied);
+  }
 
-	public void serialize(CompoundTag tagIn) {
-		CompoundTag tag = new CompoundTag();
-		tag.putInt("Offset", offset);
-		tag.put("Sources", NBTHelper.writeCompoundList(sources.entries(), e -> {
-			CompoundTag c = new CompoundTag();
-			c.putInt("Tick", e.getKey());
-			c.put("Pos", NbtUtils.writeBlockPos(e.getValue()));
-			return c;
-		}));
-		tagIn.put("SoundQueue", tag);
-	}
+  public void serialize(CompoundTag parent) {
+    var data = new CompoundTag();
+    data.putInt("Offset", offset);
+    var entries = new ListTag();
+    sources.forEach(
+        (tick, list) ->
+            list.forEach(
+                pos -> {
+                  var entry = new CompoundTag();
+                  entry.putInt("Tick", tick);
+                  entry.store("Pos", BlockPos.CODEC, pos);
+                  entries.add(entry);
+                }));
+    data.put("Sources", entries);
+    parent.put("SoundQueue", data);
+  }
 
-	public void deserialize(CompoundTag tagIn) {
-		CompoundTag tag = tagIn.getCompound("SoundQueue");
-		offset = tag.getInt("Offset");
-		NBTHelper.iterateCompoundList(tag.getList("Sources", Tag.TAG_COMPOUND),
-			c -> add(c.getInt("Tick"), NBTHelper.readBlockPos(c, "Pos")));
-	}
+  public void deserialize(CompoundTag parent) {
+    var data = parent.getCompoundOrEmpty("SoundQueue");
+    var decoded = new LinkedHashMap<Integer, List<BlockPos>>();
+    int first = Integer.MAX_VALUE, last = Integer.MIN_VALUE;
+    for (var value : data.getListOrEmpty("Sources")) {
+      if (!(value instanceof CompoundTag entry) || !entry.contains("Tick"))
+        throw new IllegalArgumentException("Invalid actual arrival sound source");
+      int tick = entry.getIntOr("Tick", 0);
+      var pos = readPosition(entry);
+      decoded.computeIfAbsent(tick, ignored -> new ArrayList<>()).add(pos);
+      first = Math.min(first, tick);
+      last = Math.max(last, tick);
+    }
+    int shift = data.getIntOr("Offset", 0);
+    if (!decoded.isEmpty()) {
+      Math.addExact(first, shift);
+      Math.addExact(last, shift);
+    }
+    sources.clear();
+    sources.putAll(decoded);
+    min = first;
+    max = last;
+    offset = shift;
+  }
 
-	public void add(int offset, BlockPos localPos) {
-		sources.put(offset, localPos);
-		min = Math.min(offset, min);
-		max = Math.max(offset, max);
-	}
+  private static BlockPos readPosition(CompoundTag entry) {
+    if (entry.get("Pos") instanceof CompoundTag legacy) {
+      if (!legacy.contains("X") || !legacy.contains("Y") || !legacy.contains("Z"))
+        throw new IllegalArgumentException("Incomplete source arrival position");
+      return new BlockPos(
+          legacy.getIntOr("X", 0), legacy.getIntOr("Y", 0), legacy.getIntOr("Z", 0));
+    }
+    return entry.read("Pos", BlockPos.CODEC).orElseThrow();
+  }
 
-	public static boolean isPlayable(BlockState state) {
-		if (state.getBlock() instanceof BellBlock)
-			return true;
-		if (state.getBlock() instanceof NoteBlock)
-			return true;
-		if (state.getBlock() instanceof WhistleBlock)
-			return true;
-		return false;
-	}
+  public static boolean isPlayable(BlockState state) {
+    return state.getBlock() instanceof BellBlock
+        || state.getBlock() instanceof NoteBlock
+        || state.getBlock() instanceof WhistleBlock;
+  }
 
-	public static void play(CarriageContraptionEntity entity, StructureBlockInfo info) {
-		if (info == null)
-			return;
-		BlockState state = info.state();
+  public static void play(AbstractContraptionEntity entity, @Nullable StructureBlockInfo info) {
+    if (info == null) return;
+    var state = info.state();
+    if (state.getBlock() instanceof BellBlock)
+      playSimple(
+          entity,
+          state.is(AllBlocks.HAUNTED_BELL)
+              ? AllSoundEvents.HAUNTED_BELL_USE
+              : SoundEvents.BELL_BLOCK,
+          1,
+          1);
+    if (state.getBlock() instanceof NoteBlock) {
+      float pitch = (float) Math.pow(2, (state.getValue(NoteBlock.NOTE) - 12) / 12d);
+      playSimple(entity, state.getValue(NoteBlock.INSTRUMENT).getSoundEvent().value(), 1, pitch);
+    }
+    if (state.getBlock() instanceof WhistleBlock && info.nbt() != null) {
+      var size = state.getValue(WhistleBlock.SIZE);
+      int pitch = info.nbt().getIntOr("Pitch", 0);
+      // These genuine source SoundEvents must be registered by the carriage integration patch.
+      var id = Create.asResource(size == WhistleSize.LARGE ? "whistle_train_low" : "whistle_train");
+      if (!BuiltInRegistries.SOUND_EVENT.containsKey(id))
+        throw new IllegalStateException("Actual source carriage whistle is not registered: " + id);
+      var sound = BuiltInRegistries.SOUND_EVENT.getValue(id);
+      playSimple(
+          entity,
+          sound,
+          1,
+          (float) Math.pow(2, ((size == WhistleSize.SMALL ? 12 : 0) - pitch) / 12d));
+    }
+  }
 
-		if (state.getBlock() instanceof BellBlock) {
-			if (AllBlocks.HAUNTED_BELL.has(state))
-				playSimple(entity, AllSoundEvents.HAUNTED_BELL_USE.getMainEvent(), 1, 1);
-			else
-				playSimple(entity, SoundEvents.BELL_BLOCK, 1, 1);
-		}
-
-		if (state.getBlock() instanceof NoteBlock nb) {
-			float f = (float) Math.pow(2, (state.getValue(NoteBlock.NOTE) - 12) / 12.0);
-			playSimple(entity, state.getValue(NoteBlock.INSTRUMENT)
-				.getSoundEvent().value(), 1, f);
-		}
-
-		if (state.getBlock() instanceof WhistleBlock && info.nbt() != null) {
-			int pitch = info.nbt().getInt("Pitch");
-			WhistleSize size = state.getValue(WhistleBlock.SIZE);
-			float f = (float) Math.pow(2, ((size == WhistleSize.SMALL ? 12 : 0) - pitch) / 12.0);
-			playSimple(entity,
-				(size == WhistleSize.LARGE ? AllSoundEvents.WHISTLE_TRAIN_LOW : AllSoundEvents.WHISTLE_TRAIN)
-					.getMainEvent(),
-				1, f);
-//			playSimple(entity, AllSoundEvents.WHISTLE_CHIFF.getMainEvent(), .75f,
-//				size == WhistleSize.SMALL ? f + .75f : f);
-		}
-
-	}
-
-	private static void playSimple(CarriageContraptionEntity entity, SoundEvent event, float volume, float pitch) {
-		entity.level().playSound(null, entity, event, SoundSource.NEUTRAL, 5 * volume, pitch);
-	}
-
+  private static void playSimple(
+      AbstractContraptionEntity entity, SoundEvent sound, float volume, float pitch) {
+    entity
+        .level()
+        .playSound(
+            null,
+            entity.getX(),
+            entity.getY(),
+            entity.getZ(),
+            sound,
+            SoundSource.NEUTRAL,
+            5 * volume,
+            pitch);
+  }
 }

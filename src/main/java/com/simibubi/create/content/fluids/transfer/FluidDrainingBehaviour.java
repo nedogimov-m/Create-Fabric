@@ -1,367 +1,130 @@
 package com.simibubi.create.content.fluids.transfer;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType;
-import com.simibubi.create.foundation.fluid.FluidHelper;
-
-import it.unimi.dsi.fastutil.PriorityQueue;
-import it.unimi.dsi.fastutil.objects.ObjectHeapPriorityQueue;
-import net.createmod.catnip.data.Iterate;
-import net.createmod.catnip.math.BBHelper;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.LiquidBlock;
+import com.simibubi.create.content.fluids.hosePulley.HosePulleyBlockEntity;
+import com.simibubi.create.foundation.fluid.FluidStack;
+import net.fabricmc.fabric.api.transfer.v1.fluid.*;
+import net.fabricmc.fabric.api.transfer.v1.transaction.TransactionContext;
+import net.minecraft.core.*;
+import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.levelgen.structure.BoundingBox;
-import net.minecraft.world.level.material.Fluid;
-import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.level.material.*;
+import net.minecraft.world.level.storage.*;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import java.util.*;
 
-import net.neoforged.neoforge.fluids.FluidStack;
-
-public class FluidDrainingBehaviour extends FluidManipulationBehaviour {
-
-	public static final BehaviourType<FluidDrainingBehaviour> TYPE = new BehaviourType<>();
-
-	Fluid fluid;
-
-	// Execution
-	Set<BlockPos> validationSet;
-	PriorityQueue<BlockPosEntry> queue;
-	boolean isValid;
-
-	// Validation
-	List<BlockPosEntry> validationFrontier;
-	Set<BlockPos> validationVisited;
-	Set<BlockPos> newValidationSet;
-
-	public FluidDrainingBehaviour(SmartBlockEntity be) {
-		super(be);
-		validationVisited = new HashSet<>();
-		validationFrontier = new ArrayList<>();
-		validationSet = new HashSet<>();
-		newValidationSet = new HashSet<>();
-		queue = new ObjectHeapPriorityQueue<>(this::comparePositions);
-	}
-
-	@Nullable
-	public boolean pullNext(BlockPos root, boolean simulate) {
-		if (!frontier.isEmpty())
-			return false;
-		if (!Objects.equals(root, rootPos)) {
-			rebuildContext(root);
-			return false;
-		}
-
-		if (counterpartActed) {
-			counterpartActed = false;
-			softReset(root);
-			return false;
-		}
-
-		if (affectedArea == null)
-			affectedArea = BoundingBox.fromCorners(root, root);
-
-		Level world = getWorld();
-		if (!queue.isEmpty() && !isValid) {
-			rebuildContext(root);
-			return false;
-		}
-
-		if (validationFrontier.isEmpty() && !queue.isEmpty() && !simulate && revalidateIn == 0)
-			revalidate(root);
-
-		if (infinite) {
-			blockEntity.award(AllAdvancements.HOSE_PULLEY);
-			if (FluidHelper.isLava(fluid))
-				blockEntity.award(AllAdvancements.HOSE_PULLEY_LAVA);
-
-			playEffect(world, root, fluid, true);
-			return true;
-		}
-
-		while (!queue.isEmpty()) {
-			// Dont dequeue here, so we can decide not to dequeue a valid entry when
-			// simulating
-			BlockPos currentPos = queue.first()
-				.pos();
-
-			BlockState blockState = world.getBlockState(currentPos);
-			BlockState emptied = blockState;
-			Fluid fluid = Fluids.EMPTY;
-
-			if (blockState.hasProperty(BlockStateProperties.WATERLOGGED)
-				&& blockState.getValue(BlockStateProperties.WATERLOGGED)) {
-				emptied = blockState.setValue(BlockStateProperties.WATERLOGGED, Boolean.valueOf(false));
-				fluid = Fluids.WATER;
-			} else if (blockState.getBlock() instanceof LiquidBlock flowingFluid) {
-				emptied = Blocks.AIR.defaultBlockState();
-				if (blockState.getValue(LiquidBlock.LEVEL) == 0)
-					fluid = flowingFluid.fluid;
-				else {
-					affectedArea = BBHelper.encapsulate(affectedArea, BoundingBox.fromCorners(currentPos, currentPos));
-					if (!blockEntity.isVirtual())
-						world.setBlock(currentPos, emptied, 2 | 16);
-					queue.dequeue();
-					if (queue.isEmpty()) {
-						isValid = checkValid(world, rootPos);
-						reset();
-					}
-					continue;
-				}
-			} else if (blockState.getFluidState()
-				.getType() != Fluids.EMPTY && blockState.getCollisionShape(world, currentPos, CollisionContext.empty())
-				.isEmpty()) {
-				fluid = blockState.getFluidState()
-					.getType();
-				emptied = Blocks.AIR.defaultBlockState();
-			}
-
-			if (this.fluid == null)
-				this.fluid = fluid;
-
-			if (!this.fluid.isSame(fluid)) {
-				queue.dequeue();
-				if (queue.isEmpty()) {
-					isValid = checkValid(world, rootPos);
-					reset();
-				}
-				continue;
-			}
-
-			if (simulate)
-				return true;
-
-			playEffect(world, currentPos, fluid, true);
-			blockEntity.award(AllAdvancements.HOSE_PULLEY);
-
-			if (!blockEntity.isVirtual()) {
-				world.setBlock(currentPos, emptied, 2 | 16);
-
-				BlockState stateAbove = world.getBlockState(currentPos.above());
-				if (stateAbove.getFluidState()
-					.getType() == Fluids.EMPTY && !stateAbove.canSurvive(world, currentPos.above()))
-					world.setBlock(currentPos.above(), Blocks.AIR.defaultBlockState(), 2 | 16);
-			}
-			affectedArea = BBHelper.encapsulate(affectedArea, currentPos);
-
-			queue.dequeue();
-			if (queue.isEmpty()) {
-				isValid = checkValid(world, rootPos);
-				reset();
-			} else if (!validationSet.contains(currentPos)) {
-				reset();
-			}
-			return true;
-		}
-
-		if (rootPos == null)
-			return false;
-
-		if (isValid)
-			rebuildContext(root);
-
-		return false;
-	}
-
-	protected void softReset(BlockPos root) {
-		queue.clear();
-		validationSet.clear();
-		newValidationSet.clear();
-		validationFrontier.clear();
-		validationVisited.clear();
-		visited.clear();
-		infinite = false;
-		setValidationTimer();
-		frontier.add(new BlockPosEntry(root, 0));
-		blockEntity.sendData();
-	}
-
-	protected boolean checkValid(Level world, BlockPos root) {
-		BlockPos currentPos = root;
-		for (int timeout = 1000; timeout > 0 && !root.equals(blockEntity.getBlockPos()); timeout--) {
-			FluidBlockType canPullFluidsFrom = canPullFluidsFrom(world.getBlockState(currentPos), currentPos);
-			if (canPullFluidsFrom == FluidBlockType.FLOWING) {
-				for (Direction d : Iterate.directions) {
-					BlockPos side = currentPos.relative(d);
-					if (canPullFluidsFrom(world.getBlockState(side), side) == FluidBlockType.SOURCE)
-						return true;
-				}
-				currentPos = currentPos.above();
-				continue;
-			}
-			if (canPullFluidsFrom == FluidBlockType.SOURCE)
-				return true;
-			break;
-		}
-		return false;
-	}
-
-	enum FluidBlockType {
-		NONE, SOURCE, FLOWING;
-	}
-
-	@Override
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(nbt, registries, clientPacket);
-		if (!clientPacket && affectedArea != null)
-			frontier.add(new BlockPosEntry(rootPos, 0));
-	}
-
-	protected FluidBlockType canPullFluidsFrom(BlockState blockState, BlockPos pos) {
-		if (blockState.hasProperty(BlockStateProperties.WATERLOGGED)
-			&& blockState.getValue(BlockStateProperties.WATERLOGGED))
-			return FluidBlockType.SOURCE;
-		if (blockState.getBlock() instanceof LiquidBlock)
-			return blockState.getValue(LiquidBlock.LEVEL) == 0 ? FluidBlockType.SOURCE : FluidBlockType.FLOWING;
-		if (blockState.getFluidState()
-			.getType() != Fluids.EMPTY && blockState.getCollisionShape(getWorld(), pos, CollisionContext.empty())
-			.isEmpty())
-			return FluidBlockType.SOURCE;
-		return FluidBlockType.NONE;
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-		if (rootPos != null)
-			isValid = checkValid(getWorld(), rootPos);
-		if (!frontier.isEmpty()) {
-			continueSearch();
-			return;
-		}
-		if (!validationFrontier.isEmpty()) {
-			continueValidation();
-			return;
-		}
-		if (revalidateIn > 0)
-			revalidateIn--;
-	}
-
-	@Override
-	public void lazyTick() {
-		super.lazyTick();
-	}
-
-	public void rebuildContext(BlockPos root) {
-		reset();
-		rootPos = root;
-		affectedArea = BoundingBox.fromCorners(rootPos, rootPos);
-		if (isValid)
-			frontier.add(new BlockPosEntry(root, 0));
-	}
-
-	public void revalidate(BlockPos root) {
-		validationFrontier.clear();
-		validationVisited.clear();
-		newValidationSet.clear();
-		validationFrontier.add(new BlockPosEntry(root, 0));
-		setValidationTimer();
-	}
-
-	private void continueSearch() {
-		try {
-			fluid = search(fluid, frontier, visited, (e, d) -> {
-				queue.enqueue(new BlockPosEntry(e, d));
-				validationSet.add(e);
-			}, false);
-		} catch (ChunkNotLoadedException e) {
-			blockEntity.sendData();
-			frontier.clear();
-			visited.clear();
-		}
-
-		int maxBlocks = maxBlocks();
-		if (visited.size() >= maxBlocks && canDrainInfinitely(fluid) && !queue.isEmpty()) {
-			infinite = true;
-			BlockPos firstValid = queue.first()
-				.pos();
-			frontier.clear();
-			visited.clear();
-			queue.clear();
-			queue.enqueue(new BlockPosEntry(firstValid, 0));
-			blockEntity.sendData();
-			return;
-		}
-
-		if (!frontier.isEmpty())
-			return;
-
-		blockEntity.sendData();
-		visited.clear();
-	}
-
-	private void continueValidation() {
-		try {
-			search(fluid, validationFrontier, validationVisited, (e, d) -> newValidationSet.add(e), false);
-		} catch (ChunkNotLoadedException e) {
-			validationFrontier.clear();
-			validationVisited.clear();
-			setLongValidationTimer();
-			return;
-		}
-
-		int maxBlocks = maxBlocks();
-		if (validationVisited.size() >= maxBlocks && canDrainInfinitely(fluid)) {
-			if (!infinite)
-				reset();
-			validationFrontier.clear();
-			setLongValidationTimer();
-			return;
-		}
-
-		if (!validationFrontier.isEmpty())
-			return;
-		if (infinite) {
-			reset();
-			return;
-		}
-
-		validationSet = newValidationSet;
-		newValidationSet = new HashSet<>();
-		validationVisited.clear();
-	}
-
-	@Override
-	public void reset() {
-		super.reset();
-
-		fluid = null;
-		rootPos = null;
-		queue.clear();
-		validationSet.clear();
-		newValidationSet.clear();
-		validationFrontier.clear();
-		validationVisited.clear();
-		blockEntity.sendData();
-	}
-
-	@Override
-	public BehaviourType<?> getType() {
-		return TYPE;
-	}
-
-	protected boolean isSearching() {
-		return !frontier.isEmpty();
-	}
-
-	public FluidStack getDrainableFluid(BlockPos rootPos) {
-		return fluid == null || isSearching() || !pullNext(rootPos, true) ? FluidStack.EMPTY
-			: new FluidStack(fluid, 1000);
-	}
+/** Upstream top-first, far-first draining, incremental search and connectivity revalidation. */
+public final class FluidDrainingBehaviour extends FluidManipulationBehaviour {
+    private Fluid fluid;
+    private final PriorityQueue<BlockPosEntry> queue=new PriorityQueue<>(this::comparePositions);
+    private Set<BlockPos> validationSet=new HashSet<>(),newValidationSet=new HashSet<>();
+    private final List<BlockPosEntry> validationFrontier=new ArrayList<>();
+    private final Set<BlockPos> validationVisited=new HashSet<>();
+    private boolean valid;
+    public FluidDrainingBehaviour(HosePulleyBlockEntity owner){super(owner);}
+    public void tick(BlockPos root){
+        valid=checkValid(root);
+        if(!Objects.equals(root,rootPos)){rebuildContext(root);return;}
+        if(counterpartActed){counterpartActed=false;softReset(root);return;}
+        if(!valid)return;
+        if(frontier.isEmpty())for(int count=0;count<searchedPerTick&&!queue.isEmpty();count++){
+            var pos=queue.element().pos();if(!getWorld().isLoaded(pos))break;
+            var at=state(pos).getFluidState();if(!at.isEmpty()&&fluid!=null&&still(at.getType()).isSame(fluid))break;
+            // A failed transfer must not be the only way to discard stale cached candidates.
+            queue.remove();
+        }
+        if(queue.isEmpty()&&frontier.isEmpty())rebuildContext(root);
+        if(!frontier.isEmpty()){continueSearch();return;}
+        if(!validationFrontier.isEmpty()){continueValidation();return;}
+        if(revalidateIn>0)revalidateIn--;
+        if(revalidateIn==0&&!queue.isEmpty())revalidate(root);
+    }
+    private boolean checkValid(BlockPos root){
+        var current=root;
+        for(int timeout=1000;timeout>0&&!current.equals(blockEntity.getBlockPos());timeout--){
+            if(!getWorld().isLoaded(current)||getWorld().isOutsideBuildHeight(current))return false;
+            var type=typeAt(state(current),current);
+            if(type==FluidBlockType.SOURCE)return true;
+            if(type!=FluidBlockType.FLOWING)return false;
+            for(var side:Direction.values()){
+                var next=current.relative(side);
+                if(getWorld().isLoaded(next)&&typeAt(state(next),next)==FluidBlockType.SOURCE)return true;
+            }current=current.above();
+        }return false;
+    }
+    private enum FluidBlockType {NONE,SOURCE,FLOWING}
+    private FluidBlockType typeAt(BlockState state,BlockPos pos){
+        if(state.hasProperty(BlockStateProperties.WATERLOGGED)&&state.getValue(BlockStateProperties.WATERLOGGED))return FluidBlockType.SOURCE;
+        if(state.getBlock() instanceof LiquidBlock)return state.getValue(LiquidBlock.LEVEL)==0?FluidBlockType.SOURCE:FluidBlockType.FLOWING;
+        if(!state.getFluidState().isEmpty()&&state.getCollisionShape(getWorld(),pos,CollisionContext.empty()).isEmpty())return FluidBlockType.SOURCE;
+        return FluidBlockType.NONE;
+    }
+    public FluidStack getDrainableFluid(BlockPos root){
+        if(!valid||fluid==null||!Objects.equals(root,rootPos)||!frontier.isEmpty()||queue.isEmpty()||!getWorld().isLoaded(queue.element().pos())||!checkValid(root))return FluidStack.EMPTY;
+        return new FluidStack(FluidVariant.of(still(fluid)),FluidConstants.BUCKET);
+    }
+    public boolean pullNext(BlockPos root,TransactionContext tx){
+        if(getDrainableFluid(root).isEmpty()||counterpartActed)return false;
+        enlist(tx);include(root);
+        if(infinite){edit(root,state(root),fluid,true,false,false,tx);boolean lava=still(fluid).isSame(Fluids.LAVA);com.simibubi.create.content.fluids.WorldFluidEdit.onAcceptedApply(getWorld(),root,()->{pulley().sourceAdvancements.award("hose_pulley");if(lava)pulley().sourceAdvancements.award("hose_pulley_lava");},true,tx);return true;}
+        while(!queue.isEmpty()){
+            var pos=queue.element().pos();if(!getWorld().isLoaded(pos))return false;
+            var old=state(pos);var replacement=old;Fluid found=Fluids.EMPTY;
+            if(old.hasProperty(BlockStateProperties.WATERLOGGED)&&old.getValue(BlockStateProperties.WATERLOGGED)){
+                found=Fluids.WATER;replacement=old.setValue(BlockStateProperties.WATERLOGGED,false);
+            }else if(old.getBlock() instanceof LiquidBlock){
+                replacement=Blocks.AIR.defaultBlockState();
+                if(old.getValue(LiquidBlock.LEVEL)==0)found=still(old.getFluidState().getType());
+                else{
+                    include(pos);edit(pos,replacement,null,true,false,false,tx);queue.remove();
+                    if(queue.isEmpty()){valid=checkValid(root);reset();}continue;
+                }
+            }else if(!old.getFluidState().isEmpty()&&old.getCollisionShape(getWorld(),pos,CollisionContext.empty()).isEmpty()){
+                found=still(old.getFluidState().getType());replacement=Blocks.AIR.defaultBlockState();
+            }
+            if(!fluid.isSame(found)){
+                queue.remove();if(queue.isEmpty()){valid=checkValid(root);reset();}continue;
+            }
+            edit(pos,replacement,fluid,true,false,false,tx);com.simibubi.create.content.fluids.WorldFluidEdit.onAcceptedApply(getWorld(),pos,()->pulley().sourceAdvancements.award("hose_pulley"),true,tx);include(pos);
+            var above=pos.above();var aboveState=state(above);
+            if(aboveState.getFluidState().isEmpty()&&!aboveState.canSurvive(getWorld(),above))edit(above,Blocks.AIR.defaultBlockState(),null,true,false,false,tx);
+            queue.remove();
+            if(queue.isEmpty()){valid=checkValid(root);reset();}else if(!validationSet.contains(pos))reset();
+            return true;
+        }return false;
+    }
+    private void rebuildContext(BlockPos root){reset();rootPos=root.immutable();include(root);if(valid)frontier.add(new BlockPosEntry(root,0));}
+    private void softReset(BlockPos root){
+        queue.clear();validationSet.clear();newValidationSet.clear();validationFrontier.clear();validationVisited.clear();visited.clear();infinite=false;setValidationTimer();frontier.clear();frontier.add(new BlockPosEntry(root,0));pulley().fluidChanged();
+    }
+    private void revalidate(BlockPos root){validationFrontier.clear();validationVisited.clear();newValidationSet.clear();validationFrontier.add(new BlockPosEntry(root,0));setValidationTimer();}
+    private void continueSearch(){
+        try{fluid=search(fluid,frontier,visited,(pos,distance)->{queue.add(new BlockPosEntry(pos,distance));validationSet.add(pos);},false);}
+        catch(ChunkNotLoadedException missing){frontier.clear();visited.clear();}
+        if(visited.size()>=maxBlocks()&&canDrainInfinitely(fluid)&&!queue.isEmpty()){
+            infinite=true;var first=queue.element();frontier.clear();visited.clear();queue.clear();queue.add(new BlockPosEntry(first.pos(),0));pulley().fluidChanged();return;
+        }
+        if(frontier.isEmpty()){visited.clear();pulley().fluidChanged();}
+    }
+    private void continueValidation(){
+        try{search(fluid,validationFrontier,validationVisited,(pos,distance)->newValidationSet.add(pos),false);}
+        catch(ChunkNotLoadedException missing){validationFrontier.clear();validationVisited.clear();setLongValidationTimer();return;}
+        if(validationVisited.size()>=maxBlocks()&&canDrainInfinitely(fluid)){
+            if(!infinite)reset();validationFrontier.clear();setLongValidationTimer();return;
+        }
+        if(!validationFrontier.isEmpty())return;
+        if(infinite){reset();return;}
+        validationSet=newValidationSet;newValidationSet=new HashSet<>();validationVisited.clear();
+    }
+    @Override public void reset(){super.reset();fluid=null;rootPos=null;queue.clear();validationSet.clear();newValidationSet.clear();validationFrontier.clear();validationVisited.clear();}
+    private record Extra(Fluid fluid,List<BlockPosEntry> queue,Set<BlockPos> validation,Set<BlockPos> newValidation,List<BlockPosEntry> frontier,Set<BlockPos> visited,boolean valid){}
+    @Override protected Object snapshotExtra(){return new Extra(fluid,List.copyOf(queue),Set.copyOf(validationSet),Set.copyOf(newValidationSet),List.copyOf(validationFrontier),Set.copyOf(validationVisited),valid);}
+    @Override protected void restoreExtra(Object snapshot){var s=(Extra)snapshot;fluid=s.fluid;queue.clear();queue.addAll(s.queue);validationSet=new HashSet<>(s.validation);newValidationSet=new HashSet<>(s.newValidation);validationFrontier.clear();validationFrontier.addAll(s.frontier);validationVisited.clear();validationVisited.addAll(s.visited);valid=s.valid;}
+    @Override public void load(ValueInput in){super.load(in);fluid=null;queue.clear();validationSet.clear();newValidationSet.clear();validationFrontier.clear();validationVisited.clear();if(rootPos!=null)frontier.add(new BlockPosEntry(rootPos,0));}
+    public static final com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType<FluidDrainingBehaviour> TYPE=new com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType<>();
+    @Override public com.simibubi.create.foundation.blockEntity.behaviour.BehaviourType<?> getType(){return TYPE;}
+    @Override public void tick(){super.tick();if(getWorld()!=null&&!getWorld().isClientSide()&&!pulley().isMoving())tick(pulley().rootPos());}
+    @Override public void write(ValueOutput output){save(output.child("Draining"));}
+    @Override public void read(ValueInput input){load(input.childOrEmpty("Draining"));}
 
 }

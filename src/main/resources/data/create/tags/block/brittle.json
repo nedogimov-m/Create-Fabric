@@ -1,0 +1,142 @@
+{
+  "values": [
+    "create:nozzle",
+    "create:copper_valve_handle",
+    "create:white_valve_handle",
+    "create:orange_valve_handle",
+    "create:magenta_valve_handle",
+    "create:light_blue_valve_handle",
+    "create:yellow_valve_handle",
+    "create:lime_valve_handle",
+    "create:pink_valve_handle",
+    "create:gray_valve_handle",
+    "create:light_gray_valve_handle",
+    "create:cyan_valve_handle",
+    "create:purple_valve_handle",
+    "create:blue_valve_handle",
+    "create:brown_valve_handle",
+    "create:green_valve_handle",
+    "create:red_valve_handle",
+    "create:black_valve_handle",
+    {
+      "id": "create:nozzle",
+      "required": false
+    },
+    {
+      "id": "create:hand_crank",
+      "required": false
+    },
+    {
+      "id": "create:copper_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:white_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:orange_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:magenta_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:light_blue_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:yellow_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:lime_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:pink_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:gray_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:light_gray_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:cyan_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:purple_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:blue_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:brown_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:green_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:red_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:black_valve_handle",
+      "required": false
+    },
+    {
+      "id": "create:rope",
+      "required": false
+    },
+    {
+      "id": "create:pulley_magnet",
+      "required": false
+    },
+    {
+      "id": "create:redstone_link",
+      "required": false
+    },
+    {
+      "id": "create:peculiar_bell",
+      "required": false
+    },
+    {
+      "id": "create:haunted_bell",
+      "required": false
+    },
+    "minecraft:bell",
+    "minecraft:cocoa",
+    "minecraft:flower_pot",
+    "minecraft:moss_carpet",
+    "minecraft:bamboo_sapling",
+    "minecraft:big_dripleaf",
+    "minecraft:vine",
+    "minecraft:twisting_vines_plant",
+    "minecraft:twisting_vines",
+    "minecraft:weeping_vines_plant",
+    "minecraft:weeping_vines",
+    "minecraft:cake",
+    "#create:corals",
+    "#minecraft:cave_vines",
+    "#minecraft:banners",
+    "#minecraft:beds",
+    "#minecraft:doors",
+    "create:hand_crank",
+    "create:rope",
+    "create:pulley_magnet",
+    "create:redstone_link",
+    "create:peculiar_bell",
+    "create:haunted_bell"
+  ],
+  "replace": false
+}

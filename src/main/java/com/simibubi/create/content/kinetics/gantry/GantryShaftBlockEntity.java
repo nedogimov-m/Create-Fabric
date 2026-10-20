@@ -1,115 +1,33 @@
 package com.simibubi.create.content.kinetics.gantry;
 
-import com.simibubi.create.AllBlocks;
+import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.content.contraptions.gantry.GantryCarriageBlock;
 import com.simibubi.create.content.contraptions.gantry.GantryCarriageBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-
-import net.createmod.catnip.data.Iterate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.util.Mth;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
+import com.simibubi.create.content.kinetics.transmission.sequencer.SequencePhase;
+import com.simibubi.create.content.kinetics.transmission.sequencer.SequencedGearshiftBlockEntity.SequenceContext;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.world.level.block.state.BlockState;
 
+/** The rack's actual RPM controls translation; powered racks drive stationary pinions instead. */
 public class GantryShaftBlockEntity extends KineticBlockEntity {
-
-	public GantryShaftBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
-		super(typeIn, pos, state);
-	}
-
-	@Override
-	protected boolean syncSequenceContext() {
-		return true;
-	}
-
-	public void checkAttachedCarriageBlocks() {
-		if (!canAssembleOn())
-			return;
-		for (Direction d : Iterate.directions) {
-			if (d.getAxis() == getBlockState().getValue(GantryShaftBlock.FACING)
-					.getAxis())
-				continue;
-			BlockPos offset = worldPosition.relative(d);
-			BlockState pinionState = level.getBlockState(offset);
-			if (!AllBlocks.GANTRY_CARRIAGE.has(pinionState))
-				continue;
-			if (pinionState.getValue(GantryCarriageBlock.FACING) != d)
-				continue;
-			BlockEntity blockEntity = level.getBlockEntity(offset);
-			if (blockEntity instanceof GantryCarriageBlockEntity)
-				((GantryCarriageBlockEntity) blockEntity).queueAssembly();
-		}
-	}
-
-	@Override
-	public void onSpeedChanged(float previousSpeed) {
-		super.onSpeedChanged(previousSpeed);
-		checkAttachedCarriageBlocks();
-	}
-
-	@Override
-	public float propagateRotationTo(KineticBlockEntity target, BlockState stateFrom, BlockState stateTo, BlockPos diff,
-		boolean connectedViaAxes, boolean connectedViaCogs) {
-		float defaultModifier =
-			super.propagateRotationTo(target, stateFrom, stateTo, diff, connectedViaAxes, connectedViaCogs);
-
-		if (connectedViaAxes)
-			return defaultModifier;
-		if (!stateFrom.getValue(GantryShaftBlock.POWERED))
-			return defaultModifier;
-		if (!AllBlocks.GANTRY_CARRIAGE.has(stateTo))
-			return defaultModifier;
-
-		Direction direction = Direction.getNearest(diff.getX(), diff.getY(), diff.getZ());
-		if (stateTo.getValue(GantryCarriageBlock.FACING) != direction)
-			return defaultModifier;
-		return GantryCarriageBlockEntity.getGantryPinionModifier(stateFrom.getValue(GantryShaftBlock.FACING),
-			stateTo.getValue(GantryCarriageBlock.FACING));
-	}
-
-	@Override
-	public boolean isCustomConnection(KineticBlockEntity other, BlockState state, BlockState otherState) {
-		if (!AllBlocks.GANTRY_CARRIAGE.has(otherState))
-			return false;
-		final BlockPos diff = other.getBlockPos()
-			.subtract(worldPosition);
-		Direction direction = Direction.getNearest(diff.getX(), diff.getY(), diff.getZ());
-		return otherState.getValue(GantryCarriageBlock.FACING) == direction;
-	}
-
-	public boolean canAssembleOn() {
-		BlockState blockState = getBlockState();
-		if (!AllBlocks.GANTRY_SHAFT.has(blockState))
-			return false;
-		if (blockState.getValue(GantryShaftBlock.POWERED))
-			return false;
-		float speed = getPinionMovementSpeed();
-
-		switch (blockState.getValue(GantryShaftBlock.PART)) {
-		case END:
-			return speed < 0;
-		case MIDDLE:
-			return speed != 0;
-		case START:
-			return speed > 0;
-		case SINGLE:
-		default:
-			return false;
-		}
-	}
-
-	public float getPinionMovementSpeed() {
-		BlockState blockState = getBlockState();
-		if (!AllBlocks.GANTRY_SHAFT.has(blockState))
-			return 0;
-		return Mth.clamp(convertToLinear(-getSpeed()), -.49f, .49f);
-	}
-
-	@Override
-	protected boolean isNoisy() {
-		return false;
-	}
-
+    @Override protected boolean syncSequenceContext(){return true;}
+    @Override protected boolean isNoisy() { return false; }
+    public GantryShaftBlockEntity(BlockPos pos,BlockState state){super(AllBlockEntityTypes.GANTRY_SHAFT,pos,state);}
+    public float getPinionMovementSpeed(){return getBlockState().getBlock() instanceof GantryShaftBlock?Math.clamp(-getSpeed()/512f,-.49f,.49f):0;}
+    public boolean canAssembleOn(){
+        var state=getBlockState();if(!(state.getBlock() instanceof GantryShaftBlock)||state.getValue(GantryShaftBlock.POWERED))return false;
+        float speed=getPinionMovementSpeed();return switch(state.getValue(GantryShaftBlock.PART)){case START->speed>0;case END->speed<0;case MIDDLE->speed!=0;case SINGLE->false;};
+    }
+    public void checkAttachedCarriageBlocks(){
+        if(level==null||level.isClientSide()||!canAssembleOn())return;var axis=getBlockState().getValue(GantryShaftBlock.FACING).getAxis();
+        for(var face:Direction.values()){
+            if(face.getAxis()==axis)continue;var pos=worldPosition.relative(face);if(!LoadedLevelAccess.isLoaded(level,pos))continue;
+            var state=LoadedLevelAccess.blockState(level,pos);
+            if(state.getBlock() instanceof GantryCarriageBlock&&state.getValue(GantryCarriageBlock.FACING)==face&&LoadedLevelAccess.blockEntity(level,pos) instanceof GantryCarriageBlockEntity carriage)carriage.queueAssembly();
+        }
+    }
+    @Override public void onSpeedChanged(float previous){super.onSpeedChanged(previous);checkAttachedCarriageBlocks();}
+    @Override protected void onSequenceContextChanged(SequenceContext previous,SequencePhase previousPhase){super.onSequenceContextChanged(previous,previousPhase);checkAttachedCarriageBlocks();}
 }

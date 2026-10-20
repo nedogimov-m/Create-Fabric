@@ -1,0 +1,21 @@
+// Ponder/Catnip 1.0.82 source, MIT; native26.3 execution/extraction adaptation.
+// See licenses/Ponder-LICENSE and ponder-source-provenance.json.
+package net.createmod.ponder.api.element;
+
+import net.minecraft.world.entity.vehicle.minecart.AbstractMinecart;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
+
+public interface MinecartElement extends AnimatedSceneElement {
+	void setPositionOffset(Vec3 position, boolean immediate);
+
+	void setRotation(float angle, boolean immediate);
+
+	Vec3 getPositionOffset();
+
+	Vec3 getRotation();
+
+	interface MinecartConstructor {
+		AbstractMinecart create(Level w, double x, double y, double z);
+	}
+}

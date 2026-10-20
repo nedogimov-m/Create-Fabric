@@ -1,298 +1,59 @@
 package com.simibubi.create;
 
-import java.util.function.Consumer;
-import java.util.function.Supplier;
-
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.joml.Vector3f;
-
-import com.mojang.blaze3d.shaders.FogShape;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.simibubi.create.AllTags.AllFluidTags;
-import com.simibubi.create.AllTags.AllItemTags;
-import com.simibubi.create.content.decoration.palettes.AllPaletteStoneTypes;
-import com.simibubi.create.content.fluids.VirtualFluid;
-import com.simibubi.create.content.fluids.potion.PotionFluid;
-import com.simibubi.create.content.fluids.potion.PotionFluid.PotionFluidType;
-import com.simibubi.create.foundation.data.CreateRegistrate;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-import com.tterrag.registrate.builders.FluidBuilder.FluidTypeFactory;
-import com.tterrag.registrate.util.entry.FluidEntry;
-
-import net.createmod.catnip.theme.Color;
-import net.minecraft.client.Camera;
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.FogRenderer.FogMode;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.dispenser.BlockSource;
-import net.minecraft.core.dispenser.DefaultDispenseItemBehavior;
-import net.minecraft.core.dispenser.DispenseItemBehavior;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.BucketItem;
-import net.minecraft.world.item.DispensibleContainerItem;
-import net.minecraft.world.item.ItemStack;
+import com.simibubi.create.content.fluids.CreateFlowingFluid;
+import com.simibubi.create.content.fluids.potion.PotionFluidHandler;
+import net.fabricmc.fabric.api.transfer.v1.fluid.*;
+import net.fabricmc.fabric.api.transfer.v1.fluid.base.*;
+import net.minecraft.core.Registry;
+import net.minecraft.core.component.*;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.BlockAndTintGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.DispenserBlock;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
-import net.minecraft.world.level.material.FluidState;
-import net.minecraft.world.level.material.MapColor;
 
-import net.neoforged.neoforge.client.extensions.common.IClientFluidTypeExtensions;
-import net.neoforged.neoforge.common.NeoForgeMod;
-import net.neoforged.neoforge.common.Tags;
-import net.neoforged.neoforge.fluids.BaseFlowingFluid;
-import net.neoforged.neoforge.fluids.FluidInteractionRegistry;
-import net.neoforged.neoforge.fluids.FluidInteractionRegistry.InteractionInformation;
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.FluidType;
-
-public class AllFluids {
-	private static final CreateRegistrate REGISTRATE = Create.registrate();
-
-	static {
-		REGISTRATE.setCreativeTab(AllCreativeModeTabs.BASE_CREATIVE_TAB);
-	}
-
-	public static final FluidEntry<PotionFluid> POTION =
-		REGISTRATE.virtualFluid("potion", PotionFluidType::new, PotionFluid::createSource, PotionFluid::createFlowing)
-			.lang("Potion")
-			.register();
-
-	public static final FluidEntry<VirtualFluid> TEA = REGISTRATE.virtualFluid("tea")
-		.lang("Builder's Tea")
-		.tag(AllFluidTags.TEA.tag)
-		.register();
-
-	public static final FluidEntry<BaseFlowingFluid.Flowing> HONEY =
-		REGISTRATE.standardFluid("honey",
-				SolidRenderedPlaceableFluidType.create(0xEAAE2F,
-					() -> 1f / 8f * AllConfigs.client().honeyTransparencyMultiplier.getF()))
-			.lang("Honey")
-			.properties(b -> b.viscosity(2000)
-				.density(1400))
-			.fluidProperties(p -> p.levelDecreasePerBlock(2)
-				.tickRate(25)
-				.slopeFindDistance(3)
-				.explosionResistance(100f))
-			.tag(Tags.Fluids.HONEY)
-			.source(BaseFlowingFluid.Source::new) // TODO: remove when Registrate fixes FluidBuilder
-			.block()
-			.properties(p -> p.mapColor(MapColor.TERRACOTTA_YELLOW))
-			.build()
-			.bucket()
-			.onRegister(AllFluids::registerFluidDispenseBehavior)
-			.tag(Tags.Items.BUCKETS, AllItemTags.HONEY_BUCKETS.tag)
-			.build()
-			.register();
-
-	public static final FluidEntry<BaseFlowingFluid.Flowing> CHOCOLATE =
-		REGISTRATE.standardFluid("chocolate",
-				SolidRenderedPlaceableFluidType.create(0x622020,
-					() -> 1f / 32f * AllConfigs.client().chocolateTransparencyMultiplier.getF()))
-			.lang("Chocolate")
-			.tag(AllFluidTags.CHOCOLATE.tag)
-			.properties(b -> b.viscosity(1500)
-				.density(1400))
-			.fluidProperties(p -> p.levelDecreasePerBlock(2)
-				.tickRate(25)
-				.slopeFindDistance(3)
-				.explosionResistance(100f))
-			.source(BaseFlowingFluid.Source::new)
-			.block()
-			.properties(p -> p.mapColor(MapColor.TERRACOTTA_BROWN))
-			.build()
-			.bucket()
-			.onRegister(AllFluids::registerFluidDispenseBehavior)
-			.tag(Tags.Items.BUCKETS, AllItemTags.CHOCOLATE_BUCKETS.tag)
-			.build()
-			.register();
-
-	// Load this class
-
-	public static void register() {
-	}
-
-	public static void registerFluidInteractions() {
-		FluidInteractionRegistry.addInteraction(NeoForgeMod.LAVA_TYPE.value(), new InteractionInformation(
-			HONEY.get().getFluidType(),
-			fluidState -> {
-				if (fluidState.isSource()) {
-					return Blocks.OBSIDIAN.defaultBlockState();
-				} else {
-					return AllPaletteStoneTypes.LIMESTONE.getBaseBlock()
-						.get()
-						.defaultBlockState();
-				}
-			}
-		));
-
-		FluidInteractionRegistry.addInteraction(NeoForgeMod.LAVA_TYPE.value(), new InteractionInformation(
-			CHOCOLATE.get().getFluidType(),
-			fluidState -> {
-				if (fluidState.isSource()) {
-					return Blocks.OBSIDIAN.defaultBlockState();
-				} else {
-					return AllPaletteStoneTypes.SCORIA.getBaseBlock()
-						.get()
-						.defaultBlockState();
-				}
-			}
-		));
-	}
-
-	@Nullable
-	public static BlockState getLavaInteraction(FluidState fluidState) {
-		Fluid fluid = fluidState.getType();
-		if (fluid.isSame(HONEY.get()))
-			return AllPaletteStoneTypes.LIMESTONE.getBaseBlock()
-				.get()
-				.defaultBlockState();
-		if (fluid.isSame(CHOCOLATE.get()))
-			return AllPaletteStoneTypes.SCORIA.getBaseBlock()
-				.get()
-				.defaultBlockState();
-		return null;
-	}
-
-	private static final DispenseItemBehavior DEFAULT = new DefaultDispenseItemBehavior();
-	private static final DispenseItemBehavior DISPENSE_FLUID = new DefaultDispenseItemBehavior(){
-			@Override
-			protected ItemStack execute(BlockSource pSource, ItemStack pStack) {
-				DispensibleContainerItem dispensibleContainerItem = (DispensibleContainerItem) pStack.getItem();
-				BlockPos pos = pSource.pos().relative(pSource.state().getValue(DispenserBlock.FACING));
-				Level level = pSource.level();
-				if (dispensibleContainerItem.emptyContents(null, level, pos, null, pStack)) {
-					return new ItemStack(Items.BUCKET);
-				}
-				return DEFAULT.dispense(pSource, pStack);
-			}
-		};
-
-	private static void registerFluidDispenseBehavior(BucketItem bucket) {
-		DispenserBlock.registerBehavior(bucket, DISPENSE_FLUID);
-	}
-
-	public static abstract class TintedFluidType extends FluidType {
-
-		protected static final int NO_TINT = 0xffffffff;
-		private final ResourceLocation stillTexture;
-		private final ResourceLocation flowingTexture;
-
-		public TintedFluidType(Properties properties, ResourceLocation stillTexture, ResourceLocation flowingTexture) {
-			super(properties);
-			this.stillTexture = stillTexture;
-			this.flowingTexture = flowingTexture;
-		}
-
-		@Override
-		public void initializeClient(Consumer<IClientFluidTypeExtensions> consumer) {
-			consumer.accept(new IClientFluidTypeExtensions() {
-
-				@Override
-				public ResourceLocation getStillTexture() {
-					return stillTexture;
-				}
-
-				@Override
-				public ResourceLocation getFlowingTexture() {
-					return flowingTexture;
-				}
-
-				@Override
-				public int getTintColor(FluidStack stack) {
-					return TintedFluidType.this.getTintColor(stack);
-				}
-
-				@Override
-				public int getTintColor(FluidState state, BlockAndTintGetter getter, BlockPos pos) {
-					return TintedFluidType.this.getTintColor(state, getter, pos);
-				}
-
-				@Override
-				public @NotNull Vector3f modifyFogColor(Camera camera, float partialTick, ClientLevel level,
-														int renderDistance, float darkenWorldAmount, Vector3f fluidFogColor) {
-					Vector3f customFogColor = TintedFluidType.this.getCustomFogColor();
-					return customFogColor == null ? fluidFogColor : customFogColor;
-				}
-
-				@Override
-				public void modifyFogRender(Camera camera, FogMode mode, float renderDistance, float partialTick,
-											float nearDistance, float farDistance, FogShape shape) {
-					float modifier = TintedFluidType.this.getFogDistanceModifier();
-					float baseWaterFog = 96.0f;
-					if (modifier != 1f) {
-						RenderSystem.setShaderFogShape(FogShape.CYLINDER);
-						RenderSystem.setShaderFogStart(-8);
-						RenderSystem.setShaderFogEnd(baseWaterFog * modifier);
-					}
-				}
-
-			});
-		}
-
-		protected abstract int getTintColor(FluidStack stack);
-
-		protected abstract int getTintColor(FluidState state, BlockAndTintGetter getter, BlockPos pos);
-
-		protected Vector3f getCustomFogColor() {
-			return null;
-		}
-
-		protected float getFogDistanceModifier() {
-			return 1f;
-		}
-
-	}
-
-	private static class SolidRenderedPlaceableFluidType extends TintedFluidType {
-
-		private Vector3f fogColor;
-		private Supplier<Float> fogDistance;
-
-		public static FluidTypeFactory create(int fogColor, Supplier<Float> fogDistance) {
-			return (p, s, f) -> {
-				SolidRenderedPlaceableFluidType fluidType = new SolidRenderedPlaceableFluidType(p, s, f);
-				fluidType.fogColor = new Color(fogColor, false).asVectorF();
-				fluidType.fogDistance = fogDistance;
-				return fluidType;
-			};
-		}
-
-		private SolidRenderedPlaceableFluidType(Properties properties, ResourceLocation stillTexture,
-												ResourceLocation flowingTexture) {
-			super(properties, stillTexture, flowingTexture);
-		}
-
-		@Override
-		protected int getTintColor(FluidStack stack) {
-			return NO_TINT;
-		}
-
-		/*
-		 * Removing alpha from tint prevents optifine from forcibly applying biome
-		 * colors to modded fluids (this workaround only works for fluids in the solid
-		 * render layer)
-		 */
-		@Override
-		public int getTintColor(FluidState state, BlockAndTintGetter world, BlockPos pos) {
-			return 0x00ffffff;
-		}
-
-		@Override
-		protected Vector3f getCustomFogColor() {
-			return fogColor;
-		}
-
-		@Override
-		protected float getFogDistanceModifier() {
-			return fogDistance.get();
-		}
-
-	}
-
+/** Paired registry IDs follow Create; milk supplies the platform fluid that NeoForge normally provides. */
+public final class AllFluids {
+    public static final CreateFlowingFluid.Family POTION_FAMILY=family("potion",true,1000);
+    public static final CreateFlowingFluid.Family TEA_FAMILY=family("tea",true,1000);
+    public static final CreateFlowingFluid.Family MILK_FAMILY=family("milk",true,1000);
+    public static final CreateFlowingFluid.Family HONEY_FAMILY=family("honey",false,2000);
+    public static final CreateFlowingFluid.Family CHOCOLATE_FAMILY=family("chocolate",false,1500);
+    public static final CreateFlowingFluid POTION=POTION_FAMILY.source,FLOWING_POTION=POTION_FAMILY.flowing,
+        TEA=TEA_FAMILY.source,FLOWING_TEA=TEA_FAMILY.flowing,MILK=MILK_FAMILY.source,FLOWING_MILK=MILK_FAMILY.flowing,
+        HONEY=HONEY_FAMILY.source,FLOWING_HONEY=HONEY_FAMILY.flowing,CHOCOLATE=CHOCOLATE_FAMILY.source,FLOWING_CHOCOLATE=CHOCOLATE_FAMILY.flowing;
+    private AllFluids(){}
+    private static CreateFlowingFluid.Family family(String name,boolean virtual,int viscosity){
+        var family=new CreateFlowingFluid.Family(virtual,viscosity);
+        Registry.register(BuiltInRegistries.FLUID,Create.asResource(name),family.source);
+        Registry.register(BuiltInRegistries.FLUID,Create.asResource("flowing_"+name),family.flowing);
+        return family;
+    }
+    public static void register(){}
+    public static net.minecraft.world.level.block.state.BlockState getLavaInteraction(net.minecraft.world.level.material.FluidState fluid){return fluid.getType().isSame(HONEY)?AllBlocks.LIMESTONE.defaultBlockState():fluid.getType().isSame(CHOCOLATE)?AllBlocks.SCORIA.defaultBlockState():null;}
+    public static void registerStorage(){
+        for(var family:java.util.List.of(POTION_FAMILY,TEA_FAMILY,MILK_FAMILY,HONEY_FAMILY,CHOCOLATE_FAMILY)){
+            var handler=new FluidVariantAttributeHandler(){
+                @Override public int getViscosity(FluidVariant fluid,net.minecraft.world.level.Level level){return family.viscosity;}
+                @Override public Component getName(FluidVariant fluid){return fluid.isOf(POTION)?PotionFluidHandler.name(fluid):Component.translatable("fluid.create."+BuiltInRegistries.FLUID.getKey(family.source).getPath());}
+            };
+            FluidVariantAttributes.register(family.source,handler);FluidVariantAttributes.register(family.flowing,handler);
+        }
+        // Expose the platform milk container without making a new survival milk bucket.
+        FluidStorage.ITEM.registerForItems((stack,context)->new FullItemFluidStorage(context,Items.BUCKET,FluidVariant.of(MILK),FluidConstants.BUCKET),Items.MILK_BUCKET);
+        FluidStorage.combinedItemApiProvider(Items.BUCKET).register(context->new EmptyItemFluidStorage(context,Items.MILK_BUCKET,MILK,FluidConstants.BUCKET));
+        // Use the native container behaviour so failed placement dispenses the full bucket.
+        var fluidDispenser=new net.minecraft.core.dispenser.DefaultDispenseItemBehavior(){
+            @Override protected net.minecraft.world.item.ItemStack execute(net.minecraft.core.dispenser.BlockSource source,net.minecraft.world.item.ItemStack stack){
+                var container=(net.minecraft.world.item.DispensibleContainerItem)stack.getItem();
+                var pos=source.pos().relative(source.state().getValue(net.minecraft.world.level.block.DispenserBlock.FACING));
+                if(container.emptyContents(null,source.level(),pos,null)){
+                    container.checkExtraContent(null,source.level(),stack,pos);
+                    return consumeWithRemainder(source,stack,new net.minecraft.world.item.ItemStack(Items.BUCKET));
+                }
+                return super.execute(source,stack);
+            }
+        };
+        net.minecraft.world.level.block.DispenserBlock.registerBehavior(HONEY_FAMILY.bucket,fluidDispenser);
+        net.minecraft.world.level.block.DispenserBlock.registerBehavior(CHOCOLATE_FAMILY.bucket,fluidDispenser);
+    }
 }

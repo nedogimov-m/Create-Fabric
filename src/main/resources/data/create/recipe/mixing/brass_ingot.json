@@ -1,0 +1,14 @@
+{
+  "type": "create:mixing",
+  "heat_requirement": "heated",
+  "ingredients": [
+    "#c:ingots/copper",
+    "#c:ingots/zinc"
+  ],
+  "results": [
+    {
+      "count": 2,
+      "id": "create:brass_ingot"
+    }
+  ]
+}

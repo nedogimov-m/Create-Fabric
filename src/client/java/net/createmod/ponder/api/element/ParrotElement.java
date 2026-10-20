@@ -1,0 +1,17 @@
+// Ponder/Catnip 1.0.82 source, MIT; native26.3 execution/extraction adaptation.
+// See licenses/Ponder-LICENSE and ponder-source-provenance.json.
+package net.createmod.ponder.api.element;
+
+import net.minecraft.world.phys.Vec3;
+
+public interface ParrotElement extends AnimatedSceneElement {
+	void setPositionOffset(Vec3 position, boolean immediate);
+
+	void setRotation(Vec3 eulers, boolean immediate);
+
+	Vec3 getPositionOffset();
+
+	Vec3 getRotation();
+
+	void setPose(ParrotPose pose);
+}

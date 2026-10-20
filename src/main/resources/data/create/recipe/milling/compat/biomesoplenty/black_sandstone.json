@@ -1,0 +1,20 @@
+{
+  "type": "create:milling",
+  "ingredients": [
+    "biomesoplenty:black_sandstone"
+  ],
+  "processing_time": 150,
+  "results": [
+    {
+      "id": "biomesoplenty:black_sand"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "biomesoplenty"
+      ]
+    }
+  ]
+}

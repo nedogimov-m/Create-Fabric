@@ -19,39 +19,34 @@ import com.simibubi.create.content.trains.schedule.ScheduleRuntime;
 import com.simibubi.create.content.trains.schedule.ScheduleRuntime.State;
 import com.simibubi.create.content.trains.station.GlobalPackagePort;
 import com.simibubi.create.content.trains.station.GlobalStation;
-import com.simibubi.create.foundation.utility.CreateLang;
+import com.simibubi.create.content.trains.schedule.ScheduleText;
 
 import net.createmod.catnip.data.Glob;
 import net.createmod.catnip.data.Pair;
 import net.minecraft.ChatFormatting;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.items.IItemHandlerModifiable;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 
 public class FetchPackagesInstruction extends TextScheduleInstruction {
 
 	@Override
 	public Pair<ItemStack, Component> getSummary() {
-		return Pair.of(getSecondLineIcon(), CreateLang.translateDirect("schedule.instruction.package_retrieval"));
+		return Pair.of(getSecondLineIcon(), ScheduleText.translate("schedule.instruction.package_retrieval"));
 	}
 
 	@Override
 	public List<Component> getTitleAs(String type) {
-		return ImmutableList.of(CreateLang.translate("schedule.instruction.package_retrieval.summary")
-			.style(ChatFormatting.GOLD)
-			.component(), CreateLang.translateDirect("generic.in_quotes", Component.literal(getLabelText())),
-			CreateLang.translateDirect("schedule.instruction.package_retrieval.summary_1")
+		return ImmutableList.of(ScheduleText.translate("schedule.instruction.package_retrieval.summary").withStyle(ChatFormatting.GOLD), ScheduleText.translate("generic.in_quotes", Component.literal(getLabelText())),
+			ScheduleText.translate("schedule.instruction.package_retrieval.summary_1")
 				.withStyle(ChatFormatting.GRAY),
-			CreateLang.translateDirect("schedule.instruction.package_retrieval.summary_2")
+			ScheduleText.translate("schedule.instruction.package_retrieval.summary_2")
 				.withStyle(ChatFormatting.GRAY));
 	}
 
@@ -72,23 +67,19 @@ public class FetchPackagesInstruction extends TextScheduleInstruction {
 
 	@Override
 	public List<Component> getSecondLineTooltip(int slot) {
-		return ImmutableList.of(CreateLang.translateDirect("schedule.instruction.address_filter_edit_box"),
-			CreateLang.translateDirect("schedule.instruction.address_filter_edit_box_1")
+		return ImmutableList.of(ScheduleText.translate("schedule.instruction.address_filter_edit_box"),
+			ScheduleText.translate("schedule.instruction.address_filter_edit_box_1")
 				.withStyle(ChatFormatting.GRAY),
-			CreateLang.translateDirect("schedule.instruction.address_filter_edit_box_2")
+			ScheduleText.translate("schedule.instruction.address_filter_edit_box_2")
 				.withStyle(ChatFormatting.DARK_GRAY),
-			CreateLang.translateDirect("schedule.instruction.address_filter_edit_box_3")
+			ScheduleText.translate("schedule.instruction.address_filter_edit_box_3")
 				.withStyle(ChatFormatting.DARK_GRAY));
 	}
 
-	@Override
-	@OnlyIn(Dist.CLIENT)
-	protected void modifyEditBox(EditBox box) {
-		box.setFilter(s -> StringUtils.countMatches(s, '*') <= 3);
-	}
+	
 
 	@Override
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return Create.asResource("package_retrieval");
 	}
 
@@ -114,24 +105,26 @@ public class FetchPackagesInstruction extends TextScheduleInstruction {
 			return null;
 		}
 
-		for (GlobalStation globalStation : train.graph.getPoints(EdgePointType.STATION)) {
-			ServerLevel dimLevel = server.getLevel(globalStation.blockEntityDimension);
+		for (GlobalStation globalStation : train.graph.getPoints(com.simibubi.create.content.trains.station.StationEdgePoints.STATION)) {
+			ServerLevel dimLevel = server.getLevel(globalStation.getBlockEntityDimension());
 			if (dimLevel == null)
 				continue;
 			
-			for (Entry<BlockPos, GlobalPackagePort> entry : globalStation.connectedPorts.entrySet()) {
-				GlobalPackagePort port = entry.getValue();
-				BlockPos pos = entry.getKey();
+			for (var entry : globalStation.ports()) {
+				GlobalPackagePort port = entry.data();
+				BlockPos pos = entry.pos();
 
-				IItemHandlerModifiable postboxInventory = port.offlineBuffer;
-				if (dimLevel.isLoaded(pos) && dimLevel.getBlockEntity(pos) instanceof PostboxBlockEntity ppbe)
-					postboxInventory = ppbe.inventory;
+				List<ItemStack> postboxInventory = port.items();
+                if (LoadedLevelAccess.isLoaded(dimLevel, pos)) {
+                    if (!(LoadedLevelAccess.blockEntity(dimLevel, pos) instanceof PostboxBlockEntity ppbe)
+                            || !ppbe.isBoundTo(globalStation)) continue;
+                    postboxInventory = ppbe.items();
+                }
 
-				for (int slot = 0; slot < postboxInventory.getSlots(); slot++) {
-					ItemStack stack = postboxInventory.getStackInSlot(slot);
+                for (ItemStack stack : postboxInventory) {
 					if (!PackageItem.isPackage(stack))
 						continue;
-					if (PackageItem.matchAddress(stack, port.address))
+					if (PackageItem.matchAddress(stack, port.address()))
 						continue;
 					try {
 						if (!PackageItem.getAddress(stack)

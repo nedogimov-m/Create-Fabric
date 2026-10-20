@@ -6,7 +6,7 @@ import java.util.List;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
-import net.createmod.catnip.lang.Lang;
+import java.util.Locale;
 import net.minecraft.core.Direction;
 import net.minecraft.util.StringRepresentable;
 import net.minecraft.world.level.block.Mirror;
@@ -103,7 +103,7 @@ public enum TrackShape implements StringRepresentable {
 
 	@Override
 	public String getSerializedName() {
-		return Lang.asId(name());
+		return name().toLowerCase(Locale.ROOT);
 	}
 
 	public String getModel() {

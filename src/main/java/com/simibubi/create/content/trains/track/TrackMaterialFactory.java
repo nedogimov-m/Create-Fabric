@@ -1,143 +1,43 @@
 package com.simibubi.create.content.trains.track;
 
+import com.simibubi.create.Create;
+import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
-
-import org.jetbrains.annotations.Nullable;
-
-import com.simibubi.create.foundation.data.recipe.CommonMetal;
-import com.tterrag.registrate.util.nullness.NonNullSupplier;
-
-import dev.engine_room.flywheel.lib.model.baked.PartialModel;
-import net.createmod.catnip.platform.CatnipServices;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.Holder;
+import net.minecraft.core.HolderSet;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.level.ItemLike;
 
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.common.Tags.Items;
-
-public class TrackMaterialFactory {
-	private final ResourceLocation id;
-	private String langName;
-	private NonNullSupplier<NonNullSupplier<? extends TrackBlock>> trackBlock;
-	private Ingredient sleeperIngredient = Ingredient.EMPTY;
-	private Ingredient railsIngredient = Ingredient.fromValues(Stream.of(new Ingredient.TagValue(Items.NUGGETS_IRON), new Ingredient.TagValue(CommonMetal.ZINC.nuggets)));
-	private ResourceLocation particle;
-	private TrackMaterial.TrackType trackType = TrackMaterial.TrackType.STANDARD;
-
-	@Nullable
-	private TrackMaterial.TrackType.TrackBlockFactory customFactory = null;
-
-	@OnlyIn(Dist.CLIENT)
-	private TrackMaterial.TrackModelHolder modelHolder;
-	@OnlyIn(Dist.CLIENT)
-	private PartialModel tieModel;
-	@OnlyIn(Dist.CLIENT)
-	private PartialModel leftSegmentModel;
-	@OnlyIn(Dist.CLIENT)
-	private PartialModel rightSegmentModel;
-
-	public TrackMaterialFactory(ResourceLocation id) {
-		this.id = id;
-	}
-
-	public static TrackMaterialFactory make(ResourceLocation id) {  // Convenience function for static import
-		return new TrackMaterialFactory(id);
-	}
-
-	public TrackMaterialFactory lang(String langName) {
-		this.langName = langName;
-		return this;
-	}
-
-	public TrackMaterialFactory block(NonNullSupplier<NonNullSupplier<? extends TrackBlock>> trackBlock) {
-		this.trackBlock = trackBlock;
-		return this;
-	}
-
-	public TrackMaterialFactory defaultModels() { // was setBuiltin
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> this.modelHolder = TrackMaterial.TrackModelHolder.DEFAULT);
-		return this;
-	}
-
-	public TrackMaterialFactory sleeper(Ingredient sleeperIngredient) {
-		this.sleeperIngredient = sleeperIngredient;
-		return this;
-	}
-
-	public TrackMaterialFactory sleeper(ItemLike... items) {
-		this.sleeperIngredient = Ingredient.of(items);
-		return this;
-	}
-
-	public TrackMaterialFactory rails(Ingredient railsIngredient) {
-		this.railsIngredient = railsIngredient;
-		return this;
-	}
-
-	public TrackMaterialFactory rails(ItemLike... items) {
-		this.railsIngredient = Ingredient.of(items);
-		return this;
-	}
-
-	public TrackMaterialFactory noRecipeGen() {
-		this.railsIngredient = Ingredient.EMPTY;
-		this.sleeperIngredient = Ingredient.EMPTY;
-		return this;
-	}
-
-	public TrackMaterialFactory particle(ResourceLocation particle) {
-		this.particle = particle;
-		return this;
-	}
-
-	public TrackMaterialFactory trackType(TrackMaterial.TrackType trackType) {
-		this.trackType = trackType;
-		return this;
-	}
-
-	public TrackMaterialFactory standardModels() { // was defaultModels
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> {
-			String namespace = id.getNamespace();
-			String prefix = "block/track/" + id.getPath() + "/";
-			tieModel = PartialModel.of(ResourceLocation.fromNamespaceAndPath(namespace, prefix + "tie"));
-			leftSegmentModel = PartialModel.of(ResourceLocation.fromNamespaceAndPath(namespace, prefix + "segment_left"));
-			rightSegmentModel = PartialModel.of(ResourceLocation.fromNamespaceAndPath(namespace, prefix + "segment_right"));
-		});
-		return this;
-	}
-
-	public TrackMaterialFactory customModels(Supplier<Supplier<PartialModel>> tieModel, Supplier<Supplier<PartialModel>> leftSegmentModel, Supplier<Supplier<PartialModel>> rightSegmentModel) {
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> {
-			this.tieModel = tieModel.get().get();
-			this.leftSegmentModel = leftSegmentModel.get().get();
-			this.rightSegmentModel = rightSegmentModel.get().get();
-		});
-		return this;
-	}
-
-	public TrackMaterialFactory customBlockFactory(TrackMaterial.TrackType.TrackBlockFactory factory) {
-		this.customFactory = factory;
-		return this;
-	}
-
-	public TrackMaterial build() {
-		assert trackBlock != null;
-		assert langName != null;
-		assert particle != null;
-		assert trackType != null;
-		assert sleeperIngredient != null;
-		assert railsIngredient != null;
-		assert id != null;
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> {
-			assert modelHolder != null;
-			if (tieModel != null || leftSegmentModel != null || rightSegmentModel != null) {
-				assert tieModel != null && leftSegmentModel != null && rightSegmentModel != null;
-				modelHolder = new TrackMaterial.TrackModelHolder(tieModel, leftSegmentModel, rightSegmentModel);
-			}
-		});
-		return new TrackMaterial(id, langName, trackBlock, particle, sleeperIngredient, railsIngredient, trackType, () -> () -> modelHolder, customFactory);
-	}
+/** Source material builder, with native lazy tag ingredients and no client classes in common code. */
+public final class TrackMaterialFactory {
+    private final Identifier id;
+    private String langName;private Identifier particle;
+    private Supplier<? extends Supplier<? extends TrackBlock>> block;
+    private TrackMaterial.TrackType type=TrackMaterial.TrackType.STANDARD;
+    private TrackMaterial.TrackType.TrackBlockFactory factory;
+    private Supplier<Optional<Ingredient>> sleepers=()->tagIngredient(List.of(Create.asResource("sleepers")));
+    private Supplier<Optional<Ingredient>> rails=()->tagIngredient(List.of(Identifier.fromNamespaceAndPath("c","nuggets/iron"),Identifier.fromNamespaceAndPath("c","nuggets/zinc")));
+    private TrackMaterialFactory(Identifier id){this.id=id;}
+    public static TrackMaterialFactory make(Identifier id){return new TrackMaterialFactory(id);}
+    public TrackMaterialFactory lang(String name){langName=name;return this;}
+    public TrackMaterialFactory particle(Identifier texture){particle=texture;return this;}
+    public TrackMaterialFactory block(Supplier<? extends Supplier<? extends TrackBlock>> block){this.block=block;return this;}
+    public TrackMaterialFactory trackType(TrackMaterial.TrackType type){this.type=type;return this;}
+    public TrackMaterialFactory customBlockFactory(TrackMaterial.TrackType.TrackBlockFactory factory){this.factory=factory;return this;}
+    public TrackMaterialFactory sleeper(Ingredient ingredient){sleepers=()->Optional.of(ingredient);return this;}
+    public TrackMaterialFactory sleeper(ItemLike... items){return sleeper(Ingredient.of(items));}
+    public TrackMaterialFactory rails(Ingredient ingredient){rails=()->Optional.of(ingredient);return this;}
+    public TrackMaterialFactory rails(ItemLike... items){return rails(Ingredient.of(items));}
+    public TrackMaterialFactory noRecipeGen(){sleepers=rails=Optional::empty;return this;}
+    public TrackMaterial build(){return new TrackMaterial(id,langName,block,particle,sleepers,rails,type,factory);}
+    private static Optional<Ingredient> tagIngredient(List<Identifier> tags){
+        var holders=tags.stream().flatMap(id->BuiltInRegistries.ITEM.get(TagKey.create(Registries.ITEM,id)).stream().flatMap(HolderSet::stream)).distinct().toList();
+        return holders.isEmpty()?Optional.empty():Optional.of(Ingredient.of(HolderSet.direct(holders)));
+    }
 }

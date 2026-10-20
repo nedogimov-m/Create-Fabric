@@ -14,9 +14,10 @@ import org.jetbrains.annotations.Nullable;
 import org.apache.commons.lang3.tuple.Pair;
 
 import com.simibubi.create.content.fluids.tank.CreativeFluidTankBlockEntity;
+import com.simibubi.create.content.fluids.tank.FluidTankBlockEntity;
 import com.simibubi.create.foundation.blockEntity.IMultiBlockEntityContainer;
 
-import net.createmod.catnip.data.Iterate;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
@@ -24,11 +25,17 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.IFluidTank;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+import com.simibubi.create.foundation.fluid.FluidStack;
+import com.simibubi.create.foundation.fluid.SmartFluidTank;
+
 
 public class ConnectivityHandler {
+    private static final ThreadLocal<BlockPos> REMOVING = new ThreadLocal<>();
+    public static <T extends BlockEntity & IMultiBlockEntityContainer> void removePart(T part) {
+        REMOVING.set(part.getBlockPos());
+        try { splitMulti(part); } finally { REMOVING.remove(); }
+    }
+
 
 	public static <T extends BlockEntity & IMultiBlockEntityContainer> void formMulti(T be) {
 		SearchCache<T> cache = new SearchCache<>();
@@ -80,7 +87,7 @@ public class ConnectivityHandler {
 				creationQueue.add(Pair.of(amount, part));
 			}
 
-			for (Direction.Axis axis : Iterate.axes) {
+			for (Direction.Axis axis : Direction.Axis.values()) {
 				Direction dir = Direction.get(Direction.AxisDirection.NEGATIVE, axis);
 				BlockPos next = partPos.relative(dir);
 
@@ -155,7 +162,7 @@ public class ConnectivityHandler {
 		BlockPos origin = be.getBlockPos();
 
 		// optional fluid handling
-		IFluidTank beTank = null;
+		SmartFluidTank beTank = null;
 		FluidStack fluid = FluidStack.EMPTY;
 		if (be instanceof IMultiBlockEntityContainer.Fluid ifluid && ifluid.hasTank()) {
 			beTank = ifluid.getTank(0);
@@ -217,6 +224,7 @@ public class ConnectivityHandler {
 						FluidStack otherFluid = ifluidCon.getFluid(0);
 						if (!fluid.isEmpty() && !otherFluid.isEmpty() && !FluidStack.isSameFluidSameComponents(fluid, otherFluid))
 							break Search;
+                        if (fluid.isEmpty() && !otherFluid.isEmpty()) fluid = otherFluid;
 					}
 				}
 			}
@@ -243,24 +251,25 @@ public class ConnectivityHandler {
 					if (part == be)
 						continue;
 
-					extraData = be.modifyExtraData(extraData);
+					extraData = part.modifyExtraData(extraData);
 
 					if (part instanceof IMultiBlockEntityContainer.Fluid ifluidPart && ifluidPart.hasTank()) {
-						IFluidTank tankAt = ifluidPart.getTank(0);
+						SmartFluidTank tankAt = ifluidPart.getTank(0);
 						FluidStack fluidAt = tankAt.getFluid();
 						if (!fluidAt.isEmpty()) {
 							// making this generic would be a rather large mess, unfortunately
-							if (beTank != null && fluid.isEmpty()
+							if (beTank != null && beTank.getFluid().isEmpty()
 								&& beTank instanceof CreativeFluidTankBlockEntity.CreativeSmartFluidTank) {
 								((CreativeFluidTankBlockEntity.CreativeSmartFluidTank) beTank)
 									.setContainedFluid(fluidAt);
 							}
 							if (be instanceof IMultiBlockEntityContainer.Fluid ifluidBE && ifluidBE.hasTank()
 								&& beTank != null) {
-								beTank.fill(fluidAt, IFluidHandler.FluidAction.EXECUTE);
+                                if(be instanceof FluidTankBlockEntity nativeTank&&!(nativeTank instanceof CreativeFluidTankBlockEntity))nativeTank.acceptOwnedFluid(fluidAt);
+                                else beTank.fill(fluidAt);
 							}
 						}
-						tankAt.drain(tankAt.getCapacity(), IFluidHandler.FluidAction.EXECUTE);
+						tankAt.clear();
 					}
 
 					splitMultiAndInvalidate(part, cache, false);
@@ -303,11 +312,18 @@ public class ConnectivityHandler {
 
 		// fluid handling, if present
 		FluidStack toDistribute = FluidStack.EMPTY;
-		int maxCapacity = 0;
+		long maxCapacity = 0;
+        long configurationOverflow=0;
+        FluidTankBlockEntity overflowDestination=null;
 		if (be instanceof IMultiBlockEntityContainer.Fluid ifluidBE && ifluidBE.hasTank()) {
 			toDistribute = ifluidBE.getFluid(0);
 			maxCapacity = ifluidBE.getTankSize(0);
-			if (!toDistribute.isEmpty() && !be.isRemoved())
+            if(be instanceof FluidTankBlockEntity nativeTank&&!(nativeTank instanceof CreativeFluidTankBlockEntity)){
+                configurationOverflow=nativeTank.configurationOverflow();
+                long retained=!be.isRemoved()&&!origin.equals(REMOVING.get())?Math.min(maxCapacity,toDistribute.getAmount()):0;
+                nativeTank.getTankInventory().setFluid(retained==0?FluidStack.EMPTY:new FluidStack(toDistribute.variant(),retained));
+            }
+			if (!toDistribute.isEmpty() && !be.isRemoved() && !origin.equals(REMOVING.get()))
 				toDistribute.shrink(maxCapacity);
 			ifluidBE.setTankSize(0, 1);
 		}
@@ -332,21 +348,21 @@ public class ConnectivityHandler {
 					T controllerBE = partAt.getControllerBE();
 					partAt.setExtraData((controllerBE == null ? null : controllerBE.getExtraData()));
 					partAt.removeController(true);
+                    if(overflowDestination==null&&partAt instanceof FluidTankBlockEntity nativeTank&&!(nativeTank instanceof CreativeFluidTankBlockEntity))overflowDestination=nativeTank;
 
 					if (!toDistribute.isEmpty() && partAt != be) {
 						FluidStack copy = toDistribute.copy();
-						IFluidTank tank =
+						SmartFluidTank tank =
 							(partAt instanceof IMultiBlockEntityContainer.Fluid ifluidPart ? ifluidPart.getTank(0) : null);
 						// making this generic would be a rather large mess, unfortunately
 						if (tank instanceof CreativeFluidTankBlockEntity.CreativeSmartFluidTank creativeTank) {
 							if (creativeTank.isEmpty())
 								creativeTank.setContainedFluid(toDistribute);
 						} else {
-							int split = Math.min(maxCapacity, toDistribute.getAmount());
+							long split = Math.min(maxCapacity, toDistribute.getAmount());
 							copy.setAmount(split);
-							toDistribute.shrink(split);
-							if (tank != null)
-								tank.fill(copy, IFluidHandler.FluidAction.EXECUTE);
+                            long accepted=tank==null?0:tank.fill(copy);
+                            toDistribute.shrink(accepted);
 						}
 					}
 					if (tryReconnect) {
@@ -359,10 +375,9 @@ public class ConnectivityHandler {
 			}
 		}
 
-		if (be instanceof IMultiBlockEntityContainer.Inventory inv && inv.hasInventory())
-			be.getLevel().invalidateCapabilities(be.getBlockPos());
-		if (be instanceof IMultiBlockEntityContainer.Fluid fluid && fluid.hasTank())
-			be.getLevel().invalidateCapabilities(be.getBlockPos());
+        if(configurationOverflow>0&&!toDistribute.isEmpty()&&overflowDestination!=null){
+            var retained=toDistribute.copy();retained.setAmount(Math.min(configurationOverflow,toDistribute.getAmount()));overflowDestination.acceptOwnedFluid(retained);
+        }
 
 		if (tryReconnect)
 			formMulti(be.getType(), level, cache == null ? new SearchCache<>() : cache, frontier);
@@ -375,7 +390,8 @@ public class ConnectivityHandler {
 	@Nullable
 	public static <T extends BlockEntity & IMultiBlockEntityContainer> T partAt(BlockEntityType<?> type, BlockGetter level,
 																				BlockPos pos) {
-		BlockEntity be = level.getBlockEntity(pos);
+		if (pos.equals(REMOVING.get()) || level instanceof Level loaded && !loaded.isLoaded(pos)) return null;
+        BlockEntity be = com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(level,pos);
 		if (be != null && be.getType() == type && !be.isRemoved())
 			return checked(be);
 		return null;
@@ -427,7 +443,7 @@ public class ConnectivityHandler {
 				putEmpty(pos);
 				return Optional.empty();
 			}
-			T controller = checked(level.getBlockEntity(partAt.getController()));
+			T controller = partAt(type, level, partAt.getController());
 			if (controller == null) {
 				putEmpty(pos);
 				return Optional.empty();

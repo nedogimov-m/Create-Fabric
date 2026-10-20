@@ -1,6 +1,8 @@
 package com.simibubi.create.content.decoration.palettes;
 
-import net.createmod.catnip.data.Iterate;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.ScheduledTickAccess;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.BlockPos.MutableBlockPos;
 import net.minecraft.core.Direction;
@@ -47,19 +49,21 @@ public class ConnectedPillarBlock extends LayeredBlock {
 		MutableBlockPos currentPos = new MutableBlockPos();
 		Axis axis = state.getValue(AXIS);
 
-		for (Direction connection : Iterate.directions) {
+		for (Direction connection : Direction.values()) {
 			if (connection.getAxis() == axis)
 				continue;
 
 			boolean connect = true;
-			Move: for (Direction movement : Iterate.directionsInAxis(axis)) {
+			Move: for (Direction movement : new Direction[]{Direction.fromAxisAndDirection(axis,AxisDirection.POSITIVE),Direction.fromAxisAndDirection(axis,AxisDirection.NEGATIVE)}) {
 				currentPos.set(pos);
 				for (int i = 0; i < 1000; i++) {
-					if (!level.isLoaded(currentPos))
-						break;
+					if (!LoadedLevelAccess.isLoaded(level,currentPos)||!LoadedLevelAccess.isLoaded(level,currentPos.relative(connection))) {
+                        connect=false;
+                        break Move;
+                    }
 
-					BlockState other1 = currentPos.equals(pos) ? state : level.getBlockState(currentPos);
-					BlockState other2 = level.getBlockState(currentPos.relative(connection));
+					BlockState other1 = currentPos.equals(pos) ? state : LoadedLevelAccess.blockState(level,currentPos);
+					BlockState other2 = LoadedLevelAccess.blockState(level,currentPos.relative(connection));
 					boolean col1 = canConnect(state, other1);
 					boolean col2 = canConnect(state, other2);
 					currentPos.move(movement);
@@ -93,14 +97,14 @@ public class ConnectedPillarBlock extends LayeredBlock {
 			return;
 		BlockPos belowPos =
 			pPos.relative(Direction.fromAxisAndDirection(pState.getValue(AXIS), AxisDirection.NEGATIVE));
-		BlockState belowState = pLevel.getBlockState(belowPos);
+		if(!LoadedLevelAccess.isLoaded(pLevel,belowPos))return;
+		BlockState belowState = LoadedLevelAccess.blockState(pLevel,belowPos);
 		if (!canConnect(pState, belowState))
 			pLevel.setBlock(pPos, updateColumn(pLevel, pPos, pState, true), Block.UPDATE_ALL);
 	}
 
 	@Override
-	public BlockState updateShape(BlockState state, Direction pDirection, BlockState pNeighborState,
-		LevelAccessor pLevel, BlockPos pCurrentPos, BlockPos pNeighborPos) {
+	protected BlockState updateShape(BlockState state, LevelReader pLevel, ScheduledTickAccess ticks, BlockPos pCurrentPos, Direction pDirection, BlockPos pNeighborPos, BlockState pNeighborState, RandomSource random) {
 		if (!canConnect(state, pNeighborState))
 			return setConnection(state, pDirection, false);
 		if (pDirection.getAxis() == state.getValue(AXIS))
@@ -114,12 +118,13 @@ public class ConnectedPillarBlock extends LayeredBlock {
 	}
 
 	@Override
-	public void onRemove(BlockState pState, Level pLevel, BlockPos pPos, BlockState pNewState, boolean pIsMoving) {
-		if (pIsMoving || pNewState.getBlock() == this)
+	protected void affectNeighborsAfterRemoval(BlockState pState, ServerLevel pLevel, BlockPos pPos, boolean pIsMoving) {
+		if (pIsMoving)
 			return;
-		for (Direction d : Iterate.directionsInAxis(pState.getValue(AXIS))) {
+		for (Direction d : new Direction[]{Direction.fromAxisAndDirection(pState.getValue(AXIS),AxisDirection.POSITIVE),Direction.fromAxisAndDirection(pState.getValue(AXIS),AxisDirection.NEGATIVE)}) {
 			BlockPos relative = pPos.relative(d);
-			BlockState adjacent = pLevel.getBlockState(relative);
+			if(!LoadedLevelAccess.isLoaded(pLevel,relative))continue;
+			BlockState adjacent = LoadedLevelAccess.blockState(pLevel,relative);
 			if (canConnect(pState, adjacent))
 				pLevel.setBlock(relative, updateColumn(pLevel, relative, adjacent, false), Block.UPDATE_ALL);
 		}

@@ -1,177 +1,97 @@
 package com.simibubi.create;
 
-import java.util.Optional;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
-
-import com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipeParams;
-
-import org.jetbrains.annotations.ApiStatus.Internal;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-
-import com.mojang.serialization.Codec;
-import com.simibubi.create.compat.jei.ConversionRecipe;
-import com.simibubi.create.content.equipment.sandPaper.SandPaperPolishingRecipe;
-import com.simibubi.create.content.equipment.toolbox.ToolboxDyeingRecipe;
-import com.simibubi.create.content.fluids.transfer.EmptyingRecipe;
-import com.simibubi.create.content.fluids.transfer.FillingRecipe;
-import com.simibubi.create.content.kinetics.crafter.MechanicalCraftingRecipe;
-import com.simibubi.create.content.kinetics.crusher.CrushingRecipe;
-import com.simibubi.create.content.kinetics.deployer.DeployerApplicationRecipe;
-import com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe;
-import com.simibubi.create.content.kinetics.deployer.ManualApplicationRecipe;
-import com.simibubi.create.content.kinetics.fan.processing.HauntingRecipe;
-import com.simibubi.create.content.kinetics.fan.processing.SplashingRecipe;
 import com.simibubi.create.content.kinetics.millstone.MillingRecipe;
-import com.simibubi.create.content.kinetics.mixer.CompactingRecipe;
-import com.simibubi.create.content.kinetics.mixer.MixingRecipe;
 import com.simibubi.create.content.kinetics.press.PressingRecipe;
-import com.simibubi.create.content.kinetics.saw.CuttingRecipe;
+import com.simibubi.create.content.equipment.sandPaper.SandPaperPolishingRecipe;
 import com.simibubi.create.content.processing.basin.BasinRecipe;
-import com.simibubi.create.content.processing.recipe.ProcessingRecipe;
-import com.simibubi.create.content.processing.recipe.StandardProcessingRecipe;
-import com.simibubi.create.content.processing.recipe.StandardProcessingRecipe.Serializer;
-import com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipeSerializer;
-import com.simibubi.create.foundation.recipe.IRecipeTypeInfo;
-import com.simibubi.create.foundation.recipe.ItemCopyingRecipe;
-
-import net.createmod.catnip.lang.Lang;
+import com.simibubi.create.content.kinetics.fan.processing.FanProcessingRecipe;
+import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.StringRepresentable;
-import net.minecraft.world.item.crafting.Recipe;
-import net.minecraft.world.item.crafting.RecipeHolder;
-import net.minecraft.world.item.crafting.RecipeInput;
+import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.RecipeType;
-import net.minecraft.world.item.crafting.ShapedRecipePattern;
-import net.minecraft.world.item.crafting.SimpleCraftingRecipeSerializer;
-import net.minecraft.world.level.Level;
 
-import net.neoforged.bus.api.IEventBus;
-import net.neoforged.neoforge.registries.DeferredHolder;
-import net.neoforged.neoforge.registries.DeferredRegister;
+public final class AllRecipeTypes {
+    public static final java.util.function.Predicate<net.minecraft.world.item.crafting.RecipeHolder<?>>
+        CAN_BE_AUTOMATED = recipe -> !recipe.id().identifier().getPath().endsWith("_manual_only");
 
-public enum AllRecipeTypes implements IRecipeTypeInfo, StringRepresentable {
+    public static boolean shouldIgnoreInAutomation(net.minecraft.world.item.crafting.RecipeHolder<?> recipe) {
+        var serializer = recipe.value().getSerializer();
+        return serializer != null && BuiltInRegistries.RECIPE_SERIALIZER.wrapAsHolder(serializer).is(
+            net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.RECIPE_SERIALIZER,
+                Create.asResource("automation_ignore"))) || !CAN_BE_AUTOMATED.test(recipe);
+    }
 
-	CONVERSION(ConversionRecipe::new),
-	CRUSHING(CrushingRecipe::new),
-	CUTTING(CuttingRecipe::new),
-	MILLING(MillingRecipe::new),
-	BASIN(BasinRecipe::new),
-	MIXING(MixingRecipe::new),
-	COMPACTING(CompactingRecipe::new),
-	PRESSING(PressingRecipe::new),
-	SANDPAPER_POLISHING(SandPaperPolishingRecipe::new),
-	SPLASHING(SplashingRecipe::new),
-	HAUNTING(HauntingRecipe::new),
-	DEPLOYING(DeployerApplicationRecipe::new),
-	FILLING(FillingRecipe::new),
-	EMPTYING(EmptyingRecipe::new),
-	ITEM_APPLICATION(ManualApplicationRecipe::new),
+    public static final RecipeType<com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe> DEPLOYING=Registry.register(BuiltInRegistries.RECIPE_TYPE,Create.asResource("deploying"),new RecipeType<>(){});
+    public static final RecipeType<com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe> ITEM_APPLICATION=Registry.register(BuiltInRegistries.RECIPE_TYPE,Create.asResource("item_application"),new RecipeType<>(){});
+    public static final RecipeSerializer<com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe> DEPLOYING_SERIALIZER=Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,Create.asResource("deploying"),new RecipeSerializer<>(com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe.codec(true),ByteBufCodecs.fromCodecWithRegistries(com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe.codec(true).codec())));
+    public static final RecipeSerializer<com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe> ITEM_APPLICATION_SERIALIZER=Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,Create.asResource("item_application"),new RecipeSerializer<>(com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe.codec(false),ByteBufCodecs.fromCodecWithRegistries(com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe.codec(false).codec())));
+    public static final RecipeType<com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe> SEQUENCED_ASSEMBLY=Registry.register(BuiltInRegistries.RECIPE_TYPE,Create.asResource("sequenced_assembly"),new RecipeType<>(){});
+    public static final RecipeSerializer<com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe> SEQUENCED_ASSEMBLY_SERIALIZER=Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,Create.asResource("sequenced_assembly"),new RecipeSerializer<>(com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe.CODEC,ByteBufCodecs.fromCodecWithRegistries(com.simibubi.create.content.processing.sequenced.SequencedAssemblyRecipe.CODEC.codec())));
+    public static final RecipeType<com.simibubi.create.content.fluids.transfer.FillingRecipe> FILLING = Registry.register(BuiltInRegistries.RECIPE_TYPE, Create.asResource("filling"), new RecipeType<>() { @Override public String toString() { return "create:filling"; } });
+    public static final RecipeSerializer<com.simibubi.create.content.fluids.transfer.FillingRecipe> FILLING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER, Create.asResource("filling"), new RecipeSerializer<>(com.simibubi.create.content.fluids.transfer.FillingRecipe.CODEC, ByteBufCodecs.fromCodecWithRegistries(com.simibubi.create.content.fluids.transfer.FillingRecipe.CODEC.codec())));
+    public static final RecipeType<com.simibubi.create.content.fluids.transfer.EmptyingRecipe> EMPTYING = Registry.register(BuiltInRegistries.RECIPE_TYPE, Create.asResource("emptying"), new RecipeType<>() { @Override public String toString() { return "create:emptying"; } });
+    public static final RecipeSerializer<com.simibubi.create.content.fluids.transfer.EmptyingRecipe> EMPTYING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER, Create.asResource("emptying"), new RecipeSerializer<>(com.simibubi.create.content.fluids.transfer.EmptyingRecipe.CODEC, ByteBufCodecs.fromCodecWithRegistries(com.simibubi.create.content.fluids.transfer.EmptyingRecipe.CODEC.codec())));
+    public static final RecipeType<com.simibubi.create.content.kinetics.saw.CuttingRecipe> CUTTING = Registry.register(BuiltInRegistries.RECIPE_TYPE, Create.asResource("cutting"), new RecipeType<>() { @Override public String toString() { return "create:cutting"; } });
+    public static final RecipeSerializer<com.simibubi.create.content.kinetics.saw.CuttingRecipe> CUTTING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER, Create.asResource("cutting"), new RecipeSerializer<>(com.simibubi.create.content.kinetics.saw.CuttingRecipe.CODEC, ByteBufCodecs.fromCodecWithRegistries(com.simibubi.create.content.kinetics.saw.CuttingRecipe.CODEC.codec())));
+    public static final RecipeType<com.simibubi.create.content.kinetics.crafter.MechanicalCraftingRecipe> MECHANICAL_CRAFTING = Registry.register(BuiltInRegistries.RECIPE_TYPE,
+            Create.asResource("mechanical_crafting"), new RecipeType<>() { @Override public String toString() { return "create:mechanical_crafting"; } });
+    public static final RecipeSerializer<com.simibubi.create.content.kinetics.crafter.MechanicalCraftingRecipe> MECHANICAL_CRAFTING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,
+            Create.asResource("mechanical_crafting"), new RecipeSerializer<>(com.simibubi.create.content.kinetics.crafter.MechanicalCraftingRecipe.CODEC,
+                    ByteBufCodecs.fromCodecWithRegistries(com.simibubi.create.content.kinetics.crafter.MechanicalCraftingRecipe.CODEC.codec())));
+    public static final RecipeType<com.simibubi.create.content.kinetics.crusher.CrushingRecipe> CRUSHING = Registry.register(BuiltInRegistries.RECIPE_TYPE,
+            Create.asResource("crushing"), new RecipeType<>() { @Override public String toString() { return "create:crushing"; } });
+    public static final RecipeSerializer<com.simibubi.create.content.kinetics.crusher.CrushingRecipe> CRUSHING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,
+            Create.asResource("crushing"), new RecipeSerializer<>(com.simibubi.create.content.kinetics.crusher.CrushingRecipe.CODEC,
+                    ByteBufCodecs.fromCodecWithRegistries(com.simibubi.create.content.kinetics.crusher.CrushingRecipe.CODEC.codec())));
+    public static final RecipeType<MillingRecipe> MILLING = Registry.register(BuiltInRegistries.RECIPE_TYPE,
+            Create.asResource("milling"), new RecipeType<>() {
+                @Override public String toString() { return "create:milling"; }
+            });
+    public static final RecipeSerializer<MillingRecipe> MILLING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,
+            Create.asResource("milling"), new RecipeSerializer<>(MillingRecipe.CODEC,
+                    ByteBufCodecs.fromCodecWithRegistries(MillingRecipe.CODEC.codec())));
+    public static final RecipeType<PressingRecipe> PRESSING = Registry.register(BuiltInRegistries.RECIPE_TYPE,
+            Create.asResource("pressing"), new RecipeType<>() { @Override public String toString() { return "create:pressing"; } });
+    public static final RecipeSerializer<PressingRecipe> PRESSING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,
+            Create.asResource("pressing"), new RecipeSerializer<>(PressingRecipe.CODEC,
+                    ByteBufCodecs.fromCodecWithRegistries(PressingRecipe.CODEC.codec())));
 
-	MECHANICAL_CRAFTING(MechanicalCraftingRecipe.Serializer::new),
-	SEQUENCED_ASSEMBLY(SequencedAssemblyRecipeSerializer::new),
+    public static void register() {
+        net.fabricmc.fabric.api.recipe.v1.sync.RecipeSynchronization.synchronizeRecipeSerializer(SEQUENCED_ASSEMBLY_SERIALIZER);
+        net.fabricmc.fabric.api.recipe.v1.sync.RecipeSynchronization.synchronizeRecipeSerializer(ITEM_APPLICATION_SERIALIZER);
+        for (var name : new String[] {"smelting", "blasting", "smoking"}) {
+            var serializer = BuiltInRegistries.RECIPE_SERIALIZER.getValue(
+                net.minecraft.resources.Identifier.withDefaultNamespace(name));
+            net.fabricmc.fabric.api.recipe.v1.sync.RecipeSynchronization.synchronizeRecipeSerializer(
+                java.util.Objects.requireNonNull(serializer, name));
+        }
+        net.fabricmc.fabric.api.recipe.v1.sync.RecipeSynchronization.synchronizeRecipeSerializer(SPLASHING_SERIALIZER);
+        net.fabricmc.fabric.api.recipe.v1.sync.RecipeSynchronization.synchronizeRecipeSerializer(HAUNTING_SERIALIZER);
+    }
+    public static final RecipeType<FanProcessingRecipe> SPLASHING = Registry.register(BuiltInRegistries.RECIPE_TYPE,
+            Create.asResource("splashing"), new RecipeType<>() { @Override public String toString() { return "create:splashing"; } });
+    public static final RecipeType<FanProcessingRecipe> HAUNTING = Registry.register(BuiltInRegistries.RECIPE_TYPE,
+            Create.asResource("haunting"), new RecipeType<>() { @Override public String toString() { return "create:haunting"; } });
+    public static final RecipeSerializer<FanProcessingRecipe> SPLASHING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,
+            Create.asResource("splashing"), new RecipeSerializer<>(FanProcessingRecipe.codec(true), ByteBufCodecs.fromCodecWithRegistries(FanProcessingRecipe.codec(true).codec())));
+    public static final RecipeSerializer<FanProcessingRecipe> HAUNTING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,
+            Create.asResource("haunting"), new RecipeSerializer<>(FanProcessingRecipe.codec(false), ByteBufCodecs.fromCodecWithRegistries(FanProcessingRecipe.codec(false).codec())));
 
-	TOOLBOX_DYEING(() -> new SimpleCraftingRecipeSerializer<>(ToolboxDyeingRecipe::new), () -> RecipeType.CRAFTING, false),
-	ITEM_COPYING(() -> new SimpleCraftingRecipeSerializer<>(ItemCopyingRecipe::new), () -> RecipeType.CRAFTING, false);
+    public static final RecipeType<BasinRecipe> MIXING = Registry.register(BuiltInRegistries.RECIPE_TYPE,
+            Create.asResource("mixing"), new RecipeType<>() { @Override public String toString() { return "create:mixing"; } });
+    public static final RecipeType<BasinRecipe> COMPACTING = Registry.register(BuiltInRegistries.RECIPE_TYPE,
+            Create.asResource("compacting"), new RecipeType<>() { @Override public String toString() { return "create:compacting"; } });
+    public static final RecipeSerializer<BasinRecipe> MIXING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,
+            Create.asResource("mixing"), new RecipeSerializer<>(BasinRecipe.codec(true), ByteBufCodecs.fromCodecWithRegistries(BasinRecipe.codec(true).codec())));
+    public static final RecipeSerializer<BasinRecipe> COMPACTING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,
+            Create.asResource("compacting"), new RecipeSerializer<>(BasinRecipe.codec(false), ByteBufCodecs.fromCodecWithRegistries(BasinRecipe.codec(false).codec())));
 
-	public static final Predicate<RecipeHolder<?>> CAN_BE_AUTOMATED = r -> !r.id()
-			.getPath()
-			.endsWith("_manual_only");
+    public static final RecipeType<SandPaperPolishingRecipe> SANDPAPER_POLISHING = Registry.register(BuiltInRegistries.RECIPE_TYPE,
+            Create.asResource("sandpaper_polishing"), new RecipeType<>() { @Override public String toString() { return "create:sandpaper_polishing"; } });
+    public static final RecipeSerializer<SandPaperPolishingRecipe> SANDPAPER_POLISHING_SERIALIZER = Registry.register(BuiltInRegistries.RECIPE_SERIALIZER,
+            Create.asResource("sandpaper_polishing"), new RecipeSerializer<>(SandPaperPolishingRecipe.CODEC,
+                    ByteBufCodecs.fromCodecWithRegistries(SandPaperPolishingRecipe.CODEC.codec())));
 
-	public final ResourceLocation id;
-	public final Supplier<RecipeSerializer<?>> serializerSupplier;
-	private final DeferredHolder<RecipeSerializer<?>, RecipeSerializer<?>> serializerObject;
-	@Nullable
-	private final DeferredHolder<RecipeType<?>, RecipeType<?>> typeObject;
-	private final Supplier<RecipeType<?>> type;
-
-	private boolean isProcessingRecipe;
-
-	public static final Codec<AllRecipeTypes> CODEC = StringRepresentable.fromEnum(AllRecipeTypes::values);
-
-	AllRecipeTypes(Supplier<RecipeSerializer<?>> serializerSupplier, Supplier<RecipeType<?>> typeSupplier, boolean registerType) {
-		String name = Lang.asId(name());
-		id = Create.asResource(name);
-		this.serializerSupplier = serializerSupplier;
-		serializerObject = Registers.SERIALIZER_REGISTER.register(name, serializerSupplier);
-		if (registerType) {
-			typeObject = Registers.TYPE_REGISTER.register(name, typeSupplier);
-			type = typeObject;
-		} else {
-			typeObject = null;
-			type = typeSupplier;
-		}
-		isProcessingRecipe = false;
-	}
-
-	AllRecipeTypes(Supplier<RecipeSerializer<?>> serializerSupplier) {
-		String name = Lang.asId(name());
-		id = Create.asResource(name);
-		this.serializerSupplier = serializerSupplier;
-		serializerObject = Registers.SERIALIZER_REGISTER.register(name, serializerSupplier);
-		typeObject = Registers.TYPE_REGISTER.register(name, () -> RecipeType.simple(id));
-		type = typeObject;
-		isProcessingRecipe = false;
-	}
-
-	AllRecipeTypes(StandardProcessingRecipe.Factory<?> processingFactory) {
-		this(() -> new Serializer<>(processingFactory));
-		isProcessingRecipe = true;
-	}
-
-	AllRecipeTypes(ProcessingRecipe.Factory<ItemApplicationRecipeParams, ? extends ItemApplicationRecipe> itemApplicationFactory) {
-		this(() -> new ItemApplicationRecipe.Serializer<>(itemApplicationFactory));
-		isProcessingRecipe = true;
-	}
-
-	@Internal
-	public static void register(IEventBus modEventBus) {
-		ShapedRecipePattern.setCraftingSize(9, 9);
-		Registers.SERIALIZER_REGISTER.register(modEventBus);
-		Registers.TYPE_REGISTER.register(modEventBus);
-	}
-
-	@Override
-	public ResourceLocation getId() {
-		return id;
-	}
-
-	@SuppressWarnings("unchecked")
-	@Override
-	public <T extends RecipeSerializer<?>> T getSerializer() {
-		return (T) serializerObject.get();
-	}
-
-	@SuppressWarnings("unchecked")
-	@Override
-	public <I extends RecipeInput, R extends Recipe<I>> RecipeType<R> getType() {
-		return (RecipeType<R>) type.get();
-	}
-
-	public <I extends RecipeInput, R extends Recipe<I>> Optional<RecipeHolder<R>> find(I inv, Level world) {
-		return world.getRecipeManager()
-			.getRecipeFor(getType(), inv, world);
-	}
-
-	public static boolean shouldIgnoreInAutomation(RecipeHolder<?> recipe) {
-		RecipeSerializer<?> serializer = recipe.value().getSerializer();
-		if (serializer != null && AllTags.AllRecipeSerializerTags.AUTOMATION_IGNORE.matches(serializer))
-			return true;
-		return !CAN_BE_AUTOMATED.test(recipe);
-	}
-
-	@Override
-	public @NotNull String getSerializedName() {
-		return id.toString();
-	}
-
-	private static class Registers {
-		private static final DeferredRegister<RecipeSerializer<?>> SERIALIZER_REGISTER = DeferredRegister.create(BuiltInRegistries.RECIPE_SERIALIZER, Create.ID);
-		private static final DeferredRegister<RecipeType<?>> TYPE_REGISTER = DeferredRegister.create(Registries.RECIPE_TYPE, Create.ID);
-	}
-
+    private AllRecipeTypes() {}
 }

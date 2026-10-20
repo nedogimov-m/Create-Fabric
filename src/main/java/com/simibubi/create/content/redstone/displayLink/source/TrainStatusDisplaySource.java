@@ -21,12 +21,12 @@ public class TrainStatusDisplaySource extends SingleLineDisplaySource {
 		if (observer == null)
 			return EMPTY_LINE;
 		Train currentTrain = observer.getPresentTrain();
-		if (currentTrain == null)
+		if (currentTrain == null || currentTrain.isRestoring())
 			return EMPTY_LINE;
 
 		ScheduleRuntime runtime = currentTrain.runtime;
 		Schedule schedule = runtime.getSchedule();
-		if (schedule == null)
+		if (schedule == null || runtime.currentEntry < 0 || runtime.currentEntry >= schedule.entries.size())
 			return EMPTY_LINE;
 		if (runtime.paused)
 			return EMPTY_LINE;

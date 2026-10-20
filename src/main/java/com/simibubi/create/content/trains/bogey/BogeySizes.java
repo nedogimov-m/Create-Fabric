@@ -1,78 +1,27 @@
 package com.simibubi.create.content.trains.bogey;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.UnmodifiableView;
-
 import com.simibubi.create.Create;
+import java.util.*;
+import net.minecraft.resources.Identifier;
 
-import net.minecraft.resources.ResourceLocation;
-
+/** Common size registry. Wheel radius is expressed in world blocks, as in the pinned source. */
 public final class BogeySizes {
-	private static final Map<ResourceLocation, BogeySize> BOGEY_SIZES = new HashMap<>();
-	private static final List<BogeySize> SORTED_INCREASING = new ArrayList<>();
-	private static final List<BogeySize> SORTED_DECREASING = new ArrayList<>();
-	@UnmodifiableView
-	private static final Map<ResourceLocation, BogeySize> BOGEY_SIZES_VIEW = Collections.unmodifiableMap(BOGEY_SIZES);
-	@UnmodifiableView
-	private static final List<BogeySize> SORTED_INCREASING_VIEW = Collections.unmodifiableList(SORTED_INCREASING);
-	@UnmodifiableView
-	private static final List<BogeySize> SORTED_DECREASING_VIEW = Collections.unmodifiableList(SORTED_DECREASING);
-
-	public static final BogeySize SMALL = new BogeySize(Create.asResource("small"), 6.5f / 16f);
-	public static final BogeySize LARGE = new BogeySize(Create.asResource("large"), 12.5f / 16f);
-
-	static {
-		register(SMALL);
-		register(LARGE);
-	}
-
-	private BogeySizes() {
-	}
-
-	public static void register(BogeySize size) {
-		ResourceLocation id = size.id();
-		if (BOGEY_SIZES.containsKey(id)) {
-			throw new IllegalArgumentException();
-		}
-		BOGEY_SIZES.put(id, size);
-
-		SORTED_INCREASING.add(size);
-		SORTED_DECREASING.add(size);
-		SORTED_INCREASING.sort(Comparator.comparing(BogeySize::wheelRadius));
-		SORTED_DECREASING.sort(Comparator.comparing(BogeySize::wheelRadius).reversed());
-	}
-
-	@UnmodifiableView
-	public static Map<ResourceLocation, BogeySize> all() {
-		return BOGEY_SIZES_VIEW;
-	}
-
-	@UnmodifiableView
-	public static List<BogeySize> allSortedIncreasing() {
-		return SORTED_INCREASING_VIEW;
-	}
-
-	@UnmodifiableView
-	public static List<BogeySize> allSortedDecreasing() {
-		return SORTED_DECREASING_VIEW;
-	}
-
-	@ApiStatus.Internal
-	public static void init() {
-	}
-
-	public record BogeySize(ResourceLocation id, float wheelRadius) {
-		public BogeySize nextBySize() {
-			List<BogeySize> values = allSortedIncreasing();
-			int ordinal = values.indexOf(this);
-			return values.get((ordinal + 1) % values.size());
-		}
-	}
+    private static final Map<Identifier,BogeySize> SIZES=new LinkedHashMap<>();
+    private static final List<BogeySize> INCREASING=new ArrayList<>(),DECREASING=new ArrayList<>();
+    private static final Map<Identifier,BogeySize> VIEW=Collections.unmodifiableMap(SIZES);
+    private static final List<BogeySize> INC_VIEW=Collections.unmodifiableList(INCREASING),DEC_VIEW=Collections.unmodifiableList(DECREASING);
+    public static final BogeySize SMALL=new BogeySize(Create.asResource("small"),6.5f/16),LARGE=new BogeySize(Create.asResource("large"),12.5f/16);
+    static {register(SMALL);register(LARGE);}
+    public static void register(BogeySize size){
+        Objects.requireNonNull(size);if(SIZES.putIfAbsent(size.id(),size)!=null)throw new IllegalArgumentException("Duplicate bogey size "+size.id());
+        INCREASING.add(size);DECREASING.add(size);INCREASING.sort(Comparator.comparing(BogeySize::wheelRadius));DECREASING.sort(Comparator.comparing(BogeySize::wheelRadius).reversed());
+    }
+    public static Map<Identifier,BogeySize> all(){return VIEW;}
+    public static List<BogeySize> allSortedIncreasing(){return INC_VIEW;}
+    public static List<BogeySize> allSortedDecreasing(){return DEC_VIEW;}
+    public record BogeySize(Identifier id,float wheelRadius){
+        public BogeySize {Objects.requireNonNull(id);if(!Float.isFinite(wheelRadius)||wheelRadius<=0)throw new IllegalArgumentException("Invalid bogey wheel radius");}
+        public BogeySize nextBySize(){int index=INCREASING.indexOf(this);if(index<0)throw new IllegalStateException("Unregistered bogey size "+id);return INCREASING.get((index+1)%INCREASING.size());}
+    }
+    private BogeySizes(){}
 }

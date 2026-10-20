@@ -1,154 +1,49 @@
 package com.simibubi.create.content.kinetics.fan;
 
-import java.util.List;
-
-import org.jetbrains.annotations.Nullable;
-
+import com.simibubi.create.AllBlockEntityTypes;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
-import com.simibubi.create.content.logistics.chute.ChuteBlockEntity;
-import com.simibubi.create.foundation.advancement.AllAdvancements;
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-import com.simibubi.create.infrastructure.config.AllConfigs;
-
-import net.minecraft.MethodsReturnNonnullByDefault;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.nbt.CompoundTag;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
-@MethodsReturnNonnullByDefault
-public class EncasedFanBlockEntity extends KineticBlockEntity implements IAirCurrentSource {
+public final class EncasedFanBlockEntity extends KineticBlockEntity implements IAirCurrentSource {
+    private final AirCurrent airCurrent = new AirCurrent(this);
+    private float previousSpeed;
+    private Direction previousFacing;
+    public EncasedFanBlockEntity(BlockPos pos, BlockState state) { super(AllBlockEntityTypes.ENCASED_FAN, pos, state); }
+    @Override public AirCurrent getAirCurrent() { return airCurrent; }
+    @Override public Level getAirCurrentWorld() { return level; }
+    @Override public BlockPos getAirCurrentPos() { return worldPosition; }
+    @Override public Direction getAirflowOriginSide() { return getBlockState().getValue(EncasedFanBlock.FACING); }
+    @Override public Direction getAirFlowDirection() { return getSpeed() == 0 ? null : isPushing() ? getAirflowOriginSide() : getAirflowOriginSide().getOpposite(); }
+    @Override public boolean isSourceRemoved() { return isRemoved(); }
+    public void requestRebuild() { airCurrent.rebuild(); }
+    public boolean isPushing() { return getSpeed() * getAirflowOriginSide().getAxisDirection().getStep() > 0; }
+    public void updateChute() {
+        if (level == null || level.isClientSide()) return;
+        var facing = getAirflowOriginSide();
+        if (facing.getAxis().isVertical() && LoadedLevelAccess.blockEntity(level, worldPosition.relative(facing))
+                instanceof com.simibubi.create.content.logistics.chute.ChuteBlockEntity chute) {
+            chute.requestAirflowUpdate(); chute.refreshAirflow();
+        }
+    }
+    @Override public void invalidate() { super.invalidate(); updateChute(); }
+    public static float flowLimit(Level level, BlockPos pos, Direction facing, float distance) { return AirCurrent.getFlowLimit(level,pos,distance,facing); }
+    public static void tick(Level level, BlockPos pos, BlockState state, EncasedFanBlockEntity fan) {
+        try (var createTick = com.simibubi.create.foundation.blockEntity.SmartBlockEntity.enterNativeTick(level, pos, state, fan)) {
+            if (!createTick.shouldTick()) return;
 
-	public AirCurrent airCurrent;
-	protected int airCurrentUpdateCooldown;
-	protected int entitySearchCooldown;
-	protected boolean updateAirFlow;
-
-	public EncasedFanBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
-		super(type, pos, state);
-		airCurrent = new AirCurrent(this);
-		updateAirFlow = true;
-	}
-
-	@Override
-	public void addBehaviours(List<BlockEntityBehaviour> behaviours) {
-		super.addBehaviours(behaviours);
-		registerAwardables(behaviours, AllAdvancements.ENCASED_FAN, AllAdvancements.FAN_PROCESSING);
-	}
-
-	@Override
-	protected void read(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.read(compound, registries, clientPacket);
-		if (clientPacket)
-			airCurrent.rebuild();
-	}
-
-	@Override
-	public void write(CompoundTag compound, HolderLookup.Provider registries, boolean clientPacket) {
-		super.write(compound, registries, clientPacket);
-	}
-
-	@Override
-	public AirCurrent getAirCurrent() {
-		return airCurrent;
-	}
-
-	@Nullable
-	@Override
-	public Level getAirCurrentWorld() {
-		return level;
-	}
-
-	@Override
-	public BlockPos getAirCurrentPos() {
-		return worldPosition;
-	}
-
-	@Override
-	public Direction getAirflowOriginSide() {
-		return this.getBlockState()
-			.getValue(EncasedFanBlock.FACING);
-	}
-
-	@Override
-	public Direction getAirFlowDirection() {
-		float speed = getSpeed();
-		if (speed == 0)
-			return null;
-		Direction facing = getBlockState().getValue(BlockStateProperties.FACING);
-		speed = convertToDirection(speed, facing);
-		return speed > 0 ? facing : facing.getOpposite();
-	}
-
-	@Override
-	public void remove() {
-		super.remove();
-		updateChute();
-	}
-
-	@Override
-	public boolean isSourceRemoved() {
-		return remove;
-	}
-
-	@Override
-	public void onSpeedChanged(float prevSpeed) {
-		super.onSpeedChanged(prevSpeed);
-		updateAirFlow = true;
-		updateChute();
-	}
-
-	public void updateChute() {
-		Direction direction = getBlockState().getValue(EncasedFanBlock.FACING);
-		if (!direction.getAxis()
-			.isVertical())
-			return;
-		BlockEntity poweredChute = level.getBlockEntity(worldPosition.relative(direction));
-		if (!(poweredChute instanceof ChuteBlockEntity chuteBE))
-			return;
-		if (direction == Direction.DOWN)
-			chuteBE.updatePull();
-		else
-			chuteBE.updatePush(1);
-	}
-
-	public void blockInFrontChanged() {
-		updateAirFlow = true;
-	}
-
-	@Override
-	public void tick() {
-		super.tick();
-
-		boolean server = !level.isClientSide || isVirtual();
-
-		if (server && airCurrentUpdateCooldown-- <= 0) {
-			airCurrentUpdateCooldown = AllConfigs.server().kinetics.fanBlockCheckRate.get();
-			updateAirFlow = true;
-		}
-
-		if (updateAirFlow) {
-			updateAirFlow = false;
-			airCurrent.rebuild();
-			if (airCurrent.maxDistance > 0)
-				award(AllAdvancements.ENCASED_FAN);
-			sendData();
-		}
-
-		if (getSpeed() == 0)
-			return;
-
-		if (entitySearchCooldown-- <= 0) {
-			entitySearchCooldown = 5;
-			airCurrent.findEntities();
-		}
-
-		airCurrent.tick();
-	}
-
+        KineticBlockEntity.tick(level,pos,state,fan);
+        if (!level.isClientSide() && (fan.previousSpeed != fan.getSpeed() || fan.previousFacing != fan.getAirflowOriginSide() || level.getGameTime()%com.simibubi.create.infrastructure.config.AllConfigs.server().kinetics.fanBlockCheckRate.get() == 0)) fan.updateChute();
+        fan.previousSpeed = fan.getSpeed(); fan.previousFacing = fan.getAirflowOriginSide();
+        fan.airCurrent.tick();
+    
+        }
+    }
+    @Override protected void addNativeAdvancementIds(java.util.List<String> ids) {
+        super.addNativeAdvancementIds(ids);
+        ids.add("encased_fan");
+        ids.add("fan_processing");
+    }
 }

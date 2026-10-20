@@ -1,56 +1,29 @@
 package com.simibubi.create.content.logistics.filter;
 
-import java.util.Collections;
-import java.util.List;
-
-import com.simibubi.create.AllDataComponents;
 import com.simibubi.create.content.logistics.box.PackageItem;
-import com.simibubi.create.content.logistics.filter.FilterItemStack.PackageFilterItemStack;
-import com.simibubi.create.foundation.utility.CreateLang;
-
+import java.util.function.Consumer;
+import net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider;
 import net.minecraft.ChatFormatting;
-import net.minecraft.core.component.DataComponentType;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.*;
+import net.minecraft.world.entity.player.*;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.*;
+import net.minecraft.world.item.component.TooltipDisplay;
+import net.minecraft.world.item.context.UseOnContext;
+import net.minecraft.world.level.Level;
 
-public class PackageFilterItem extends FilterItem {
-	protected PackageFilterItem(Properties properties) {
-		super(properties);
-	}
-
-	@Override
-	public List<Component> makeSummary(ItemStack filter) {
-		String address = PackageItem.getAddress(filter);
-		if (address.isBlank())
-			return Collections.emptyList();
-
-		return List.of(CreateLang.text("-> ")
-			.style(ChatFormatting.GRAY)
-			.add(CreateLang.text(address)
-				.style(ChatFormatting.GOLD))
-			.component());
-	}
-
-	@Override
-	public AbstractContainerMenu createMenu(int id, Inventory inv, Player player) {
-		return PackageFilterMenu.create(id, inv, player.getMainHandItem());
-	}
-
-	@Override
-	public DataComponentType<?> getComponentType() {
-		return AllDataComponents.PACKAGE_ADDRESS;
-	}
-
-	@Override
-	public FilterItemStack makeStackWrapper(ItemStack filter) {
-		return new PackageFilterItemStack(filter);
-	}
-
-	@Override
-	public ItemStack[] getFilterItems(ItemStack stack) {
-		return new ItemStack[0];
-	}
+public final class PackageFilterItem extends Item {
+    public PackageFilterItem(Properties properties){super(properties);}
+    @Override public InteractionResult use(Level level,Player player,InteractionHand hand){
+        if(player.isShiftKeyDown()||hand!=InteractionHand.MAIN_HAND)return InteractionResult.PASS;
+        if(player instanceof ServerPlayer server){var held=player.getMainHandItem();int slot=player.getInventory().getSelectedSlot();server.openMenu(new ExtendedMenuProvider<PackageFilterMenu.Opening>(){
+            @Override public Component getDisplayName(){return held.getHoverName();}
+            @Override public PackageFilterMenu.Opening getScreenOpeningData(ServerPlayer ignored){return new PackageFilterMenu.Opening(held.copy(),slot);}
+            @Override public AbstractContainerMenu createMenu(int id,Inventory inventory,Player owner){return new PackageFilterMenu(id,inventory,held,slot);}
+        });}return InteractionResult.SUCCESS;
+    }
+    @Override public InteractionResult useOn(UseOnContext context){return context.getPlayer()==null?InteractionResult.PASS:use(context.getLevel(),context.getPlayer(),context.getHand());}
+    @Override public void appendHoverText(ItemStack stack,TooltipContext context,TooltipDisplay display,Consumer<Component> lines,TooltipFlag flag){if(FilterItemTooltip.shiftDown())return;String address=PackageItem.getAddress(stack);if(!address.isBlank())lines.accept(Component.literal("→ ").withStyle(ChatFormatting.GRAY).append(Component.literal(address).withStyle(ChatFormatting.GOLD)));}
 }

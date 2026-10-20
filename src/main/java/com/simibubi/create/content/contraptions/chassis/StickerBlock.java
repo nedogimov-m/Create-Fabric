@@ -1,156 +1,43 @@
 package com.simibubi.create.content.contraptions.chassis;
 
 import com.simibubi.create.AllBlockEntityTypes;
-import com.simibubi.create.AllBlocks;
-import com.simibubi.create.foundation.block.IBE;
-import com.simibubi.create.foundation.block.WrenchableDirectionalBlock;
-
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.particles.BlockParticleOption;
-import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
+import com.simibubi.create.api.contraption.BlockMovementChecks;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
+import net.minecraft.core.*;
+import net.minecraft.world.entity.*;
 import net.minecraft.world.item.context.BlockPlaceContext;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.SignalGetter;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.StateDefinition.Builder;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
-import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.*;
+import net.minecraft.world.level.block.*;
+import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.state.*;
+import net.minecraft.world.level.block.state.properties.*;
+import net.minecraft.world.level.redstone.Orientation;
 
-public class StickerBlock extends WrenchableDirectionalBlock implements IBE<StickerBlockEntity> {
-
-	public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
-	public static final BooleanProperty EXTENDED = BlockStateProperties.EXTENDED;
-
-	public StickerBlock(Properties p_i48415_1_) {
-		super(p_i48415_1_);
-		registerDefaultState(defaultBlockState().setValue(POWERED, false)
-			.setValue(EXTENDED, false));
-	}
-
-	@Override
-	public BlockState getStateForPlacement(BlockPlaceContext context) {
-		Direction nearestLookingDirection = context.getNearestLookingDirection();
-		boolean shouldPower = context.getLevel()
-			.hasNeighborSignal(context.getClickedPos());
-		Direction facing = context.getPlayer() != null && context.getPlayer()
-			.isShiftKeyDown() ? nearestLookingDirection : nearestLookingDirection.getOpposite();
-
-		return defaultBlockState().setValue(FACING, facing)
-			.setValue(POWERED, shouldPower);
-	}
-
-	@Override
-	protected void createBlockStateDefinition(Builder<Block, BlockState> builder) {
-		super.createBlockStateDefinition(builder.add(POWERED, EXTENDED));
-	}
-
-	@Override
-	public void neighborChanged(BlockState state, Level worldIn, BlockPos pos, Block blockIn, BlockPos fromPos,
-		boolean isMoving) {
-		if (worldIn.isClientSide)
-			return;
-
-		boolean previouslyPowered = state.getValue(POWERED);
-		if (previouslyPowered != worldIn.hasNeighborSignal(pos)) {
-			state = state.cycle(POWERED);
-			if (state.getValue(POWERED))
-				state = state.cycle(EXTENDED);
-			worldIn.setBlock(pos, state, Block.UPDATE_CLIENTS);
-		}
-	}
-
-	@Override
-    public boolean shouldCheckWeakPower(BlockState state, SignalGetter level, BlockPos pos, Direction side) {
-        return false;
+/** A rising-edge toggle latch. POWERED tracks input, while EXTENDED survives the falling edge. */
+public class StickerBlock extends DirectionalBlock implements EntityBlock {
+    public static final BooleanProperty POWERED=BlockStateProperties.POWERED,EXTENDED=BlockStateProperties.EXTENDED;
+    public StickerBlock(Properties properties){super(properties.strength(1.5f,6).requiresCorrectToolForDrops().sound(SoundType.STONE).noOcclusion().isRedstoneConductor((state,level,pos)->false));registerDefaultState(defaultBlockState().setValue(FACING,Direction.NORTH).setValue(POWERED,false).setValue(EXTENDED,false));}
+    @Override protected void createBlockStateDefinition(StateDefinition.Builder<Block,BlockState> builder){builder.add(FACING,POWERED,EXTENDED);}
+    @Override public BlockState getStateForPlacement(BlockPlaceContext context){var facing=context.getNearestLookingDirection();if(context.getPlayer()==null||!context.getPlayer().isShiftKeyDown())facing=facing.getOpposite();return defaultBlockState().setValue(FACING,facing).setValue(POWERED,LoadedLevelAccess.getBestNeighborSignal(context.getLevel(),context.getClickedPos())>0);}
+    @Override protected void neighborChanged(BlockState state,Level level,BlockPos pos,Block block,Orientation orientation,boolean moving){
+        if(level.isClientSide())return;boolean powered=LoadedLevelAccess.getBestNeighborSignal(level,pos)>0;if(powered==state.getValue(POWERED))return;
+        var next=state.setValue(POWERED,powered);if(powered)next=next.cycle(EXTENDED);LoadedLevelAccess.setBlockQuiet(level,pos,next);
     }
-
-	@Override
-	public Class<StickerBlockEntity> getBlockEntityClass() {
-		return StickerBlockEntity.class;
-	}
-
-	@Override
-	public BlockEntityType<? extends StickerBlockEntity> getBlockEntityType() {
-		return AllBlockEntityTypes.STICKER.get();
-	}
-
-	// Slime block stuff
-
-	private boolean isUprightSticker(BlockGetter world, BlockPos pos) {
-		BlockState blockState = world.getBlockState(pos);
-		return AllBlocks.STICKER.has(blockState) && blockState.getValue(FACING) == Direction.UP;
-	}
-
-	@Override
-	public void fallOn(Level p_152426_, BlockState p_152427_, BlockPos p_152428_, Entity p_152429_, float p_152430_) {
-		if (!isUprightSticker(p_152426_, p_152428_) || p_152429_.isSuppressingBounce())
-			super.fallOn(p_152426_, p_152427_, p_152428_, p_152429_, p_152430_);
-		p_152429_.causeFallDamage(p_152430_, 1.0F, p_152426_.damageSources().fall());
-	}
-
-	@Override
-	public void updateEntityAfterFallOn(BlockGetter p_176216_1_, Entity p_176216_2_) {
-		if (!isUprightSticker(p_176216_1_, p_176216_2_.blockPosition()
-			.below()) || p_176216_2_.isSuppressingBounce()) {
-			super.updateEntityAfterFallOn(p_176216_1_, p_176216_2_);
-		} else {
-			this.bounceUp(p_176216_2_);
-		}
-	}
-
-	private void bounceUp(Entity p_226946_1_) {
-		Vec3 Vector3d = p_226946_1_.getDeltaMovement();
-		if (Vector3d.y < 0.0D) {
-			double d0 = p_226946_1_ instanceof LivingEntity ? 1.0D : 0.8D;
-			p_226946_1_.setDeltaMovement(Vector3d.x, -Vector3d.y * d0, Vector3d.z);
-		}
-	}
-
-	@Override
-	public void stepOn(Level p_152431_, BlockPos p_152432_, BlockState p_152433_, Entity p_152434_) {
-		double d0 = Math.abs(p_152434_.getDeltaMovement().y);
-		if (d0 < 0.1D && !p_152434_.isSteppingCarefully() && isUprightSticker(p_152431_, p_152432_)) {
-			double d1 = 0.4D + d0 * 0.2D;
-			p_152434_.setDeltaMovement(p_152434_.getDeltaMovement()
-				.multiply(d1, 1.0D, d1));
-		}
-		super.stepOn(p_152431_, p_152432_, p_152433_, p_152434_);
-	}
-
-	@Override
-	public boolean addLandingEffects(BlockState state1, ServerLevel worldserver, BlockPos pos, BlockState state2,
-		LivingEntity entity, int numberOfParticles) {
-		if (isUprightSticker(worldserver, pos)) {
-			worldserver.sendParticles(
-				new BlockParticleOption(ParticleTypes.BLOCK, Blocks.SLIME_BLOCK.defaultBlockState()), entity.getX(),
-				entity.getY(), entity.getZ(), numberOfParticles, 0.0D, 0.0D, 0.0D, (double) 0.15F);
-			return true;
-		}
-		return super.addLandingEffects(state1, worldserver, pos, state2, entity, numberOfParticles);
-	}
-
-	@Override
-	public boolean addRunningEffects(BlockState state, Level world, BlockPos pos, Entity entity) {
-		if (state.getValue(FACING) == Direction.UP) {
-			Vec3 Vector3d = entity.getDeltaMovement();
-			world.addParticle(
-				new BlockParticleOption(ParticleTypes.BLOCK, Blocks.SLIME_BLOCK.defaultBlockState()).setPos(pos),
-				entity.getX() + ((double) world.random.nextFloat() - 0.5D) * (double) entity.getBbWidth(),
-				entity.getY() + 0.1D,
-				entity.getZ() + ((double) world.random.nextFloat() - 0.5D) * (double) entity.getBbWidth(),
-				Vector3d.x * -4.0D, 1.5D, Vector3d.z * -4.0D);
-			return true;
-		}
-		return super.addRunningEffects(state, world, pos, entity);
-	}
-
+    public static boolean isUpright(BlockState state){return state.getBlock() instanceof StickerBlock&&state.getValue(FACING)==Direction.UP;}
+    public static boolean attachedTowards(BlockState state,Level level,BlockPos pos,Direction side){return state.getBlock() instanceof StickerBlock&&state.getValue(EXTENDED)&&state.getValue(FACING)==side&&!BlockMovementChecks.isNotSupportive(LoadedLevelAccess.blockState(level,pos.relative(side)),side.getOpposite());}
+    public static boolean notSupportive(BlockState state,Direction side){return state.getBlock() instanceof StickerBlock&&!state.getValue(EXTENDED)&&state.getValue(FACING)==side;}
+    @Override public void fallOn(Level level,BlockState state,BlockPos pos,Entity entity,double distance){
+        if(!isUpright(state)||entity.isSuppressingBounce())super.fallOn(level,state,pos,entity,distance);
+        // Source Sticker deliberately retains ordinary fall damage, unlike vanilla SlimeBlock.
+        entity.causeFallDamage(distance,1,level.damageSources().fall());
+    }
+    // Native restitution is selected per contacted state by StickerBouncinessMixin. Block.bounceOn
+    // is only an after-effect callback in 26.3: writing velocity there would be overwritten.
+    @Override public void stepOn(Level level,BlockPos pos,BlockState state,Entity entity){
+        double vertical=Math.abs(entity.getDeltaMovement().y);if(isUpright(state)&&vertical<.1&&!entity.isSteppingCarefully())entity.setDeltaMovement(entity.getDeltaMovement().multiply(.4+vertical*.2,1,.4+vertical*.2));super.stepOn(level,pos,state,entity);
+    }
+    @Override protected BlockState rotate(BlockState state,Rotation rotation){return state.setValue(FACING,rotation.rotate(state.getValue(FACING)));}
+    @Override protected BlockState mirror(BlockState state,Mirror mirror){return state.setValue(FACING,mirror.mirror(state.getValue(FACING)));}
+    @Override public BlockEntity newBlockEntity(BlockPos pos,BlockState state){return new StickerBlockEntity(pos,state);}
+    @Override public <T extends BlockEntity>BlockEntityTicker<T> getTicker(Level level,BlockState state,BlockEntityType<T> type){return level.isClientSide()&&type==AllBlockEntityTypes.STICKER?(world,pos,block,entity)->((StickerBlockEntity)entity).tickClientAnimation():null;}
 }

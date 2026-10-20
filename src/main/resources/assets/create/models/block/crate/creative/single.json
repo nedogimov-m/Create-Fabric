@@ -1,0 +1,9 @@
+{
+  "parent": "create:block/crate/single",
+  "textures": {
+    "casing": "create:block/creative_casing",
+    "crate": "create:block/crate_creative",
+    "side": "create:block/crate_creative_side",
+    "particle": "create:block/creative_casing"
+  }
+}

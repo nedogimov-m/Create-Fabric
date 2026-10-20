@@ -9,13 +9,18 @@ import java.util.Map;
 
 import com.mojang.serialization.Codec;
 
-import net.createmod.catnip.codecs.CatnipCodecUtils;
+import net.minecraft.nbt.NbtOps;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
 public class RequestPromiseQueue {
+    public static final Codec<RequestPromiseQueue> CODEC = RequestPromise.CODEC.listOf().xmap(values -> {
+        var queue = new RequestPromiseQueue(() -> {});
+        for (var value : values) queue.add(value);
+        return queue;
+    }, queue -> queue.flatten(false));
 	private Map<Item, List<RequestPromise>> promisesByItem;
 	private Runnable onChanged;
 
@@ -42,7 +47,7 @@ public class RequestPromiseQueue {
 
 		for (Iterator<RequestPromise> iterator = list.iterator(); iterator.hasNext();) {
 			RequestPromise promise = iterator.next();
-			if (!ItemStack.isSameItemSameComponents(promise.promisedStack.stack, stack))
+			if (!com.simibubi.create.foundation.item.ItemSampleEquality.same(promise.promisedStack.stack, stack))
 				continue;
 			if (expiryTime != -1 && promise.ticksExisted >= expiryTime) {
 				iterator.remove();
@@ -52,6 +57,7 @@ public class RequestPromiseQueue {
 
 			promised += promise.promisedStack.count;
 		}
+		if (list.isEmpty()) promisesByItem.remove(stack.getItem());
 		return promised;
 	}
 
@@ -62,7 +68,7 @@ public class RequestPromiseQueue {
 
 		for (Iterator<RequestPromise> iterator = list.iterator(); iterator.hasNext();) {
 			RequestPromise promise = iterator.next();
-			if (!ItemStack.isSameItemSameComponents(promise.promisedStack.stack, stack))
+			if (!com.simibubi.create.foundation.item.ItemSampleEquality.same(promise.promisedStack.stack, stack))
 				continue;
 			iterator.remove();
 			onChanged.run();
@@ -79,12 +85,13 @@ public class RequestPromiseQueue {
 
 		for (Iterator<RequestPromise> iterator = list.iterator(); iterator.hasNext();) {
 			RequestPromise requestPromise = iterator.next();
-			if (!ItemStack.isSameItemSameComponents(requestPromise.promisedStack.stack, stack))
+			if (!com.simibubi.create.foundation.item.ItemSampleEquality.same(requestPromise.promisedStack.stack, stack))
 				continue;
 
 			int toSubtract = Math.min(amount, requestPromise.promisedStack.count);
 			amount -= toSubtract;
 			requestPromise.promisedStack.count -= toSubtract;
+            if (toSubtract > 0) onChanged.run();
 
 			if (requestPromise.promisedStack.count <= 0) {
 				iterator.remove();
@@ -108,13 +115,13 @@ public class RequestPromiseQueue {
 
 	public CompoundTag write(HolderLookup.Provider registries) {
 		CompoundTag tag = new CompoundTag();
-		tag.put("List", CatnipCodecUtils.encode(Codec.list(RequestPromise.CODEC), registries, flatten(false)).orElseThrow());
+		tag.put("List", RequestPromise.CODEC.listOf().encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), flatten(false)).getOrThrow());
 		return tag;
 	}
 
 	public static RequestPromiseQueue read(CompoundTag tag, HolderLookup.Provider registries, Runnable onChanged) {
 		RequestPromiseQueue queue = new RequestPromiseQueue(onChanged);
-		List<RequestPromise> promises = CatnipCodecUtils.decode(Codec.list(RequestPromise.CODEC), registries, tag.get("List")).orElse(List.of());
+		List<RequestPromise> promises = RequestPromise.CODEC.listOf().parse(registries.createSerializationContext(NbtOps.INSTANCE), tag.get("List")).result().orElse(List.of());
 		for (RequestPromise promise : promises) {
 			queue.add(promise);
 		}
@@ -122,10 +129,13 @@ public class RequestPromiseQueue {
 	}
 
 	public void tick() {
-		promisesByItem.forEach((key, list) -> list.forEach(RequestPromise::tick)); // delete old entries?
+		if (!promisesByItem.isEmpty()) {
+            promisesByItem.forEach((key, list) -> list.forEach(RequestPromise::tick));
+            onChanged.run();
+        }
 	}
 
 	public boolean isEmpty() {
-		return promisesByItem.isEmpty();
+		return promisesByItem.values().stream().allMatch(List::isEmpty);
 	}
 }

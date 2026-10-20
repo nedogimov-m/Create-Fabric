@@ -8,12 +8,11 @@ import com.simibubi.create.api.registry.SimpleRegistry;
 
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.TagsUpdatedEvent;
+import net.fabricmc.fabric.api.event.lifecycle.v1.CommonLifecycleEvents;
 
 public class TagProviderImpl<K, V> implements SimpleRegistry.Provider<K, V> {
 	private final TagKey<K> tag;
@@ -35,19 +34,15 @@ public class TagProviderImpl<K, V> implements SimpleRegistry.Provider<K, V> {
 
 	@Override
 	public void onRegister(Runnable invalidate) {
-		NeoForge.EVENT_BUS.addListener((TagsUpdatedEvent event) -> {
-			if (event.shouldUpdateStaticData()) {
-				invalidate.run();
-			}
-		});
+		CommonLifecycleEvents.TAGS_LOADED.register((registries, client) -> invalidate.run());
 	}
 
 	// eye of the beholder? check the nametag, buddy
 	public static Holder<BlockEntityType<?>> getBeHolder(BlockEntityType<?> type) {
-		ResourceLocation key = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(type);
+		Identifier key = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(type);
 		if (key == null)
 			throw new IllegalStateException("Unregistered BlockEntityType: " + type);
 
-		return BuiltInRegistries.BLOCK_ENTITY_TYPE.getHolder(key).orElseThrow();
+		return BuiltInRegistries.BLOCK_ENTITY_TYPE.get(key).orElseThrow();
 	}
 }

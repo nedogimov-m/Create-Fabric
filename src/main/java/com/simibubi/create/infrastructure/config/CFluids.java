@@ -2,9 +2,8 @@ package com.simibubi.create.infrastructure.config;
 
 import com.simibubi.create.content.fluids.transfer.FluidManipulationBehaviour.BottomlessFluidMode;
 
-import net.createmod.catnip.config.ConfigBase;
 
-public class CFluids extends ConfigBase {
+public class CFluids extends NativeConfigBase {
 
 	public final ConfigInt fluidTankCapacity = i(8, 1, "fluidTankCapacity", Comments.buckets, Comments.fluidTankCapacity);
 	public final ConfigInt fluidTankMaxHeight = i(32, 1, "fluidTankMaxHeight", Comments.blocks, Comments.fluidTankMaxHeight);

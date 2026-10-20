@@ -1,0 +1,23 @@
+{
+  "type": "create:filling",
+  "ingredients": [
+    "minecraft:glass_bottle",
+    {
+      "fluid_tag": "c:milk",
+      "amount": 20250
+    }
+  ],
+  "results": [
+    {
+      "id": "farmersdelight:milk_bottle"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "farmersdelight"
+      ]
+    }
+  ]
+}

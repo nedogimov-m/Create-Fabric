@@ -1,0 +1,20 @@
+{
+  "type": "create:cutting",
+  "ingredients": [
+    "regions_unexplored:brimwood_log_magma"
+  ],
+  "processing_time": 50,
+  "results": [
+    {
+      "id": "regions_unexplored:stripped_brimwood_log"
+    }
+  ],
+  "fabric:load_conditions": [
+    {
+      "condition": "fabric:all_mods_loaded",
+      "values": [
+        "regions_unexplored"
+      ]
+    }
+  ]
+}

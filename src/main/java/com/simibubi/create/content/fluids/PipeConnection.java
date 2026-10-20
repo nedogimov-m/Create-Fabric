@@ -1,39 +1,20 @@
 package com.simibubi.create.content.fluids;
-
-import java.util.Optional;
+import java.util.*;
 import java.util.function.Predicate;
-
-import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
-
-import net.createmod.catnip.animation.LerpedFloat;
 import net.createmod.catnip.data.Couple;
-import net.createmod.catnip.data.Iterate;
 import net.createmod.catnip.math.BlockFace;
-import net.createmod.catnip.math.VecHelper;
-import net.createmod.catnip.platform.CatnipServices;
-import net.minecraft.client.Minecraft;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.HolderLookup;
-import net.minecraft.core.particles.ParticleOptions;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.FloatTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.util.Mth;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.Level;
+import com.simibubi.create.foundation.fluid.FluidStack;
+import net.minecraft.core.*;
+import net.minecraft.world.level.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.world.phys.Vec3;
-
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-import net.neoforged.neoforge.fluids.FluidStack;
-
+import net.minecraft.util.Mth;
+import net.minecraft.world.level.storage.*;
+import net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant;
 public class PipeConnection {
 
 	public Direction side;
+    private OpenEndedPipe cachedOpenEnd;
 
 	// Layer I
 	Couple<Float> pressure; // [inbound, outward]
@@ -83,7 +64,8 @@ public class PipeConnection {
 	}
 
 	public void manageSource(Level world, BlockPos pos, BlockEntity blockEntity) {
-		if (!source.isPresent() && !determineSource(world, pos))
+		if (!world.isLoaded(pos.relative(side))) { if (source.orElse(null) instanceof OpenEndedPipe) previousSource=source; source = Optional.empty(); return; }
+        if (!source.isPresent() && !determineSource(world, pos))
 			return;
 		FlowSource flowSource = source.get();
 		flowSource.manageSource(world, blockEntity);
@@ -107,7 +89,7 @@ public class PipeConnection {
 
 			// Try starting a new flow
 			boolean prioritizeInbound = comparePressure() < 0;
-			for (boolean trueFalse : Iterate.trueAndFalse) {
+			for (boolean trueFalse : new boolean[]{true, false}) {
 				boolean inbound = prioritizeInbound == trueFalse;
 				if (pressure.get(inbound) == 0)
 					continue;
@@ -168,10 +150,13 @@ public class PipeConnection {
 
 		BlockFace location = new BlockFace(pos, side);
 		if (FluidPropagator.isOpenEnd(world, pos, side)) {
-			if (previousSource.orElse(null) instanceof OpenEndedPipe)
+			if (cachedOpenEnd!=null)
+                source=Optional.of(cachedOpenEnd);
+            else if (previousSource.orElse(null) instanceof OpenEndedPipe)
 				source = previousSource;
 			else
 				source = Optional.of(new OpenEndedPipe(location));
+            cachedOpenEnd=(OpenEndedPipe)source.get();
 			return true;
 		}
 
@@ -181,7 +166,7 @@ public class PipeConnection {
 		}
 
 		FluidTransportBehaviour behaviour =
-			BlockEntityBehaviour.get(world, relative, FluidTransportBehaviour.TYPE);
+			FluidPropagator.getPipe(world, relative);
 		source = Optional.of(behaviour == null ? new FlowSource.Blocked(location) : new FlowSource.OtherPipe(location));
 		return true;
 	}
@@ -193,92 +178,10 @@ public class PipeConnection {
 		if (flow.fluid.isEmpty())
 			return;
 
-		if (world.isClientSide) {
-			if (!source.isPresent())
-				determineSource(world, pos);
-
-			spawnParticles(world, pos, flow.fluid);
-			if (particleSplashNextTick)
-				spawnSplashOnRim(world, pos, flow.fluid);
-			particleSplashNextTick = false;
-		}
-
 		float flowSpeed = 1 / 32f + Mth.clamp(pressure.get(flow.inbound) / 128f, 0, 1) * 31 / 32f;
-		flow.progress.setValue(Math.min(flow.progress.getValue() + flowSpeed, 1));
-		if (flow.progress.getValue() >= 1)
+		flow.previousProgress = flow.progress; flow.progress = Math.min(flow.progress + flowSpeed, 1);
+		if (flow.progress >= 1)
 			flow.complete = true;
-	}
-
-	public void serializeNBT(CompoundTag tag, HolderLookup.Provider registries, boolean clientPacket) {
-		CompoundTag connectionData = new CompoundTag();
-		tag.put(side.getName(), connectionData);
-
-		if (hasPressure()) {
-			ListTag pressureData = new ListTag();
-			pressureData.add(FloatTag.valueOf(getInboundPressure()));
-			pressureData.add(FloatTag.valueOf(getOutwardPressure()));
-			connectionData.put("Pressure", pressureData);
-		}
-
-		if (hasOpenEnd())
-			connectionData.put("OpenEnd", ((OpenEndedPipe) source.get()).serializeNBT(registries));
-
-		if (hasFlow()) {
-			CompoundTag flowData = new CompoundTag();
-			Flow flow = this.flow.get();
-			flowData.put("Fluid", flow.fluid.saveOptional(registries));
-			flowData.putBoolean("In", flow.inbound);
-			if (!flow.complete)
-				flowData.put("Progress", flow.progress.writeNBT());
-			connectionData.put("Flow", flowData);
-		}
-
-	}
-
-	private boolean hasOpenEnd() {
-		return source.orElse(null) instanceof OpenEndedPipe;
-	}
-
-	public void deserializeNBT(CompoundTag tag, HolderLookup.Provider registries, BlockPos blockEntityPos, boolean clientPacket) {
-		CompoundTag connectionData = tag.getCompound(side.getName());
-
-		if (connectionData.contains("Pressure")) {
-			ListTag pressureData = connectionData.getList("Pressure", Tag.TAG_FLOAT);
-			pressure = Couple.create(pressureData.getFloat(0), pressureData.getFloat(1));
-		} else
-			pressure.replace(f -> 0f);
-
-		source = Optional.empty();
-		if (connectionData.contains("OpenEnd"))
-			source = Optional.of(OpenEndedPipe.fromNBT(connectionData.getCompound("OpenEnd"), registries, blockEntityPos));
-
-		if (connectionData.contains("Flow")) {
-			CompoundTag flowData = connectionData.getCompound("Flow");
-
-			FluidStack fluid = FluidStack.parseOptional(registries, flowData.getCompound("Fluid"));
-			boolean inbound = flowData.getBoolean("In");
-			if (flow.isEmpty()) {
-				flow = Optional.of(new Flow(inbound, fluid));
-				if (clientPacket)
-					particleSplashNextTick = true;
-			}
-			Flow flow = this.flow.get();
-
-			flow.fluid = fluid;
-			flow.inbound = inbound;
-			flow.complete = !flowData.contains("Progress");
-
-			if (!flow.complete)
-				flow.progress.readNBT(flowData.getCompound("Progress"), clientPacket);
-			else {
-				if (flow.progress.getValue() == 0)
-					flow.progress.startWithValue(1);
-				flow.progress.setValue(1);
-			}
-
-		} else
-			flow = Optional.empty();
-
 	}
 
 	/**
@@ -319,11 +222,11 @@ public class PipeConnection {
 		return getInboundPressure() != 0 || getOutwardPressure() != 0;
 	}
 
-	private float getOutwardPressure() {
+	public float getOutwardPressure() {
 		return pressure.getSecond();
 	}
 
-	private float getInboundPressure() {
+	public float getInboundPressure() {
 		return pressure.getFirst();
 	}
 
@@ -343,145 +246,30 @@ public class PipeConnection {
 
 		public boolean complete;
 		public boolean inbound;
-		public LerpedFloat progress;
+		public float progress, previousProgress;
 		public FluidStack fluid;
 
 		public Flow(boolean inbound, FluidStack fluid) {
 			this.inbound = inbound;
 			this.fluid = fluid;
-			this.progress = LerpedFloat.linear()
-				.startWithValue(0);
+			this.progress = 0;
 			this.complete = false;
 		}
 
 	}
 
-	public static final int MAX_PARTICLE_RENDER_DISTANCE = 20;
-	public static final int SPLASH_PARTICLE_AMOUNT = 1;
-	public static final float IDLE_PARTICLE_SPAWN_CHANCE = 1 / 1000f;
-	public static final float RIM_RADIUS = 1 / 4f + 1 / 64f;
 
-	public void spawnSplashOnRim(Level world, BlockPos pos, FluidStack fluid) {
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> spawnSplashOnRimInner(world, pos, fluid));
-	}
-
-	public void spawnParticles(Level world, BlockPos pos, FluidStack fluid) {
-		CatnipServices.PLATFORM.executeOnClientOnly(() -> () -> spawnParticlesInner(world, pos, fluid));
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private void spawnParticlesInner(Level level, BlockPos pos, FluidStack fluid) {
-		if (level == Minecraft.getInstance().level)
-			if (!isRenderEntityWithinDistance(pos))
-				return;
-		if (hasOpenEnd())
-			spawnPouringLiquid(level, pos, fluid, 1);
-		else if (level.random.nextFloat() < IDLE_PARTICLE_SPAWN_CHANCE)
-			spawnRimParticles(level, pos, fluid, 1);
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private void spawnSplashOnRimInner(Level world, BlockPos pos, FluidStack fluid) {
-		if (world == Minecraft.getInstance().level)
-			if (!isRenderEntityWithinDistance(pos))
-				return;
-		spawnRimParticles(world, pos, fluid, SPLASH_PARTICLE_AMOUNT);
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private void spawnRimParticles(Level world, BlockPos pos, FluidStack fluid, int amount) {
-		if (hasOpenEnd()) {
-			spawnPouringLiquid(world, pos, fluid, amount);
-			return;
-		}
-
-		ParticleOptions particle = FluidFX.getDrippingParticle(fluid);
-		FluidFX.spawnRimParticles(world, pos, side, amount, particle, RIM_RADIUS);
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	private void spawnPouringLiquid(Level world, BlockPos pos, FluidStack fluid, int amount) {
-		ParticleOptions particle = FluidFX.getFluidParticle(fluid);
-		Vec3 directionVec = Vec3.atLowerCornerOf(side.getNormal());
-		if (!hasFlow())
-			return;
-		Flow flow = this.flow.get();
-		FluidFX.spawnPouringLiquid(world, pos, amount, particle, RIM_RADIUS, directionVec, flow.inbound);
-	}
-
-	@OnlyIn(Dist.CLIENT)
-	public static boolean isRenderEntityWithinDistance(BlockPos pos) {
-		Entity renderViewEntity = Minecraft.getInstance()
-			.getCameraEntity();
-		if (renderViewEntity == null)
-			return false;
-		Vec3 center = VecHelper.getCenterOf(pos);
-		if (renderViewEntity.position()
-			.distanceTo(center) > MAX_PARTICLE_RENDER_DISTANCE)
-			return false;
-		return true;
-	}
-
-//	void visualizePressure(BlockPos pos) {
-//		if (!hasPressure())
-//			return;
-//
-//		pressure.forEachWithContext((pressure, inbound) -> {
-//			if (inbound)
-//				return;
-//
-//			Vector3d directionVec = new Vector3d(side.getDirectionVec());
-//			Vector3d scaleVec = directionVec.scale(-.25f * side.getAxisDirection()
-//				.getOffset());
-//			directionVec = directionVec.scale(inbound ? .35f : .45f);
-//			CreateClient.outliner.chaseAABB("pressure" + pos.toShortString() + side.getName() + String.valueOf(inbound),
-//				FluidPropagator.smallCenter.offset(directionVec.add(new Vector3d(pos)))
-//					.grow(scaleVec.x, scaleVec.y, scaleVec.z)
-//					.expand(0, pressure / 64f, 0)
-//					.grow(1 / 64f));
-//		});
-//	}
-//
-//	void visualizeFlow(BlockPos pos) {
-//		if (!hasFlow())
-//			return;
-//
-//		Vector3d directionVec = new Vector3d(side.getDirectionVec());
-//		float size = 1 / 4f;
-//		float length = .5f;
-//		Flow flow = this.flow.get();
-//		boolean inbound = flow.inbound;
-//		FluidStack fluid = flow.fluid;
-//
-//		if (flow.progress == null)
-//			return;
-//		float value = flow.progress.getValue();
-//		Vector3d start = directionVec.scale(inbound ? .5 : .5f - length);
-//		Vector3d offset = directionVec.scale(length * (inbound ? -1 : 1))
-//			.scale(value);
-//
-//		Vector3d scale = new Vector3d(1, 1, 1).subtract(directionVec.scale(side.getAxisDirection()
-//			.getOffset()))
-//			.scale(size);
-//		AABB bb = new AABB(start, start.add(offset)).offset(VecHelper.getCenterOf(pos))
-//			.grow(scale.x, scale.y, scale.z);
-//
-//		int color = 0x7fdbda;
-//		if (!fluid.isEmpty()) {
-//			Fluid fluid2 = fluid.getFluid();
-//			if (fluid2 == Fluids.WATER)
-//				color = 0x1D4D9B;
-//			else if (fluid2 == Fluids.LAVA)
-//				color = 0xFF773D;
-//			else
-//				color = fluid2.getAttributes()
-//					.getColor(fluid);
-//		}
-//
-//		CreateClient.outliner.chaseAABB(this, bb)
-//			.withFaceTexture(AllSpecialTextures.SELECTION)
-//			.colored(color)
-//			.lineWidth(0);
-//	}
-
+    public void write(ValueOutput out) {
+        out.putFloat("Inbound", getInboundPressure()); out.putFloat("Outward", getOutwardPressure());
+        if (hasFlow()) {
+            var f=flow.get(); var data=out.child("Flow"); data.store("Fluid",FluidVariant.CODEC,f.fluid.variant()); data.putBoolean("In",f.inbound); data.putFloat("Progress",f.progress);
+        }
+        var open=source.orElse(previousSource.orElse(cachedOpenEnd)); if(cachedOpenEnd!=null)cachedOpenEnd.write(out.child("OpenEnd"));else if(open instanceof OpenEndedPipe end)end.write(out.child("OpenEnd"));
+    }
+    public void read(ValueInput in, BlockPos pos) {
+        pressure=Couple.create(finite(in.getFloatOr("Inbound",0)), finite(in.getFloatOr("Outward",0)));
+        flow=in.child("Flow").flatMap(data->data.read("Fluid",FluidVariant.CODEC).filter(v->!v.isBlank()).map(v->{var f=new Flow(data.getBooleanOr("In",false),new FluidStack(v,81)); f.progress=f.previousProgress=Math.clamp(finite(data.getFloatOr("Progress",0)),0,1);f.complete=f.progress>=1;return f;}));
+        source=in.child("OpenEnd").map(data->{var end=new OpenEndedPipe(new BlockFace(pos,side));end.read(data);cachedOpenEnd=end;return (FlowSource)end;});
+    }
+    private static float finite(float value) {return Float.isFinite(value)?Math.max(0,value):0;}
 }

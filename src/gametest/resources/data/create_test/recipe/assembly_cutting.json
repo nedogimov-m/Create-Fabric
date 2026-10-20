@@ -1,0 +1,10 @@
+{
+  "type": "create:sequenced_assembly",
+  "ingredient": "create_test:assembly_blank",
+  "transitional_item": {"id": "create:incomplete_precision_mechanism"},
+  "sequence": [
+    {"type": "create:cutting", "ingredients": ["create:incomplete_precision_mechanism"], "results": [{"id": "create:incomplete_precision_mechanism"}], "processing_time": 20},
+    {"type": "create:deploying", "ingredients": ["create:incomplete_precision_mechanism", "minecraft:iron_nugget"], "results": [{"id": "create:incomplete_precision_mechanism"}]}
+  ],
+  "results": [{"id": "minecraft:emerald"}]
+}

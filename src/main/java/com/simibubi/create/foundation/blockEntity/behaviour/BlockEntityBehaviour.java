@@ -1,118 +1,49 @@
 package com.simibubi.create.foundation.blockEntity.behaviour;
 
-import java.util.ConcurrentModificationException;
-
-import com.simibubi.create.content.schematics.requirement.ItemRequirement;
+import com.simibubi.create.foundation.utility.LoadedLevelAccess;
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.Level;
+import net.minecraft.util.ProblemReporter;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.*;
 
+/** Source behaviour API; the actual Smart owner controls lifecycle and native persistence. */
 public abstract class BlockEntityBehaviour {
-
-	public SmartBlockEntity blockEntity;
-	private int lazyTickRate;
-	private int lazyTickCounter;
-
-	public BlockEntityBehaviour(SmartBlockEntity be) {
-		blockEntity = be;
-		setLazyTickRate(10);
-	}
-
-	public abstract BehaviourType<?> getType();
-
-	public void initialize() {
-
-	}
-
-	public void tick() {
-		if (lazyTickCounter-- <= 0) {
-			lazyTickCounter = lazyTickRate;
-			lazyTick();
-		}
-
-	}
-
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-
-	}
-
-	public void write(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-
-	}
-
-	/**
-	 * Called when isSafeNBT == true. Defaults to write()
-	 */
-	public void writeSafe(CompoundTag nbt, HolderLookup.Provider registries) {
-		write(nbt, registries, false);
-	}
-
-	public boolean isSafeNBT() {
-		return false;
-	}
-
-	public ItemRequirement getRequiredItems() {
-		return ItemRequirement.NONE;
-	}
-
-	public void onBlockChanged(BlockState oldState) {
-
-	}
-
-	public void onNeighborChanged(BlockPos neighborPos) {
-
-	}
-
-	/**
-	 * Block destroyed or Chunk unloaded. Usually invalidates capabilities
-	 */
-	public void unload() {
-	}
-
-	/**
-	 * Block destroyed or removed. Requires block to call ITE::onRemove
-	 */
-	public void destroy() {
-	}
-
-	public void setLazyTickRate(int slowTickRate) {
-		this.lazyTickRate = slowTickRate;
-		this.lazyTickCounter = slowTickRate;
-	}
-
-	public void lazyTick() {
-
-	}
-
-	public BlockPos getPos() {
-		return blockEntity.getBlockPos();
-	}
-
-	public Level getWorld() {
-		return blockEntity.getLevel();
-	}
-
-	public static <T extends BlockEntityBehaviour> T get(BlockGetter reader, BlockPos pos, BehaviourType<T> type) {
-		BlockEntity be;
-		try {
-			be = reader.getBlockEntity(pos);
-		} catch (ConcurrentModificationException e) {
-			be = null;
-		}
-		return get(be, type);
-	}
-
-	public static <T extends BlockEntityBehaviour> T get(BlockEntity be, BehaviourType<T> type) {
-		if (be == null)
-			return null;
-		if (!(be instanceof SmartBlockEntity ste))
-			return null;
-		return ste.getBehaviour(type);
-	}
+    public com.simibubi.create.content.schematics.requirement.ItemRequirement getRequiredItems(){return com.simibubi.create.content.schematics.requirement.ItemRequirement.NONE;}
+    public interface Provider {<T extends BlockEntityBehaviour>T getBehaviour(BehaviourType<T> type);}
+    public SmartBlockEntity blockEntity;
+    private int lazyTickRate=10,lazyTickCounter=10;
+    public BlockEntityBehaviour(SmartBlockEntity blockEntity){this.blockEntity=blockEntity;}
+    protected BlockEntityBehaviour(BlockEntity blockEntity){
+        if(!(blockEntity instanceof SmartBlockEntity smart))throw new IllegalArgumentException("A block entity behaviour requires its actual Smart owner");
+        this.blockEntity=smart;
+    }
+    public abstract BehaviourType<?> getType();
+    public void initialize(){}
+    public void tick(){if(lazyTickCounter--<=0){lazyTickCounter=lazyTickRate;lazyTick();}}
+    public void lazyTick(){}
+    public void setLazyTickRate(int rate){lazyTickRate=rate;lazyTickCounter=rate;}
+    public void read(ValueInput input){}
+    public void write(ValueOutput output){}
+    public void read(ValueInput input,boolean clientPacket){read(input);}
+    public void write(ValueOutput output,boolean clientPacket){write(output);}
+    public void writeSafe(ValueOutput output){write(output,false);}
+    public void writeSafe(CompoundTag tag,HolderLookup.Provider registries){
+        var output=TagValueOutput.createWithContext(ProblemReporter.DISCARDING,registries);
+        writeSafe(output);tag.merge(output.buildResult());
+    }
+    public boolean isSafeNBT(){return false;}
+    public void onBlockChanged(BlockState previous){}
+    public void onNeighborChanged(BlockPos neighbor){}
+    public void unload(){}
+    public void destroy(){}
+    public BlockPos getPos(){return blockEntity.getBlockPos();}
+    public Level getWorld(){return blockEntity.getLevel();}
+    public static <T extends BlockEntityBehaviour>T get(BlockGetter level,BlockPos pos,BehaviourType<T> type){return get(LoadedLevelAccess.blockEntity(level,pos),type);}
+    public static <T extends BlockEntityBehaviour>T get(BlockEntity blockEntity,BehaviourType<T> type){if(blockEntity instanceof Provider provider)return provider.getBehaviour(type);return type.resolve(blockEntity);}
+    protected void changed(){blockEntity.setChanged();var level=getWorld();if(level!=null&&!level.isClientSide())level.sendBlockUpdated(getPos(),blockEntity.getBlockState(),blockEntity.getBlockState(),net.minecraft.world.level.block.Block.UPDATE_CLIENTS);}
 }

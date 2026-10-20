@@ -1,116 +1,160 @@
 package com.simibubi.create;
 
-import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
-import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
-import com.simibubi.create.content.contraptions.OrientedContraptionEntity;
-import com.simibubi.create.content.contraptions.actors.seat.SeatEntity;
-import com.simibubi.create.content.contraptions.gantry.GantryContraptionEntity;
-import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
-import com.simibubi.create.content.contraptions.glue.SuperGlueRenderer;
-import com.simibubi.create.content.contraptions.render.ContraptionEntityRenderer;
-import com.simibubi.create.content.contraptions.render.ContraptionVisual;
-import com.simibubi.create.content.contraptions.render.OrientedContraptionEntityRenderer;
-import com.simibubi.create.content.equipment.blueprint.BlueprintEntity;
-import com.simibubi.create.content.equipment.blueprint.BlueprintRenderer;
-import com.simibubi.create.content.equipment.potatoCannon.PotatoProjectileEntity;
-import com.simibubi.create.content.equipment.potatoCannon.PotatoProjectileRenderer;
 import com.simibubi.create.content.logistics.box.PackageEntity;
-import com.simibubi.create.content.logistics.box.PackageRenderer;
-import com.simibubi.create.content.logistics.box.PackageVisual;
-import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
-import com.simibubi.create.content.trains.entity.CarriageContraptionEntityRenderer;
-import com.simibubi.create.content.trains.entity.CarriageContraptionVisual;
-import com.simibubi.create.foundation.data.CreateEntityBuilder;
-import com.tterrag.registrate.util.entry.EntityEntry;
-import com.tterrag.registrate.util.nullness.NonNullConsumer;
-import com.tterrag.registrate.util.nullness.NonNullFunction;
-import com.tterrag.registrate.util.nullness.NonNullSupplier;
+import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.*;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.entity.*;
 
-import net.createmod.catnip.lang.Lang;
-import net.minecraft.client.renderer.entity.EntityRenderer;
-import net.minecraft.client.renderer.entity.EntityRendererProvider;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityType.EntityFactory;
-import net.minecraft.world.entity.MobCategory;
+public final class AllEntityTypes {
+  private static final ResourceKey<EntityType<?>> BLUEPRINT_KEY=ResourceKey.create(Registries.ENTITY_TYPE,Create.asResource("crafting_blueprint"));
+  public static final EntityType<com.simibubi.create.content.equipment.blueprint.BlueprintEntity> CRAFTING_BLUEPRINT=Registry.register(BuiltInRegistries.ENTITY_TYPE,BLUEPRINT_KEY,EntityType.Builder.<com.simibubi.create.content.equipment.blueprint.BlueprintEntity>of(com.simibubi.create.content.equipment.blueprint.BlueprintEntity::new,MobCategory.MISC).fireImmune().dontTrackDeltas().clientTrackingRange(10).updateInterval(Integer.MAX_VALUE).noLootTable().build(BLUEPRINT_KEY));
+  private static final ResourceKey<EntityType<?>> POTATO_KEY = ResourceKey.create(Registries.ENTITY_TYPE,Create.asResource("potato_projectile"));
+  public static final EntityType<com.simibubi.create.content.equipment.potatoCannon.PotatoProjectileEntity> POTATO_PROJECTILE = Registry.register(BuiltInRegistries.ENTITY_TYPE,POTATO_KEY,EntityType.Builder.<com.simibubi.create.content.equipment.potatoCannon.PotatoProjectileEntity>of(com.simibubi.create.content.equipment.potatoCannon.PotatoProjectileEntity::new,MobCategory.MISC).sized(.25f,.25f).clientTrackingRange(4).updateInterval(20).noLootTable().build(POTATO_KEY));
 
-import net.neoforged.neoforge.common.Tags.EntityTypes;
-import net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent;
+  private static final ResourceKey<EntityType<?>> CARRIAGE_KEY =
+      ResourceKey.create(Registries.ENTITY_TYPE, Create.asResource("carriage_contraption"));
+  public static final EntityType<
+          com.simibubi.create.content.trains.entity.CarriageContraptionEntity>
+      CARRIAGE_CONTRAPTION =
+          Registry.register(
+              BuiltInRegistries.ENTITY_TYPE,
+              CARRIAGE_KEY,
+              EntityType.Builder
+                  .<com.simibubi.create.content.trains.entity.CarriageContraptionEntity>of(
+                      com.simibubi.create.content.trains.entity.CarriageContraptionEntity::new,
+                      MobCategory.MISC)
+                  .sized(1, 1)
+                  .fireImmune()
+                  .clientTrackingRange(15)
+                  .updateInterval(3)
+                  .noLootTable()
+                  .build(CARRIAGE_KEY));
+  private static final ResourceKey<EntityType<?>> GANTRY_KEY =
+      ResourceKey.create(Registries.ENTITY_TYPE, Create.asResource("gantry_contraption"));
+  public static final EntityType<
+          com.simibubi.create.content.contraptions.gantry.GantryContraptionEntity>
+      GANTRY_CONTRAPTION =
+          Registry.register(
+              BuiltInRegistries.ENTITY_TYPE,
+              GANTRY_KEY,
+              EntityType.Builder
+                  .<com.simibubi.create.content.contraptions.gantry.GantryContraptionEntity>of(
+                      com.simibubi.create.content.contraptions.gantry.GantryContraptionEntity::new,
+                      MobCategory.MISC)
+                  .sized(1, 1)
+                  .fireImmune()
+                  .dontTrackDeltas()
+                  .clientTrackingRange(10)
+                  .updateInterval(40)
+                  .noLootTable()
+                  .build(GANTRY_KEY));
 
-public class AllEntityTypes {
+  private static final ResourceKey<EntityType<?>> ORIENTED_KEY =
+      ResourceKey.create(Registries.ENTITY_TYPE, Create.asResource("oriented_contraption"));
+  public static final EntityType<com.simibubi.create.content.contraptions.OrientedContraptionEntity>
+      ORIENTED_CONTRAPTION =
+          Registry.register(
+              BuiltInRegistries.ENTITY_TYPE,
+              ORIENTED_KEY,
+              EntityType.Builder
+                  .<com.simibubi.create.content.contraptions.OrientedContraptionEntity>of(
+                      com.simibubi.create.content.contraptions.OrientedContraptionEntity::new,
+                      MobCategory.MISC)
+                  .sized(1, 1)
+                  .fireImmune()
+                  .dontTrackDeltas()
+                  .clientTrackingRange(16)
+                  .updateInterval(1)
+                  .noLootTable()
+                  .build(ORIENTED_KEY));
+  private static final ResourceKey<EntityType<?>> LINEAR_KEY =
+      ResourceKey.create(Registries.ENTITY_TYPE, Create.asResource("linear_contraption"));
+  public static final EntityType<com.simibubi.create.content.contraptions.LinearContraptionEntity>
+      LINEAR_CONTRAPTION =
+          Registry.register(
+              BuiltInRegistries.ENTITY_TYPE,
+              LINEAR_KEY,
+              EntityType.Builder
+                  .<com.simibubi.create.content.contraptions.LinearContraptionEntity>of(
+                      com.simibubi.create.content.contraptions.LinearContraptionEntity::new,
+                      MobCategory.MISC)
+                  .sized(1, 1)
+                  .fireImmune()
+                  .clientTrackingRange(16)
+                  .updateInterval(1)
+                  .noLootTable()
+                  .build(LINEAR_KEY));
+  private static final ResourceKey<EntityType<?>> CONTROLLED_KEY =
+      ResourceKey.create(Registries.ENTITY_TYPE, Create.asResource("controlled_contraption"));
+  public static final EntityType<
+          com.simibubi.create.content.contraptions.ControlledContraptionEntity>
+      CONTROLLED_CONTRAPTION =
+          Registry.register(
+              BuiltInRegistries.ENTITY_TYPE,
+              CONTROLLED_KEY,
+              EntityType.Builder
+                  .<com.simibubi.create.content.contraptions.ControlledContraptionEntity>of(
+                      com.simibubi.create.content.contraptions.ControlledContraptionEntity::new,
+                      MobCategory.MISC)
+                  .sized(1, 1)
+                  .fireImmune()
+                  .dontTrackDeltas()
+                  .clientTrackingRange(16)
+                  .updateInterval(1)
+                  .noLootTable()
+                  .build(CONTROLLED_KEY));
+  private static final ResourceKey<EntityType<?>> GLUE_KEY =
+      ResourceKey.create(Registries.ENTITY_TYPE, Create.asResource("super_glue"));
+  public static final EntityType<com.simibubi.create.content.contraptions.glue.SuperGlueEntity>
+      SUPER_GLUE =
+          Registry.register(
+              BuiltInRegistries.ENTITY_TYPE,
+              GLUE_KEY,
+              EntityType.Builder.<com.simibubi.create.content.contraptions.glue.SuperGlueEntity>of(
+                      com.simibubi.create.content.contraptions.glue.SuperGlueEntity::new,
+                      MobCategory.MISC)
+                  .sized(0, 0)
+                  .fireImmune()
+                  .clientTrackingRange(10)
+                  .updateInterval(Integer.MAX_VALUE)
+                  .noLootTable()
+                  .build(GLUE_KEY));
+  private static final ResourceKey<EntityType<?>> SEAT_KEY =
+      ResourceKey.create(Registries.ENTITY_TYPE, Create.asResource("seat"));
+  public static final EntityType<com.simibubi.create.content.contraptions.actors.seat.SeatEntity>
+      SEAT =
+          Registry.register(
+              BuiltInRegistries.ENTITY_TYPE,
+              SEAT_KEY,
+              EntityType.Builder
+                  .<com.simibubi.create.content.contraptions.actors.seat.SeatEntity>of(
+                      com.simibubi.create.content.contraptions.actors.seat.SeatEntity::new,
+                      MobCategory.MISC)
+                  .sized(.25f, .35f)
+                  .fireImmune()
+                  .dontTrackDeltas()
+                  .clientTrackingRange(5)
+                  .updateInterval(Integer.MAX_VALUE)
+                  .noLootTable()
+                  .build(SEAT_KEY));
+  private static final ResourceKey<EntityType<?>> PACKAGE_KEY =
+      ResourceKey.create(Registries.ENTITY_TYPE, Create.asResource("package"));
+  public static final EntityType<PackageEntity> PACKAGE =
+      Registry.register(
+          BuiltInRegistries.ENTITY_TYPE,
+          PACKAGE_KEY,
+          EntityType.Builder.<PackageEntity>of(PackageEntity::new, MobCategory.MISC)
+              .sized(1, 1)
+              .clientTrackingRange(10)
+              .updateInterval(3)
+              .noLootTable()
+              .build(PACKAGE_KEY));
 
-	public static final EntityEntry<OrientedContraptionEntity> ORIENTED_CONTRAPTION = contraption("contraption",
-		OrientedContraptionEntity::new, () -> OrientedContraptionEntityRenderer::new, 5, 3, true)
-		.visual(() -> ContraptionVisual::new)
-		.register();
-	public static final EntityEntry<ControlledContraptionEntity> CONTROLLED_CONTRAPTION =
-		contraption("stationary_contraption", ControlledContraptionEntity::new, () -> ContraptionEntityRenderer::new,
-			20, 40, false)
-			.visual(() -> ContraptionVisual::new)
-			.register();
-	public static final EntityEntry<GantryContraptionEntity> GANTRY_CONTRAPTION = contraption("gantry_contraption",
-		GantryContraptionEntity::new, () -> ContraptionEntityRenderer::new, 10, 40, false)
-		.visual(() -> ContraptionVisual::new)
-		.register();
-	public static final EntityEntry<CarriageContraptionEntity> CARRIAGE_CONTRAPTION =
-		contraption("carriage_contraption", CarriageContraptionEntity::new,
-			() -> CarriageContraptionEntityRenderer::new, 15, 3, true)
-			.visual(() -> CarriageContraptionVisual::new)
-			.register();
+  public static void register() {
+    FabricDefaultAttributeRegistry.register(PACKAGE, PackageEntity.createPackageAttributes());
+  }
 
-	public static final EntityEntry<SuperGlueEntity> SUPER_GLUE =
-		register("super_glue", SuperGlueEntity::new, () -> SuperGlueRenderer::new, MobCategory.MISC, 10,
-			Integer.MAX_VALUE, false, true, SuperGlueEntity::build).register();
-
-	public static final EntityEntry<BlueprintEntity> CRAFTING_BLUEPRINT =
-		register("crafting_blueprint", BlueprintEntity::new, () -> BlueprintRenderer::new, MobCategory.MISC, 10,
-			Integer.MAX_VALUE, false, true, BlueprintEntity::build).register();
-
-	public static final EntityEntry<PotatoProjectileEntity> POTATO_PROJECTILE =
-		register("potato_projectile", PotatoProjectileEntity::new, () -> PotatoProjectileRenderer::new,
-			MobCategory.MISC, 4, 20, true, false, PotatoProjectileEntity::build).register();
-
-	public static final EntityEntry<SeatEntity> SEAT = register("seat", SeatEntity::new, () -> SeatEntity.Render::new,
-		MobCategory.MISC, 5, Integer.MAX_VALUE, false, true, SeatEntity::build).register();
-
-	public static final EntityEntry<PackageEntity> PACKAGE = register("package", PackageEntity::new, () -> PackageRenderer::new,
-		MobCategory.MISC, 10, 3, true, false, PackageEntity::build)
-		.visual(() -> PackageVisual::new, true)
-		.register();
-
-	//
-
-	private static <T extends Entity> CreateEntityBuilder<T, ?> contraption(String name, EntityFactory<T> factory,
-																			NonNullSupplier<NonNullFunction<EntityRendererProvider.Context, EntityRenderer<? super T>>> renderer, int range,
-																			int updateFrequency, boolean sendVelocity) {
-		return (CreateEntityBuilder<T, ?>) register(name, factory, renderer, MobCategory.MISC, range, updateFrequency, sendVelocity, true,
-			AbstractContraptionEntity::build)
-			.tag(EntityTypes.TELEPORTING_NOT_SUPPORTED);
-	}
-
-	private static <T extends Entity> CreateEntityBuilder<T, ?> register(String name, EntityFactory<T> factory,
-																		 NonNullSupplier<NonNullFunction<EntityRendererProvider.Context, EntityRenderer<? super T>>> renderer,
-																		 MobCategory group, int range, int updateFrequency, boolean sendVelocity, boolean immuneToFire,
-																		 NonNullConsumer<EntityType.Builder<T>> propertyBuilder) {
-		String id = Lang.asId(name);
-		return (CreateEntityBuilder<T, ?>) Create.registrate()
-			.entity(id, factory, group)
-			.properties(b -> b.setTrackingRange(range)
-				.setUpdateInterval(updateFrequency)
-				.setShouldReceiveVelocityUpdates(sendVelocity))
-			.properties(propertyBuilder)
-			.properties(b -> {
-				if (immuneToFire)
-					b.fireImmune();
-			})
-			.renderer(renderer);
-	}
-
-	public static void registerEntityAttributes(EntityAttributeCreationEvent event) {
-		event.put(PACKAGE.get(), PackageEntity.createPackageAttributes()
-			.build());
-	}
-
-	public static void register() {
-	}
+  private AllEntityTypes() {}
 }

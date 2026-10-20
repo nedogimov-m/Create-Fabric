@@ -1,0 +1,17 @@
+{
+  "type": "create:compacting",
+  "ingredients": [
+    "minecraft:flint",
+    "minecraft:flint",
+    "minecraft:calcite",
+    {
+      "fluid": "minecraft:lava",
+      "amount": 8100
+    }
+  ],
+  "results": [
+    {
+      "id": "minecraft:diorite"
+    }
+  ]
+}

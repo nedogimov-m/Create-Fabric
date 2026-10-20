@@ -23,7 +23,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
-import net.neoforged.neoforge.common.util.FakePlayer;
+import net.fabricmc.fabric.api.entity.FakePlayer;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
+import java.util.function.IntSupplier;
 
 public class ScrollValueBehaviour extends BlockEntityBehaviour implements ValueSettingsBehaviour {
 
@@ -40,6 +43,7 @@ public class ScrollValueBehaviour extends BlockEntityBehaviour implements ValueS
 	Consumer<Integer> clientCallback;
 	Function<Integer, String> formatter;
 	private Supplier<Boolean> isActive;
+    private IntSupplier dynamicMin, dynamicMax;
 	boolean needsWrench;
 
 	public ScrollValueBehaviour(Component label, SmartBlockEntity be, ValueBoxTransform slot) {
@@ -60,17 +64,20 @@ public class ScrollValueBehaviour extends BlockEntityBehaviour implements ValueS
 		return true;
 	}
 
-	@Override
-	public void write(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		nbt.putInt("ScrollValue", value);
-		super.write(nbt, registries, clientPacket);
-	}
-
-	@Override
-	public void read(CompoundTag nbt, HolderLookup.Provider registries, boolean clientPacket) {
-		value = nbt.getInt("ScrollValue");
-		super.read(nbt, registries, clientPacket);
-	}
+    @Override public void write(ValueOutput output,boolean clientPacket) {
+        output.putInt("ScrollValue",value);
+        super.write(output,clientPacket);
+    }
+    @Override public void read(ValueInput input,boolean clientPacket) {
+        value=Mth.clamp(input.getIntOr("ScrollValue",value),minimum(),maximum());
+        super.read(input,clientPacket);
+    }
+    /** Configuration bounds are read when used; the one actual setting remains public value. */
+    public ScrollValueBehaviour withBounds(IntSupplier minimum,IntSupplier maximum) {
+        dynamicMin=minimum;dynamicMax=maximum;return this;
+    }
+    public int minimum() { return dynamicMin==null?min:dynamicMin.getAsInt(); }
+    public int maximum() { return dynamicMax==null?max:dynamicMax.getAsInt(); }
 
 	public ScrollValueBehaviour withClientCallback(Consumer<Integer> valueCallback) {
 		clientCallback = valueCallback;
@@ -83,6 +90,8 @@ public class ScrollValueBehaviour extends BlockEntityBehaviour implements ValueS
 	}
 
 	public ScrollValueBehaviour between(int min, int max) {
+        if(min>max)throw new IllegalArgumentException("Reversed scroll range");
+        dynamicMin=dynamicMax=null;
 		this.min = min;
 		this.max = max;
 		return this;
@@ -104,14 +113,25 @@ public class ScrollValueBehaviour extends BlockEntityBehaviour implements ValueS
 	}
 
 	public void setValue(int value) {
-		value = Mth.clamp(value, min, max);
+		if (!isCurrentOwner())
+			return;
+		value = Mth.clamp(value, minimum(), maximum());
 		if (value == this.value)
 			return;
 		this.value = value;
 		callback.accept(value);
+		if (!isCurrentOwner())
+			return;
 		blockEntity.setChanged();
 		blockEntity.sendData();
 	}
+
+    /** Detached construction and virtual scenes are valid; removed world owners cannot publish. */
+    protected boolean isCurrentOwner() {
+        return !blockEntity.isRemoved() && (!blockEntity.hasLevel()
+            || blockEntity.getBehaviour(getType()) == this && (blockEntity.isVirtual()
+                || com.simibubi.create.foundation.utility.LoadedLevelAccess.blockEntity(getWorld(),getPos()) == blockEntity));
+    }
 
 	public int getValue() {
 		return value;
@@ -156,7 +176,7 @@ public class ScrollValueBehaviour extends BlockEntityBehaviour implements ValueS
 
 	@Override
 	public ValueSettingsBoard createBoard(Player player, BlockHitResult hitResult) {
-		return new ValueSettingsBoard(label, max, 10, ImmutableList.of(Component.literal("Value")),
+		return new ValueSettingsBoard(label, maximum(), 10, ImmutableList.of(Component.literal("Value")),
 			new ValueSettingsFormatter(ValueSettings::format));
 	}
 
@@ -172,6 +192,8 @@ public class ScrollValueBehaviour extends BlockEntityBehaviour implements ValueS
 	public ValueSettings getValueSettings() {
 		return new ValueSettings(0, value);
 	}
+
+    @Override public void newSettingHovered(ValueSettings setting) { clientCallback.accept(setting.value()); }
 
 	@Override
 	public boolean onlyVisibleWithWrench() {

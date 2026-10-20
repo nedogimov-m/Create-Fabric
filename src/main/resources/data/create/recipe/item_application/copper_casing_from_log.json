@@ -1,0 +1,12 @@
+{
+  "type": "create:item_application",
+  "ingredients": [
+    "#c:stripped_logs",
+    "#c:ingots/copper"
+  ],
+  "results": [
+    {
+      "id": "create:copper_casing"
+    }
+  ]
+}

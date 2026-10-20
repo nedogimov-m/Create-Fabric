@@ -9,7 +9,7 @@ import org.jetbrains.annotations.Nullable;
 import com.google.common.collect.ImmutableList;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import com.tterrag.registrate.util.nullness.NonNullSupplier;
+import java.util.function.Supplier;
 
 import net.createmod.catnip.data.Couple;
 import net.minecraft.tags.BlockTags;
@@ -17,8 +17,8 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.feature.configurations.OreConfiguration;
-import net.minecraft.world.level.levelgen.feature.configurations.OreConfiguration.TargetBlockState;
+import net.minecraft.world.level.levelgen.feature.BlockReplacement;
+
 import net.minecraft.world.level.levelgen.structure.templatesystem.RuleTest;
 import net.minecraft.world.level.levelgen.structure.templatesystem.TagMatchTest;
 
@@ -26,13 +26,20 @@ import org.jetbrains.annotations.NotNull;
 
 public class LayerPattern {
 	public static final Codec<LayerPattern> CODEC = Codec.list(Layer.CODEC)
-			.xmap(LayerPattern::new, pattern -> pattern.layers);
+			.xmap(LayerPattern::new, pattern -> pattern.layers)
+            .validate(pattern -> pattern.valid() ? com.mojang.serialization.DataResult.success(pattern) : com.mojang.serialization.DataResult.error(()->"Layer pattern requires two positive weighted layers, nonempty targets, and positive finite progress"));
 
 	public final List<Layer> layers;
 
 	public LayerPattern(List<Layer> layers) {
 		this.layers = layers;
 	}
+
+    public boolean valid(){
+        long total=0;int positive=0;
+        for(var layer:layers){if(layer.weight<0||layer.minSize<0||layer.maxSize<layer.minSize||layer.targets.isEmpty()||layer.targets.stream().anyMatch(java.util.List::isEmpty))return false;if(layer.weight>0){if(layer.maxSize==0)return false;positive++;total+=layer.weight;}}
+        return positive>=2&&total<=Integer.MAX_VALUE;
+    }
 
 	public Layer rollNext(@Nullable Layer previous, RandomSource random) {
 		int totalWeight = 0;
@@ -80,7 +87,7 @@ public class LayerPattern {
 	public static class Layer {
 		public static final Codec<Layer> CODEC = RecordCodecBuilder.create(instance -> {
 			return instance.group(
-				Codec.list(Codec.list(TargetBlockState.CODEC))
+				Codec.list(Codec.list(BlockReplacement.CODEC))
 					.fieldOf("targets")
 					.forGetter(layer -> layer.targets),
 				Codec.intRange(0, Integer.MAX_VALUE)
@@ -95,19 +102,19 @@ public class LayerPattern {
 			).apply(instance, Layer::new);
 		});
 
-		public final List<List<TargetBlockState>> targets;
+		public final List<List<BlockReplacement>> targets;
 		public final int minSize;
 		public final int maxSize;
 		public final int weight;
 
-		public Layer(List<List<TargetBlockState>> targets, int minSize, int maxSize, int weight) {
+		public Layer(List<List<BlockReplacement>> targets, int minSize, int maxSize, int weight) {
 			this.targets = targets;
 			this.minSize = minSize;
 			this.maxSize = maxSize;
 			this.weight = weight;
 		}
 
-		public List<TargetBlockState> rollBlock(RandomSource random) {
+		public List<BlockReplacement> rollBlock(RandomSource random) {
 			if (targets.size() == 1)
 				return targets.get(0);
 			return targets.get(random.nextInt(targets.size()));
@@ -118,13 +125,13 @@ public class LayerPattern {
 			private static final RuleTest DEEPSLATE_ORE_REPLACEABLES = new TagMatchTest(BlockTags.DEEPSLATE_ORE_REPLACEABLES);
 			private static final RuleTest NETHER_ORE_REPLACEABLES = new TagMatchTest(BlockTags.BASE_STONE_NETHER);
 
-			private final List<List<TargetBlockState>> targets = new ArrayList<>();
+			private final List<List<BlockReplacement>> targets = new ArrayList<>();
 			private int minSize = 1;
 			private int maxSize = 1;
 			private int weight = 1;
 			private boolean netherMode;
 
-			public com.simibubi.create.infrastructure.worldgen.LayerPattern.Layer.Builder block(NonNullSupplier<? extends Block> block) {
+			public com.simibubi.create.infrastructure.worldgen.LayerPattern.Layer.Builder block(Supplier<? extends Block> block) {
 				return block(block.get());
 			}
 
@@ -134,8 +141,8 @@ public class LayerPattern {
 
 			public com.simibubi.create.infrastructure.worldgen.LayerPattern.Layer.Builder block(Block block) {
 				if (netherMode) {
-					this.targets.add(ImmutableList.of(OreConfiguration
-						.target(NETHER_ORE_REPLACEABLES, block.defaultBlockState())));
+					this.targets.add(ImmutableList.of(BlockReplacement
+						.replace(NETHER_ORE_REPLACEABLES, block.defaultBlockState())));
 					return this;
 				}
 				return blocks(block.defaultBlockState(), block.defaultBlockState());
@@ -145,7 +152,7 @@ public class LayerPattern {
 				return blocks(block.defaultBlockState(), deepblock.defaultBlockState());
 			}
 
-			public com.simibubi.create.infrastructure.worldgen.LayerPattern.Layer.Builder blocks(Couple<NonNullSupplier<? extends Block>> blocksByDepth) {
+			public com.simibubi.create.infrastructure.worldgen.LayerPattern.Layer.Builder blocks(Couple<Supplier<? extends Block>> blocksByDepth) {
 				return blocks(blocksByDepth.getFirst()
 					.get()
 					.defaultBlockState(),
@@ -156,8 +163,8 @@ public class LayerPattern {
 
 			private com.simibubi.create.infrastructure.worldgen.LayerPattern.Layer.Builder blocks(BlockState stone, BlockState deepslate) {
 				this.targets.add(
-					ImmutableList.of(OreConfiguration.target(STONE_ORE_REPLACEABLES, stone),
-						OreConfiguration.target(DEEPSLATE_ORE_REPLACEABLES, deepslate)));
+					ImmutableList.of(BlockReplacement.replace(STONE_ORE_REPLACEABLES, stone),
+						BlockReplacement.replace(DEEPSLATE_ORE_REPLACEABLES, deepslate)));
 				return this;
 			}
 
