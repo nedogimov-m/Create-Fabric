@@ -219,6 +219,8 @@ public abstract class FluidTransportBehaviour extends com.simibubi.create.founda
                     if(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.FluidPipeBlock&&!(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.EncasedPipeBlock))type=axis==side.getAxis()?AttachmentTypes.CONNECTION:AttachmentTypes.DETAILED_CONNECTION;
                     else if(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.AxisPipeBlock&&otherAxis==side.getAxis())type=axis==side.getAxis()?AttachmentTypes.CONNECTION:AttachmentTypes.DETAILED_CONNECTION;
                     else if(type==AttachmentTypes.RIM&&FluidPropagator.getPipe(level,pos)!=null&&!(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.FluidPipeBlock))type=AttachmentTypes.DETAILED_CONNECTION;
+                    // Pumps hide the rim, but an open normal pipe still needs its connecting segment.
+                    if(type==AttachmentTypes.NONE)type=AttachmentTypes.DETAILED_CONNECTION;
                 }
                 if(state.getBlock() instanceof com.simibubi.create.content.fluids.pipes.EncasedPipeBlock&&type!=AttachmentTypes.DRAIN)type=AttachmentTypes.NONE;
                 if(glass){if(type==AttachmentTypes.RIM&&(next.getBlock() instanceof com.simibubi.create.content.fluids.pipes.FluidPipeBlock||axis==otherAxis))type=AttachmentTypes.NONE;type=type.withoutConnector();}
