@@ -230,7 +230,10 @@ public abstract class FluidTransportBehaviour extends com.simibubi.create.founda
         return new PipeRenderData(java.util.List.copyOf(attachments),casing);
     }
     public PipeRenderData clientRenderData=new PipeRenderData(java.util.Collections.nCopies(6,AttachmentTypes.NONE),false);
-    public Object getRenderData(){return clientRenderData;}
+    public Object getRenderData(){
+        // Virtual scene edits have no server packet to refresh the attachment snapshot.
+        return blockEntity.isVirtual()?renderData():clientRenderData;
+    }
     @Override public void read(ValueInput input,boolean clientPacket) {
         var previous=clientRenderData;
         read(input);

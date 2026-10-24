@@ -50,14 +50,8 @@ public class PipeScenes {
 		scene.showBasePlate();
 		scene.idle(5);
 
-		BlockState pipeState = AllBlocks.FLUID_PIPE.defaultBlockState()
-			.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.UP, false)
-			.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.DOWN, false);
-
-		scene.world().setBlock(util.grid().at(2, 1, 1), pipeState.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.NORTH, false)
-			.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SOUTH, false), false);
-		scene.world().setBlock(util.grid().at(1, 1, 2), pipeState.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.WEST, false)
-			.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.EAST, false), false);
+		scene.world().setBlock(util.grid().at(2, 1, 1), AllBlocks.FLUID_PIPE.getAxisState(Axis.X), false);
+		scene.world().setBlock(util.grid().at(1, 1, 2), AllBlocks.FLUID_PIPE.getAxisState(Axis.Z), false);
 
 		Selection largeCog = util.select().position(5, 0, 1);
 		Selection kinetics = util.select().fromTo(5, 1, 0, 3, 1, 0);

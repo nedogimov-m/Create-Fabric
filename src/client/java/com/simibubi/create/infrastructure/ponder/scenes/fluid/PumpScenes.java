@@ -256,9 +256,9 @@ public class PumpScenes {
 			.text("...and the speed at which fluids are transferred");
 		scene.idle(60);
 
-		BlockState pipeState = AllBlocks.FLUID_PIPE.defaultBlockState()
-			.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.DOWN, false)
-			.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.UP, false);
+		BlockState pipeState = AllBlocks.FLUID_PIPE.getAxisState(Axis.X)
+			.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.NORTH, true)
+			.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.SOUTH, true);
 		scene.world().setKineticSpeed(util.select().everywhere(), 0);
 		scene.idle(10);
 
