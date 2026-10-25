@@ -302,6 +302,7 @@
     "fabric-client-gametest": [
       "com.simibubi.create.test.PipeGeometryRenderingTest",
       "net.createmod.ponder.test.PonderBlockGeometryTest",
+      "net.createmod.ponder.test.PonderPipeFluidRenderingTest",
       "com.simibubi.create.test.CartAssemblerModeClientTest",
       "com.simibubi.create.content.processing.burner.BurnerFlameRenderingTest",
       "com.simibubi.create.test.KineticRenderingTest",

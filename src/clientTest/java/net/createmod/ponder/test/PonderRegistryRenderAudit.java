@@ -25,6 +25,13 @@ public final class PonderRegistryRenderAudit {
             }
             return null;
         }
+        public synchronized PonderViewport.State completedState() {
+            for (var entry : observations.entrySet()) {
+                var observation = entry.getValue();
+                if (observation.submitted && observation.blitted) return entry.getKey();
+            }
+            return null;
+        }
         public Throwable failure() { return failure; }
         private FrameReceipt receipt(PonderViewport.State state, Observation observation) {
             var frame = state.frame();
