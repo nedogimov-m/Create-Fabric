@@ -28,10 +28,17 @@ final class CreateMainMenuRenderingTest {
     }
     private static void checkConfigTooltips(ClientGameTestContext context){
         for(boolean bottom:new boolean[]{false,true}){
+            var definition=new java.util.concurrent.atomic.AtomicReference<com.simibubi.create.infrastructure.config.NativeConfigBase.CValue<?>>();
             var point=context.computeOnClient(client->{
                 var screen=client.gui.screen();if(!(screen instanceof CreateConfigScreen))throw new AssertionError("Actual native configuration screen required for tooltip regression");
                 var widgets=screen.children().stream().filter(AbstractWidget.class::isInstance).map(AbstractWidget.class::cast).filter(w->w.active&&w.visible).filter(w->bottom?w instanceof net.minecraft.client.gui.components.EditBox&&!w.getMessage().equals(Component.translatable("create.config.ui.search")):w.getMessage().equals(Component.translatable("options.on"))||w.getMessage().equals(Component.translatable("options.off"))).toList();
-                var order=java.util.Comparator.comparingInt(AbstractWidget::getY);var widget=(bottom?widgets.stream().max(order):widgets.stream().min(order)).orElseThrow();return new Vec2(widget.getX()-10,widget.getY()+widget.getHeight()/2f);
+                var order=java.util.Comparator.comparingInt(AbstractWidget::getY);var widget=(bottom?widgets.stream().max(order):widgets.stream().min(order)).orElseThrow();
+                if(bottom){
+                    var title=(net.minecraft.network.chat.contents.TranslatableContents)widget.getMessage().getContents();
+                    definition.set(com.simibubi.create.infrastructure.config.AllConfigs.client().directValues().stream()
+                        .filter(value->("create.config."+value.key()).equals(title.getKey())).findFirst().orElseThrow());
+                }else definition.set(com.simibubi.create.infrastructure.config.AllConfigs.client().tooltips);
+                return new Vec2(widget.getX()-10,widget.getY()+widget.getHeight()/2f);
             });
             var cursor=context.computeOnClient(client->{var window=client.getWindow();return new Vec2(point.x*window.getScreenWidth()/window.getGuiScaledWidth(),point.y*window.getScreenHeight()/window.getGuiScaledHeight());});
             context.getInput().setCursorPos(cursor.x,cursor.y);context.waitTicks(3);
@@ -41,7 +48,7 @@ final class CreateMainMenuRenderingTest {
                 var tooltip=new java.util.ArrayList<net.minecraft.client.renderer.state.gui.GuiTextRenderState>();state.forEachText(text->{if(!before.contains(text))tooltip.add(text);});if(tooltip.size()<3)throw new AssertionError("Native configuration tooltip did not preserve separate wrapped title/description/default lines");
                 var textField=net.minecraft.client.renderer.state.gui.GuiTextRenderState.class.getDeclaredField("text");textField.setAccessible(true);var joined=new StringBuilder();
                 for(var text:tooltip){var value=new StringBuilder();((net.minecraft.util.FormattedCharSequence)textField.get(text)).accept((index,style,codepoint)->{if(Character.isISOControl(codepoint))throw new AssertionError("Native configuration tooltip retained a newline/control glyph instead of a real line break");value.appendCodePoint(codepoint);return true;});joined.append(value).append(' ');var bounds=text.bounds();if(!value.isEmpty()&&(bounds==null||bounds.left()<0||bounds.top()<0||bounds.right()>screen.width||bounds.bottom()>screen.height))throw new AssertionError("Actual native configuration tooltip text escaped GUI bounds: "+bounds+" in "+screen.width+"x"+screen.height);}
-                com.simibubi.create.infrastructure.config.NativeConfigBase.CValue<?> definition=bottom?com.simibubi.create.infrastructure.config.AllConfigs.client().filterItemRenderDistance:com.simibubi.create.infrastructure.config.AllConfigs.client().tooltips;var actual=joined.toString();var compact=actual.replaceAll("\\s+","");for(var description:definition.comments())if(!compact.contains(description.replaceAll("\\s+","")))throw new AssertionError("Native wrapped configuration tooltip lost its source description: "+actual);if(actual.contains(definition.key()))throw new AssertionError("Native user tooltip exposed its internal implementation key");
+                var actual=joined.toString();var compact=actual.replaceAll("\\s+","");for(var description:definition.get().comments())if(!compact.contains(description.replaceAll("\\s+","")))throw new AssertionError("Native wrapped configuration tooltip lost its source description: "+actual);if(actual.contains(definition.get().key()))throw new AssertionError("Native user tooltip exposed its internal implementation key");
                 Create.LOGGER.info("Actual native configuration tooltip bounds verified: bottom={}, lines={}, window={}x{}",bottom,tooltip.size(),screen.width,screen.height);
             }catch(ReflectiveOperationException failure){throw new AssertionError(failure);}});
             context.takeScreenshot(bottom ? "create-vulkan-native-config-tooltip-bottom-wrapped-within-bounds" : "create-vulkan-native-config-tooltip-first-wrapped-within-bounds");

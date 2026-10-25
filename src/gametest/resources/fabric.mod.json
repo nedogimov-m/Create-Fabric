@@ -300,6 +300,13 @@
       "com.simibubi.create.test.PonderCommandGameTests"
     ],
     "fabric-client-gametest": [
+      "com.simibubi.create.test.RegisteredItemModelClientTest",
+      "com.simibubi.create.test.RegisteredBlockPlacementClientTest",
+      "com.simibubi.create.test.TreeFertilizerUseClientTest",
+      "com.simibubi.create.test.ConsumableAndHandToolsUseClientTest",
+      "com.simibubi.create.test.UtilityItemUseClientTest",
+      "com.simibubi.create.test.DroppedMaterialsUseClientTest",
+      "net.createmod.ponder.test.PonderTooltipConcurrencyClientTest",
       "com.simibubi.create.test.PipeGeometryRenderingTest",
       "net.createmod.ponder.test.PonderBlockGeometryTest",
       "net.createmod.ponder.test.PonderPipeFluidRenderingTest",

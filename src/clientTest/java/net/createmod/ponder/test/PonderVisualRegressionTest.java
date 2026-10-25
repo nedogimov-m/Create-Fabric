@@ -35,7 +35,7 @@ public final class PonderVisualRegressionTest implements FabricClientGameTest {
         if (!recording || FRAMES.size() > 1800) return;
         var kinetic = state.frame().sections().stream().flatMap(section -> section.blockEntities().stream())
             .map(owner -> scene.getWorld().getBlockEntity(owner.position()))
-            .filter(owner -> owner instanceof KineticBlockEntity)
+            .filter(owner -> owner instanceof KineticBlockEntity rotating && rotating.getSpeed() != 0)
             .map(owner -> (KineticBlockEntity) owner).findFirst().orElse(null);
         if (kinetic != null) FRAMES.add(new Frame(System.nanoTime(), scene.getCurrentTime(), kinetic.getBlockPos(),
             scene.getWorld().scenePartialTicks(), kinetic.getAngle(scene.getWorld().scenePartialTicks()), kinetic.getSpeed()));
@@ -86,7 +86,7 @@ public final class PonderVisualRegressionTest implements FabricClientGameTest {
                         boundaryChecks++;
                     }
                 }
-                require(boundaryChecks > 40 && interpolated > 80, "Actual playback must cover many rendered subframes and tick boundaries");
+                require(boundaryChecks > 40 && interpolated > 80, "Actual playback must cover many rendered subframes and tick boundaries: frames="+FRAMES.size()+", boundaries="+boundaryChecks+", interpolated="+interpolated+", fps="+client.getFps());
                 times.sort(Long::compare);
                 System.out.println("PONDER_PLAYBACK_PASS frames=" + FRAMES.size() + " boundaries=" + boundaryChecks + " interpolated=" + interpolated
                     + " medianMs=" + times.get(times.size()/2)/1e6 + " p95Ms=" + times.get(times.size()*95/100)/1e6);

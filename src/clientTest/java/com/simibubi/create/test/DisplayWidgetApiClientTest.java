@@ -79,11 +79,15 @@ public final class DisplayWidgetApiClientTest implements FabricClientGameTest {
         try (var world = context.worldBuilder().adjustSettings(settings ->
                 settings.setGameMode(WorldCreationUiState.SelectedGameMode.SURVIVAL)).create()) {
             var server = world.getServer();
+            server.runCommand("gamemode spectator @p");
             server.runCommand("tp @p 32.5 5 35.5");
+            NativeScreenshotReadiness.beforeFloor(context,world,new BlockPos(30,4,30),new BlockPos(38,4,37),new BlockPos(32,5,35));
             server.runCommand("fill 30 4 30 38 4 37 minecraft:smooth_quartz");
+            NativeScreenshotReadiness.afterFloor(context,world,new BlockPos(30,4,30),new BlockPos(38,4,37));
+            server.runCommand("gamemode survival @p");server.runCommand("tp @p 32.5 5 35.5");
             context.waitFor(client -> client.level != null && client.level.isLoaded(LINK)
                 && client.level.isLoaded(TARGET) && client.player.position().distanceToSqr(
-                    new net.minecraft.world.phys.Vec3(32.5, 5, 35.5)) < 1, 400);
+                    new net.minecraft.world.phys.Vec3(32.5, 5, 35.5)) < .01&&!client.player.isSpectator()&&client.player.onGround(), 400);
             server.runOnServer(ignored -> {
                 var level = world.getConnection().getServerLevel();
                 var player = level.getServer().getPlayerList().getPlayers().getFirst();
@@ -101,9 +105,13 @@ public final class DisplayWidgetApiClientTest implements FabricClientGameTest {
                 require(DisplaySource.getAll(level, SOURCE).contains(DisplayWidgetApiTestFixtures.SOURCE)
                     && link.configure(initial, 0), "Actual source association and loaded sign target must configure");
                 require(sign(level).equals("seed:3"), "Actual source callback must populate real sign before menu opens");
-                DisplayLinkMenu.open(player, link);
             });
+            context.waitFor(client->client.level.getBlockState(LINK).is(AllBlocks.DISPLAY_LINK)
+                &&client.level.getBlockEntity(LINK) instanceof DisplayLinkBlockEntity,300);
+            NativeScreenshotReadiness.await(context,world);
+            server.runOnServer(ignored->{var level=world.getConnection().getServerLevel();DisplayLinkMenu.open(level.getServer().getPlayerList().getPlayers().getFirst(),link(level));});
             context.waitFor(client -> client.gui.screen() instanceof DisplayLinkScreen && ACTUAL.get() != null, 300);
+            context.waitFor(client->client.gui.overlay()==null,300);
             context.runOnClient(client -> {
                 var screen = (DisplayLinkScreen) client.gui.screen();
                 var widgets = ACTUAL.get();
@@ -215,10 +223,13 @@ public final class DisplayWidgetApiClientTest implements FabricClientGameTest {
             return new Vec2((field.getX() + field.getWidth() / 2f) * scaleX, (field.getY() + 9) * scaleY);
         });
         context.getInput().setCursorPos(point.x, point.y);
+        context.waitTicks(2);
         context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+        context.runOnClient(client->{var field=number?ACTUAL.get().number():ACTUAL.get().caption();var window=client.getWindow();double x=client.mouseHandler.getScaledXPos(window),y=client.mouseHandler.getScaledYPos(window);System.out.println("CREATE_WIDGET_NATIVE_CLICK screen="+client.gui.screen()+", focused="+(client.gui.screen()==null?null:client.gui.screen().getFocused())+", actual="+x+","+y+", field="+field.getX()+","+field.getY()+","+field.getWidth()+","+field.getHeight()+", fieldFocused="+field.isFocused()+", child="+(client.gui.screen()==null?null:client.gui.screen().getChildAt(x,y))+", factories="+FACTORY_CALLS.get());});
+        context.takeScreenshot(number?"create-native-custom-number-after-actual-click":"create-native-custom-caption-after-actual-click");
+        context.waitFor(client->client.gui.screen() instanceof DisplayLinkScreen&&(number?ACTUAL.get().number():ACTUAL.get().caption()).isFocused(),200);
         context.getInput().typeChars(value);
-        context.runOnClient(client -> require((number ? ACTUAL.get().number() : ACTUAL.get().caption()).getValue().equals(value),
-            "Actual native input did not reach the source widget"));
+        context.waitFor(client->client.gui.screen() instanceof DisplayLinkScreen&&(number?ACTUAL.get().number():ACTUAL.get().caption()).getValue().equals(value),200);
     }
 
     private static void hoverNumber(ClientGameTestContext context) {

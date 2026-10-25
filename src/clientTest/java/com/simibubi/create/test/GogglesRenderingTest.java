@@ -21,6 +21,7 @@ final class GogglesRenderingTest {
     static void run(ClientGameTestContext context,TestSingleplayerContext world){
         var server=world.getServer();var oldHud=new AtomicBoolean();context.runOnClient(client->{oldHud.set(client.gui.hud.isHidden());if(oldHud.get())client.gui.hud.toggle();});
         server.runCommand("tp @p 522 4 9");context.waitFor(client->Math.abs(client.player.getX()-522.5)<0.1&&client.level.isLoaded(new BlockPos(540,3,5)),500);
+        NativeScreenshotReadiness.beforeFloor(context,world,new BlockPos(512,3,1),new BlockPos(543,3,12),TANK,BASIN,PRESS);
         server.runCommand("fill 512 3 1 543 3 12 minecraft:smooth_quartz");server.runCommand("fill 520 4 5 520 5 5 create:fluid_tank");server.runCommand("setblock 526 4 5 create:basin");
         server.runCommand("setblock 532 4 5 create:creative_motor[facing=east]");server.runCommand("setblock 533 4 5 create:mechanical_press[facing=east]");
         server.runCommand("setblock 538 4 5 create:mechanical_press[facing=east]");server.runCommand("setblock 539 4 5 create:mechanical_press[facing=east]");server.runCommand("setblock 540 4 5 create:hand_crank[facing=east]");
@@ -46,11 +47,19 @@ final class GogglesRenderingTest {
         config(context);burner(context,world);boilerAndProxies(context,world);wornModel(context,world);
         server.runCommand("gamemode spectator @p");context.runOnClient(client->{if(client.gui.hud.isHidden()!=oldHud.get())client.gui.hud.toggle();});
     }
-    private static void look(ClientGameTestContext context,BlockPos pos){context.getInput().lookAt(pos);context.waitFor(client->client.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit&&hit.getBlockPos().equals(pos),200);}
+    private static void look(ClientGameTestContext context,BlockPos pos){
+        if(pos.equals(BASIN)){
+            // The centre of the near face is the basin's filter value box, which correctly suppresses the goggles HUD.
+            var target=net.minecraft.world.phys.Vec3.atLowerCornerOf(pos).add(.2,.3,.99);
+            var angles=context.computeOnClient(client->{var delta=target.subtract(client.player.getEyePosition());return new net.minecraft.world.phys.Vec2((float)Math.toDegrees(Math.atan2(-delta.x,delta.z)),(float)-Math.toDegrees(Math.atan2(delta.y,Math.hypot(delta.x,delta.z))));});
+            context.getInput().lookAt(angles.x,angles.y);
+        }else context.getInput().lookAt(pos);
+        context.waitFor(client->client.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit&&hit.getBlockPos().equals(pos),200);
+    }
     private static void assertOverlay(ClientGameTestContext context,BlockPos pos,String... expected){context.runOnClient(client->{
         var info=GoggleOverlayRenderer.collect(client.level,client.player,pos);if(info==null)throw new AssertionError("No inspected information at "+pos);var text=info.lines().stream().map(net.minecraft.network.chat.Component::getString).collect(java.util.stream.Collectors.joining(" "));
         for(var part:expected)if(!text.contains(part))throw new AssertionError("Missing overlay information: "+part+" in "+text);
-        var extracted=new net.minecraft.client.renderer.state.gui.GuiRenderState();var graphics=new net.minecraft.client.gui.GuiGraphicsExtractor(client,extracted,0,0);GoggleOverlayRenderer.renderOverlay(graphics,client.getDeltaTracker());var count=new AtomicInteger();extracted.forEachText(line->count.incrementAndGet());if(count.get()==0)throw new AssertionError("HUD extractor did not receive goggle text");
+        var extracted=new net.minecraft.client.renderer.state.gui.GuiRenderState();var graphics=new net.minecraft.client.gui.GuiGraphicsExtractor(client,extracted,0,0);GoggleOverlayRenderer.renderOverlay(graphics,client.getDeltaTracker());var count=new AtomicInteger();extracted.forEachText(line->count.incrementAndGet());if(count.get()==0)throw new AssertionError("HUD extractor did not receive goggle text: target="+pos+", hit="+client.hitResult+", hudHidden="+client.gui.hud.isHidden()+", tooltips="+AllConfigs.client().tooltips.get()+", spectator="+client.gameMode.isSpectator()+", screen="+client.gui.screen()+", highlighted="+com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxRenderHandler.hasHighlightedBox(pos)+", hoverTicks="+GoggleOverlayRenderer.hoverTicks+", size="+graphics.guiWidth()+"x"+graphics.guiHeight());
         var layout=GoggleOverlayRenderer.layout(client,info,120,100,Integer.MAX_VALUE,Integer.MIN_VALUE);if(layout.x()<0||layout.x()+layout.width()>120||layout.y()<0)throw new AssertionError("Overlay exceeds window after offset clamp");
     });}
     private static void config(ClientGameTestContext context){

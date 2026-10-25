@@ -1,0 +1,101 @@
+// Prepare immutable production/test JARs and a native launch.json; this task does not execute Minecraft.
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+
+gradle.projectsEvaluated {
+    def p = gradle.rootProject
+    def runName = p.providers.gradleProperty('auditRun').getOrElse('manual-' + System.currentTimeMillis())
+    def selectedNames = p.providers.gradleProperty('auditClientClasses').getOrElse('')
+    def flags = new JsonSlurper().parseText(p.providers.gradleProperty('auditFlags').getOrElse('{}'))
+    def reportDir = p.file(p.providers.gradleProperty('auditReportDir').getOrElse('build/reports/gameplay-audit'))
+    def root = new File(reportDir, runName)
+    p.tasks.named('processGametestResources').configure {
+        inputs.property('auditSelectedClients', selectedNames)
+        doLast {
+            if (!selectedNames.isBlank()) {
+                def file = new File(destinationDir, 'fabric.mod.json')
+                def metadata = new JsonSlurper().parse(file)
+                def requested = selectedNames.split(',').collect { it.trim() }
+                def available = metadata.entrypoints['fabric-client-gametest']
+                if (requested.isEmpty() || requested.any { !available.contains(it) })
+                    throw new GradleException('Unknown client test selection: ' + requested)
+                metadata.entrypoints['fabric-client-gametest'] = requested
+                file.text = JsonOutput.prettyPrint(JsonOutput.toJson(metadata)) + '\n'
+            }
+        }
+    }
+    p.tasks.withType(JavaExec).configureEach {
+        if (!(name in ['runClientGameTest', 'runGameTest'])) return
+        dependsOn(p.tasks.named('jar'))
+        doFirst {
+            def artifacts = new File(root, 'artifacts')
+            artifacts.mkdirs()
+            def production = new File(artifacts, 'create.jar')
+            def tests = new File(artifacts, 'create-tests.jar')
+            def resources = new File(artifacts, 'test-resources')
+            production.bytes = p.tasks.named('jar').get().archiveFile.get().asFile.bytes
+            p.copy { from(p.sourceSets.gametest.output.resourcesDir); into(resources) }
+            p.ant.zip(destfile: tests, duplicate: 'fail') {
+                p.sourceSets.gametest.output.files.findAll { it.isDirectory() }.each { output ->
+                    fileset(dir: output)
+                }
+            }
+            def outputs = (p.sourceSets.main.output.files + p.sourceSets.client.output.files +
+                p.sourceSets.gametest.output.files).collect { it.canonicalFile }.toSet()
+            def frozenClasspath = classpath.files.findAll { !outputs.contains(it.canonicalFile) } + [production, tests]
+            def overrides = [
+                'fabric.classPathGroups': production.absolutePath + File.pathSeparator + File.pathSeparator + tests.absolutePath,
+                'fabric.client.gametest.testModResourcesPath': resources.absolutePath
+            ]
+            def sha = { File file -> MessageDigest.getInstance('SHA-256').digest(file.bytes).encodeHex().toString() }
+            def productionSHA = sha(production)
+            def testSHA = sha(tests)
+            def metadata = new JsonSlurper().parse(new File(resources, 'fabric.mod.json'))
+            def expected = metadata.entrypoints['fabric-client-gametest']
+            new File(root, 'expected-client-entrypoints.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(expected)) + '\n'
+            def snapshot = [
+                runId: runName, productionArtifact: production.absolutePath, productionSHA256: productionSHA,
+                testArtifact: tests.absolutePath, testSHA256: testSHA, flags: flags,
+                clientEntrypoints: expected, serverEntrypoints: metadata.entrypoints['fabric-gametest'].size(),
+                classPathGroups: overrides['fabric.classPathGroups']
+            ]
+            new File(root, 'snapshot.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(snapshot)) + '\n'
+            def work = new File(root, name == 'runClientGameTest' ? 'client' : 'server')
+            work.mkdirs()
+            flags.each { key, value -> overrides[key.toString()] = value.toString() }
+            overrides['fabric-api.gametest.report-file'] = new File(root, 'server-results.xml').absolutePath
+            overrides['create.test.nativeBatchReport'] = new File(root, 'server-batches.json').absolutePath
+            if (name == 'runClientGameTest') {
+                overrides['fabric.client.gametest.modid'] = 'create_test'
+                def prefix = 'create.test.clientCompletion'
+                overrides[prefix + 'Report'] = new File(root, 'client-completion.json').absolutePath
+                overrides[prefix + 'RunId'] = runName
+                overrides[prefix + 'CandidateSHA256'] = productionSHA
+                overrides[prefix + 'Expected'] = new File(root, 'expected-client-entrypoints.json').absolutePath
+                overrides[prefix + 'ExpectedBackend'] = 'vulkan'
+                overrides[prefix + 'ArtifactPath'] = production.absolutePath
+                overrides[prefix + 'ArtifactSHA256'] = productionSHA
+            }
+            def replace = overrides.keySet().collect { '-D' + it + '=' }
+            def frozenJvmArgs = getAllJvmArgs().findAll { argument -> !replace.any { argument.startsWith(it) } }
+            frozenJvmArgs += overrides.collect { key, value -> '-D' + key + '=' + value }
+            def frozenArgs = new ArrayList(getArgs() ?: [])
+            getArgumentProviders().each { provider -> frozenArgs.addAll(provider.asArguments()) }
+            if (name == 'runClientGameTest') {
+                def gameDirIndex = frozenArgs.indexOf('--gameDir')
+                if (gameDirIndex >= 0) frozenArgs[gameDirIndex + 1] = work.absolutePath
+                else frozenArgs.addAll(['--gameDir', work.absolutePath])
+                if (!frozenArgs.contains('--graphicsBackend')) frozenArgs.addAll(['--graphicsBackend', 'vulkan'])
+            }
+            def spec = [
+                java: javaLauncher.get().executablePath.asFile.absolutePath,
+                jvmArgs: frozenJvmArgs, classpath: frozenClasspath.collect { it.absolutePath },
+                mainClass: getMainClass().get(), args: frozenArgs, workingDirectory: work.absolutePath
+            ]
+            new File(root, 'launch.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(spec)) + '\n'
+            logger.lifecycle('Prepared frozen native command: {}', new File(root, 'launch.json'))
+            throw new org.gradle.api.tasks.StopExecutionException('Preparation only; native execution uses launch.json')
+        }
+    }
+}

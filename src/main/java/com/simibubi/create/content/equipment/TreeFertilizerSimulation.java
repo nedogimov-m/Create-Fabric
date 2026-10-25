@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.minecraft.core.*;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.level.*;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
@@ -49,10 +50,14 @@ public final class TreeFertilizerSimulation implements AutoCloseable {
  /** Real accepted native writes own all later effects. Original stock/components are never rewritten. */
  public int replay(List<Placement> placements,BlockPos sapling,Player player){
   if(!closed||ACTIVE.get()!=null)throw new IllegalStateException("Cannot replay while a native fertilizer dream is active");var accepted=new HashSet<BlockPos>();
+  var saplingBlock=LoadedLevelAccess.blockState(level,sapling).getBlock();
   for(var placement:placements){var pos=placement.virtualPos.offset(sapling).below(10);if(!ZapperWorldAccess.canEdit(level,player,pos))continue;var before=LoadedLevelAccess.blockState(level,pos);var owner=LoadedLevelAccess.blockEntity(level,pos);if(before.getDestroySpeed(level,pos)==-1||!placement.conductor&&!before.getCollisionShape(level,pos).isEmpty())continue;
    if(player instanceof ServerPlayer actual&&!PlayerBlockBreakEvents.BEFORE.invoker().beforeBlockBreak(level,actual,pos,before,owner))continue;
    if(!ZapperWorldAccess.canEdit(level,player,pos)||LoadedLevelAccess.blockState(level,pos)!=before||LoadedLevelAccess.blockEntity(level,pos)!=owner)continue;
-   if(!before.isAir()&&(!level.destroyBlock(pos,true,player)||!LoadedLevelAccess.blockState(level,pos).isAir()))continue;
+   boolean shouldDrop=before.getBlock()!=saplingBlock&&before.getBlock()!=placement.state.getBlock()
+    &&!before.is(BlockTags.REPLACEABLE_BY_TREES)&&!before.is(BlockTags.MANGROVE_ROOTS_CAN_GROW_THROUGH)
+    &&!before.is(BlockTags.MANGROVE_LOGS_CAN_GROW_THROUGH);
+   if(!before.isAir()&&(!level.destroyBlock(pos,shouldDrop,player)||!LoadedLevelAccess.blockState(level,pos).isAir()))continue;
    if(!level.setBlockAndUpdate(pos,placement.state)||LoadedLevelAccess.blockState(level,pos)!=placement.state)continue;accepted.add(placement.virtualPos);
    if(!placement.bees.isEmpty()&&LoadedLevelAccess.blockEntity(level,pos) instanceof BeehiveBlockEntity hive&&hive.getBlockState()==placement.state&&hive.isEmpty()){for(var bee:placement.bees)hive.storeBee(bee);hive.setChanged();}
   }

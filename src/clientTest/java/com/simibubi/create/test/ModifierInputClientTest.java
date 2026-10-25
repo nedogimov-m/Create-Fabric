@@ -79,10 +79,14 @@ public final class ModifierInputClientTest implements FabricClientGameTest {
         try (var world = context.worldBuilder().adjustSettings(settings ->
                 settings.setGameMode(WorldCreationUiState.SelectedGameMode.SURVIVAL)).create()) {
             report.status = "RUNNING";
+            world.getServer().runCommand("gamemode spectator @p");
             world.getServer().runCommand("tp @p 32.5 5 37.5");
+            NativeScreenshotReadiness.beforeFloor(context,world,new BlockPos(30,4,30),new BlockPos(38,4,39),new BlockPos(32,5,37));
             world.getServer().runCommand("fill 30 4 30 38 4 39 minecraft:smooth_quartz");
+            NativeScreenshotReadiness.afterFloor(context,world,new BlockPos(30,4,30),new BlockPos(38,4,39));
+            world.getServer().runCommand("gamemode survival @p");world.getServer().runCommand("tp @p 32.5 5 37.5");
             context.waitFor(client -> client.level!=null && client.level.isLoaded(TARGET) && client.level.isLoaded(Q)
-                && client.player.position().distanceToSqr(new Vec3(32.5,5,37.5))<1,400);
+                &&!client.player.isSpectator()&&client.player.onGround()&&client.player.position().distanceToSqr(new Vec3(32.5,5,37.5))<.01,400);
             world.getServer().runOnServer(ignored -> {
                 var level=world.getConnection().getServerLevel(); var player=level.getServer().getPlayerList().getPlayers().getFirst();
                 player.setItemInHand(InteractionHand.MAIN_HAND,ItemStack.EMPTY);
@@ -169,7 +173,7 @@ public final class ModifierInputClientTest implements FabricClientGameTest {
     private static void scroll(ClientGameTestContext context,int[] keys,boolean control,boolean shift,int before,int expected) {
         for(int key:keys)context.getInput().holdKey(key);
         try {
-            context.runOnClient(client -> { require(client.gui.screen() instanceof DisplayLinkScreen,"Actual source menu must retain GUI focus"); require(INPUT.get().getState()==before,"Unexpected prior widget value"); SAMPLE.set(null); });
+            context.runOnClient(client -> { require(client.gui.screen() instanceof DisplayLinkScreen,"Actual source menu must retain GUI focus: "+client.gui.screen()); require(INPUT.get().getState()==before,"Unexpected prior widget value"); SAMPLE.set(null); });
             context.getInput().scroll(1); context.waitTicks(2);
             context.runOnClient(client -> {
                 var sample=SAMPLE.get(); require(sample!=null&&sample.control()==control&&sample.shift()==shift&&sample.prior()==before&&sample.forward(),"Actual physical modifier StepContext mismatch: "+sample);

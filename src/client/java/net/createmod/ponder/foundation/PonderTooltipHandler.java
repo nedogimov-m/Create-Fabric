@@ -24,6 +24,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 
 public final class PonderTooltipHandler {
+    // Formatted-text identities and live hover state belong to the client thread.
     private static final Set<FormattedCharSequence> tooltipText = Collections.newSetFromMap(new WeakHashMap<>());
     public static final String HOLD_TO_PONDER = "ui.hold_to_ponder", SUBJECT = "ui.subject";
     public static boolean enable = true;
@@ -36,8 +37,15 @@ public final class PonderTooltipHandler {
     public static void addToTooltip(List<Component> tooltip, ItemStack stack) {
         if (!enable || stack.isEmpty()) return;
         var client = Minecraft.getInstance();
+        boolean clientThread = client.isSameThread();
         if (!PonderIndex.getSceneAccess().doScenesExistForId(BuiltInRegistries.ITEM.getKey(stack.getItem()))) {
-            lastSeen = -100;
+            if (clientThread) lastSeen = -100;
+            return;
+        }
+        // Native recipe/creative search requests tooltips concurrently on worker threads.
+        // Keep their searchable hint without touching UI progress, callbacks, font or the weak identity set.
+        if (!clientThread) {
+            tooltip.add(Math.min(1, tooltip.size()), holdMessage());
             return;
         }
         if (!ItemStack.isSameItemSameComponents(trackingStack, stack)) { trackingStack = stack.copy(); progress = 0; }
